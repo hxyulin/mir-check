@@ -9,6 +9,7 @@ build = "build.rs"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+syn.workspace = true
 
 [dev-dependencies]
 mir-contracts = { path = "../mir-contracts" }

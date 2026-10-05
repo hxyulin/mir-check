@@ -10,11 +10,11 @@ paths through local calls; it does not check execution feasibility or substitute
 
 The inventory includes cleanup blocks and marks structural CFG reachability. Assert conditions
 and compiler operands are diagnostic strings, not a stable representation for future solvers.
-The future proof engine should consume typed MIR inside the adapter, not parse those strings.
+The proof engine consumes typed MIR inside the adapter and does not parse inventory strings.
 
 Compilation continues in Cargo mode and stops after analysis in direct mode. Compiler failures,
-unknown entries and report-write failures produce a nonzero exit status. Success establishes
-only that the inventory was collected.
+unknown entries and report-write failures produce a nonzero exit status. In inventory mode,
+success establishes only that the inventory was collected.
 
 The report model uses std and serde. No compiler types escape the adapter, so JSON consumers
 do not need rustc internals. Inventory remains separate from the opt-in proof engine.
@@ -23,4 +23,8 @@ Proof mode interprets a restricted subset of typed MIR, uses exact SMT bit-vecto
 semantics and follows actual arguments and return values through local calls. Z3 runs as a
 subprocess. Every reachable panic condition must be unsatisfiable; unsupported behavior, loops,
 recursion and resource limits remain unknown and cause verification failure. No dependency
-analysis or contract verification is present in the initial stage 3 engine.
+analysis is present. The contract evaluator accepts only pure comparisons and boolean predicates,
+with read-only byte lengths. It checks caller preconditions and every feasible return, using
+entry values for parameter names in postconditions. It never assumes a callee summary from
+annotations. Missing names, type errors, unsupported predicates and inconsistent entry domains
+fail verification; passing root metadata is marked verified under preconditions.

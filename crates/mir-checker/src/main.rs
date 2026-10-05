@@ -18,6 +18,7 @@ use rustc_span::Span;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+mod contracts;
 mod inventory;
 mod proof;
 mod solver;
@@ -58,6 +59,15 @@ impl Callbacks for Checker {
                             .find(|id| tcx.def_path_str(id.to_def_id()) == function.name)
                             .expect("inventoried functions have local MIR bodies");
                         function.proof = Some(proof::verify(tcx, id.to_def_id()));
+                        if function
+                            .proof
+                            .as_ref()
+                            .is_some_and(|proof| proof.status == ProofStatus::Proved)
+                        {
+                            for contract in &mut function.contracts {
+                                contract.status = ContractStatus::VerifiedUnderPreconditions;
+                            }
+                        }
                     }
                 }
                 tcx.dcx().abort_if_errors();
@@ -129,7 +139,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 3,
+        schema_version: 4,
         compiler: env!("MIR_CHECKER_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),

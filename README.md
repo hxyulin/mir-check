@@ -6,7 +6,8 @@ is independent of fleet-2027 and installs no firmware dependencies.
 
 The compiler adapter and panic inventory now include an opt-in proof engine for a restricted
 subset of typed MIR. It can prove panic freedom for guarded integer and byte-slice operations
-and trace concrete arguments through local calls. Contracts remain pending verification.
+and trace symbolic arguments through local calls. It also checks a restricted contract language:
+callee preconditions, caller bounds and postconditions.
 
 ## Build and use
 
@@ -36,6 +37,7 @@ From another Rust project:
 
 ```sh
 cargo mir-checker --lib
+cargo mir-checker --verify --lib
 cargo mir-checker --manifest-path path/to/Cargo.toml --all-targets
 ```
 
@@ -69,17 +71,19 @@ path to each active site. Names must exactly match the names in the report. Recu
 terminate. Paths ignore branch feasibility and generic substitutions, so they are explanations of
 call-graph connectivity, not counterexamples. This option is not yet available in Cargo mode.
 
-JSON schema version 2 includes source locations, block numbers, conditions, unwind actions,
+The inventory includes source locations, block numbers, conditions, unwind actions,
 cleanup flags, structural CFG reachability, local call edges and the compiler arguments. All
-sites have unverified status. A successful exit means compilation and inventory completed; it
-does not mean contracts passed. Compilation, unknown-entry and report-write errors fail the run.
+sites have unverified status. Without --verify, a successful exit means compilation and inventory
+completed; it does not mean contracts passed. Compilation, unknown-entry and report-write errors
+fail the run.
 
 ## Panic proofs
 
 --verify uses path-sensitive symbolic execution of typed MIR and SMT bit-vectors, preserving
 integer widths, signed comparisons, casts, wrapping operations and checked arithmetic. Each
 panic condition must be unsatisfiable under the path conditions. The proof is universal over
-valid Rust inputs to the selected function; it is not based on test input coverage.
+valid Rust inputs satisfying the selected function's declared preconditions; it is not based on
+test input coverage.
 
 Supported inputs are bool, integers, unit, shared byte slices and byte arrays. Shared slice
 contents are modeled as SMT arrays. Local calls are analyzed with the actual symbolic arguments
@@ -91,9 +95,10 @@ UNKNOWN. Reachable loops and recursive calls also remain UNKNOWN.
 local bodies must pass. cargo mir-checker --verify applies this mode to Cargo workspace members.
 Inventory mode remains available without a solver.
 
-JSON schema version 3 adds a separate proof result per selected root, with PROVED, REFUTED and
+JSON schema version 4 includes a separate proof result per selected root, with PROVED, REFUTED and
 UNKNOWN outcomes. Every obligation includes the generated SMT query and, for a satisfiable
-failure, its solver model. Inventory sites keep their separate unverified status. Verification
+failure, its solver model. Named input bindings make models interpretable; entry preconditions
+are listed as assumptions. Inventory sites keep their separate unverified status. Verification
 exits nonzero for either REFUTED or UNKNOWN. Compiler errors discovered while fetching MIR
 suppress the report entirely.
 
@@ -116,7 +121,6 @@ use mir_contracts::{ensures, no_panic, requires};
 
 #[no_panic]
 #[requires(index < bytes.len())]
-#[ensures(result == bytes[index])]
 pub fn read(bytes: &[u8], index: usize) -> u8 {
     bytes[index]
 }
@@ -127,10 +131,37 @@ function with no wrappers, predicate evaluation, runtime assertions or runtime l
 checker reads this metadata from typed compiler attributes. The metadata format is experimental;
 it is a request to verify, never evidence that a contract holds.
 
-Currently predicates receive syntax validation only. Names, types, purity and truth are not
-checked. result is reserved for the eventual return-value binding in postconditions. Attribute
-targets are functions and methods with bodies, including const functions. Trait declarations
-without bodies are not supported yet.
+In verification mode, requires predicates define the entry domain. Every reachable local call
+must independently prove each callee precondition from its current path conditions. Callee bodies
+are analyzed with actual symbolic arguments; annotations are never trusted as summaries. Each
+ensures predicate must hold at every feasible return. result denotes the actual return value;
+parameter names refer to their entry values, even when the function reassigns its parameters.
+
+The supported predicate language includes named bool/integer parameters, integer and boolean
+literals, comparisons, &&, ||, !, parentheses, negative integer literals and read-only byte-slice
+or byte-array .len(). Literals are checked against the inferred target integer type and range.
+Arithmetic, indexing, arbitrary calls, mutation and unknown names are unsupported and fail as
+UNKNOWN. Inconsistent entry preconditions also fail as UNKNOWN instead of yielding a vacuous
+proof. A requires predicate is an obligation for analyzed callers; it adds no runtime protection
+against other callers violating that domain.
+
+Only a selected root that passes all body and contract obligations marks its metadata verified
+under preconditions. Inventory-only and unselected functions keep pending metadata, even when a
+caller has been checked with a particular argument. Attribute targets are functions and methods
+with bodies, including const functions; analyzing receivers outside the input subset remains
+unsupported. Trait declarations without bodies are not supported.
+
+See examples/contracts for a runnable no_std crate with guarded reads and a bounded increment.
+From this repository root, after building and installing the solver:
+
+```sh
+target/debug/cargo-mir-checker --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
+```
+
+This prototype can establish the listed obligations for its supported subset and recorded build.
+The translator itself has not been formally verified, and a selected-root result is not a claim
+about an entire crate, all its callers, dependencies, allocation failures, stack exhaustion or
+undefined behavior.
 
 ## Development
 

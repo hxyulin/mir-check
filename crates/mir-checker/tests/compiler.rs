@@ -304,25 +304,31 @@ fn contracts_are_collected_as_unverified_metadata() {
     );
 }
 
-fn find_contract_library(directory: &Path) -> Option<PathBuf> {
-    for entry in std::fs::read_dir(directory).ok()? {
-        let path = entry.ok()?.path();
-        if path.is_dir() {
-            if let Some(library) = find_contract_library(&path) {
-                return Some(library);
+fn find_contract_library(profile: &Path) -> Option<PathBuf> {
+    // The pinned Cargo uses build/<crate>/<hash>/out; deps can contain stable ABI artifacts.
+    let mut libraries = Vec::new();
+    for entry in std::fs::read_dir(profile.join("build/mir-contracts")).ok()? {
+        let output = entry.ok()?.path().join("out");
+        if !output.is_dir() {
+            continue;
+        }
+        for file in std::fs::read_dir(output).ok()? {
+            let path = file.ok()?.path();
+            if path
+                .file_name()?
+                .to_string_lossy()
+                .starts_with("libmir_contracts-")
+                && path
+                    .extension()
+                    .is_some_and(|ext| ext == "dylib" || ext == "so")
+            {
+                let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+                libraries.push((modified, path));
             }
-        } else if path
-            .file_name()?
-            .to_string_lossy()
-            .starts_with("libmir_contracts-")
-            && path
-                .extension()
-                .is_some_and(|extension| extension == "dylib" || extension == "so")
-        {
-            return Some(path);
         }
     }
-    None
+    libraries.sort();
+    libraries.pop().map(|(_, path)| path)
 }
 
 fn verify_entry(name: &str, rustc_args: &[&str]) -> (Output, Report) {
@@ -560,4 +566,334 @@ fn cargo_analysis_revisits_a_crate_and_forwards_feature_selection() {
         report_directories.push(reports.to_owned());
     }
     assert_ne!(report_directories[0], report_directories[1]);
+}
+
+fn verify_contract(name: &str, rustc_args: &[&str]) -> (Output, Report) {
+    let directory = Directory::new();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
+        .parent()
+        .unwrap();
+    let library = find_contract_library(profile).unwrap();
+    let external = format!("mir_contracts={}", library.display());
+    let mut args = vec!["--extern", external.as_str(), "-Coverflow-checks=yes"];
+    args.extend_from_slice(rustc_args);
+    let output = analyze_from(
+        &fixture("verified_contracts.rs"),
+        &directory,
+        &["--verify", "--entry", name],
+        &args,
+    );
+    let report = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "{name}: {error}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    (output, report)
+}
+
+#[test]
+fn callee_domains_caller_bounds_and_return_values_are_proved_separately() {
+    for name in [
+        "read",
+        "guarded_read",
+        "bounded",
+        "guarded_bound",
+        "snapshot",
+        "signed_bound",
+        "valid_signed_call",
+        "boolean_contract",
+        "array_read",
+    ] {
+        let (output, report) = verify_contract(name, &["-Cpanic=abort"]);
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let function = report
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap();
+        let proof = function.proof.as_ref().unwrap();
+        assert_eq!(proof.status, ProofStatus::Proved, "{name}");
+        assert!(!proof.obligations.is_empty(), "{name}");
+        assert!(
+            function.contracts.iter().all(|contract| matches!(
+                contract.status,
+                ContractStatus::VerifiedUnderPreconditions
+            ))
+        );
+        if name == "read" {
+            assert_eq!(proof.assumptions, ["index < bytes.len()"]);
+            assert!(proof.inputs.contains_key("index"));
+        }
+        if name == "guarded_read" {
+            assert!(proof.assumptions.is_empty());
+            assert!(proof.obligations.iter().any(|obligation| matches!(
+                obligation.kind,
+                mir_checker::ObligationKind::CallPrecondition
+            )));
+            let callee = report
+                .functions
+                .iter()
+                .find(|function| function.name == "read")
+                .unwrap();
+            assert!(callee.proof.is_none());
+            assert!(
+                callee
+                    .contracts
+                    .iter()
+                    .all(|contract| matches!(contract.status, ContractStatus::PendingVerification))
+            );
+        }
+    }
+}
+
+#[test]
+fn violating_a_call_bound_fails_even_when_the_callee_cannot_panic() {
+    for name in ["bad_bound", "bad_read", "bad_signed_call", "bad_array_read"] {
+        let (output, report) = verify_contract(name, &[]);
+        assert!(!output.status.success(), "accepted {name}");
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted, "{name}");
+        assert!(
+            proof.obligations.iter().any(|obligation| matches!(
+                obligation.kind,
+                mir_checker::ObligationKind::CallPrecondition
+            ) && obligation.status
+                == ProofStatus::Refuted
+                && obligation.model.is_some()),
+            "{name}"
+        );
+        if name == "bad_bound" {
+            // value=16 violates the contract, although bounded(16) simply returns 16.
+            assert!(proof.obligations.iter().any(|obligation| {
+                obligation
+                    .model
+                    .as_ref()
+                    .is_some_and(|model| model.contains("(_ bv16 8)"))
+            }));
+        }
+    }
+}
+
+#[test]
+fn annotations_are_never_trusted_in_place_of_body_or_postcondition_proofs() {
+    for name in [
+        "lying_no_panic",
+        "lying_postcondition",
+        "use_lying_postcondition",
+        "changed_snapshot",
+    ] {
+        let (output, report) = verify_contract(name, &[]);
+        assert!(!output.status.success(), "accepted {name}");
+        let function = report
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap();
+        let proof = function.proof.as_ref().unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted, "{name}");
+        assert!(
+            function
+                .contracts
+                .iter()
+                .all(|contract| matches!(contract.status, ContractStatus::PendingVerification))
+        );
+        if name != "lying_no_panic" {
+            assert!(
+                proof.obligations.iter().any(|obligation| matches!(
+                    obligation.kind,
+                    mir_checker::ObligationKind::Postcondition
+                ) && obligation.status
+                    == ProofStatus::Refuted),
+                "{name}"
+            );
+        }
+        if name == "use_lying_postcondition" {
+            assert!(proof.obligations.iter().any(|obligation| matches!(
+                obligation.kind,
+                mir_checker::ObligationKind::PanicSafety
+            ) && obligation.status
+                == ProofStatus::Refuted));
+        }
+    }
+}
+
+#[test]
+fn inconsistent_ill_typed_and_impure_contracts_cannot_produce_a_proof() {
+    for name in [
+        "inconsistent",
+        "missing_name",
+        "out_of_range",
+        "wrong_type",
+        "impure",
+        "arithmetic",
+    ] {
+        let (output, report) = verify_contract(name, &[]);
+        assert!(!output.status.success(), "accepted {name}");
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Unknown, "{name}");
+    }
+}
+
+#[test]
+fn proofs_use_the_target_width_and_record_the_actual_overflow_configuration() {
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let bits = if target.is_some() { 32 } else { usize::BITS };
+        let mut args = vec!["-Cpanic=abort", "-Coverflow-checks=yes"];
+        if let Some(target) = target {
+            args.extend(["--target", target]);
+        }
+        let (output, report) = verify_entry("next_byte", &args);
+        assert!(
+            output.status.success(),
+            "{target:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if let Some(target) = target {
+            assert_eq!(report.target, target);
+        }
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == "next_byte")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Proved);
+        assert!(proof.obligations.iter().any(|obligation| {
+            obligation
+                .query
+                .as_ref()
+                .is_some_and(|query| query.contains(&format!("BitVec {bits}")))
+        }));
+    }
+    for panic in ["abort", "unwind"] {
+        for checks in ["yes", "no"] {
+            let panic_arg = format!("-Cpanic={panic}");
+            let checks_arg = format!("-Coverflow-checks={checks}");
+            let (output, report) = verify_entry("overflowing_sum", &[&panic_arg, &checks_arg]);
+            assert_eq!(output.status.success(), checks == "no");
+            assert_eq!(report.panic_strategy, panic);
+            assert_eq!(report.overflow_checks, checks == "yes");
+        }
+    }
+}
+
+#[test]
+fn unknown_memory_and_dispatch_boundaries_fail_verification() {
+    for name in [
+        "unwrap_option",
+        "clamp",
+        "dynamic",
+        "generic",
+        "indirect",
+        "destructor",
+    ] {
+        let directory = Directory::new();
+        let output = analyze_from(
+            &fixture("panics.rs"),
+            &directory,
+            &["--verify", "--entry", name],
+            &[],
+        );
+        assert!(!output.status.success(), "accepted {name}");
+        let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Unknown, "{name}");
+    }
+}
+
+#[test]
+fn cargo_contract_verification_returns_failure_and_preserves_its_report() {
+    let directory = Directory::new();
+    let dependency = Path::new(env!("CARGO_MANIFEST_DIR")).join("../mir-contracts");
+    std::fs::write(
+        directory.0.join("Cargo.toml"),
+        format!(
+            "[package]\nname='contract_fixture'\nversion='0.1.0'\nedition='2024'\n\
+         [lib]\npath='lib.rs'\n[workspace]\n[dependencies]\nmir-contracts={{path={}}}\n",
+            serde_json::to_string(&dependency).unwrap(),
+        ),
+    )
+    .unwrap();
+    for (guard, success) in [("<", true), ("<=", false)] {
+        std::fs::write(
+            directory.0.join("lib.rs"),
+            format!(
+                "#![no_std]\n#![forbid(unsafe_code)]\n\
+             use mir_contracts::{{requires,ensures,no_panic}};\n\
+             #[requires(value < 16)] #[ensures(result == value)] #[no_panic]\n\
+             pub fn bounded(value:u8)->u8{{value}}\n\
+             pub fn caller(value:u8)->u8{{if value {guard} 16 {{bounded(value)}}else{{0}}}}\n",
+            ),
+        )
+        .unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-checker"))
+            .args(["mir-checker", "--verify", "--lib", "--offline"])
+            .current_dir(&directory.0)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            success,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(if success {
+            output.stdout
+        } else {
+            output.stderr
+        })
+        .unwrap();
+        let reports = text
+            .lines()
+            .find_map(|line| line.strip_prefix("JSON reports: "))
+            .unwrap();
+        let path = std::fs::read_dir(reports)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let report: Report = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let caller = report
+            .functions
+            .iter()
+            .find(|function| function.name == "caller")
+            .unwrap();
+        assert_eq!(
+            caller.proof.as_ref().unwrap().status,
+            if success {
+                ProofStatus::Proved
+            } else {
+                ProofStatus::Refuted
+            }
+        );
+    }
 }

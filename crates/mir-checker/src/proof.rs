@@ -1,16 +1,17 @@
+use super::contracts;
 use super::solver::{self, Answer};
 use super::symbolic::{self, Value};
-use mir_checker::{Obligation, ObligationKind, Proof, ProofStatus};
-use rustc_attr_ir::LangItem;
+use mir_checker::{Contract, ContractKind, Obligation, ObligationKind, Proof, ProofStatus};
+use rustc_attr_ir::{HasAttrs, LangItem};
 use rustc_hir::def::DefKind;
 use rustc_middle::mir::{
     AggregateKind, BinOp, Body, BorrowKind, CastKind, Operand, Place, ProjectionElem, Rvalue,
-    START_BLOCK, StatementKind, TerminatorKind, UnOp,
+    START_BLOCK, StatementKind, TerminatorKind, UnOp, VarDebugInfoContents,
 };
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::Span;
 use rustc_span::def_id::DefId;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 const MAX_STEPS: usize = 256;
 const MAX_CALL_DEPTH: usize = 8;
@@ -43,6 +44,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
+            inputs: BTreeMap::new(),
             obligations: Vec::new(),
         },
     };
@@ -78,8 +80,76 @@ impl<'tcx> Engine<'tcx> {
         for local in body.args_iter() {
             arguments.push(self.argument(id, body.local_decls[local].ty, &mut conditions)?);
         }
+        let bindings = self.bindings(body, &arguments)?;
+        for (name, value) in &bindings {
+            let description = match value {
+                Value::Int { expression, .. } | Value::Bool(expression) => expression.clone(),
+                Value::Bytes { length, data } => {
+                    format!("len={}, data={data}", length.integer()?.0)
+                }
+                Value::Unit => "()".to_owned(),
+                Value::Tuple(_) => return Err("tuple argument binding is unsupported".to_owned()),
+            };
+            self.proof.inputs.insert(name.clone(), description);
+        }
+        for contract in self.contracts(id) {
+            if matches!(contract.kind, ContractKind::Requires) {
+                let text = contract
+                    .predicate
+                    .as_deref()
+                    .ok_or("missing precondition")?;
+                conditions.push(self.predicate(text, &bindings)?);
+                self.proof.assumptions.push(text.to_owned());
+            }
+        }
+        if !self.feasible(&conditions)? {
+            return Err(
+                "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
+            );
+        }
         self.execute(id, arguments, conditions, &[])?;
         Ok(())
+    }
+
+    fn contracts(&self, id: DefId) -> Vec<Contract> {
+        id.get_attrs(&self.tcx)
+            .iter()
+            .filter_map(|attribute| attribute.doc_str())
+            .filter_map(|doc| super::parse_contract(doc.as_str()))
+            .collect()
+    }
+
+    fn bindings(
+        &self,
+        body: &Body<'tcx>,
+        arguments: &[Value],
+    ) -> Result<BTreeMap<String, Value>, String> {
+        let mut bindings = BTreeMap::new();
+        for debug in &body.var_debug_info {
+            if let VarDebugInfoContents::Place(place) = debug.value
+                && place.projection.is_empty()
+                && place.local.as_usize() > 0
+                && place.local.as_usize() <= body.arg_count
+            {
+                let name = debug.name.as_str().to_owned();
+                if bindings
+                    .insert(name, arguments[place.local.as_usize() - 1].clone())
+                    .is_some()
+                {
+                    return Err("ambiguous argument name in contract bindings".to_owned());
+                }
+            }
+        }
+        Ok(bindings)
+    }
+
+    fn predicate(&self, text: &str, bindings: &BTreeMap<String, Value>) -> Result<String, String> {
+        contracts::predicate(
+            text,
+            bindings,
+            u32::from(self.tcx.sess.target.pointer_width),
+        )
+        .map_err(|reason| format!("contract `{text}`: {reason}"))
     }
 
     fn fresh(&mut self, sort: &str) -> String {
@@ -249,6 +319,15 @@ impl<'tcx> Engine<'tcx> {
         if arguments.len() != body.arg_count {
             return Err("call arguments do not match the MIR body".to_owned());
         }
+        let bindings = self.bindings(body, &arguments)?;
+        let contracts = self.contracts(id);
+        if bindings.contains_key("result")
+            && contracts
+                .iter()
+                .any(|contract| matches!(contract.kind, ContractKind::Ensures))
+        {
+            return Err("result is reserved for the postcondition return value".to_owned());
+        }
         let mut state = State {
             locals: vec![None; body.local_decls.len()],
             conditions,
@@ -339,6 +418,25 @@ impl<'tcx> Engine<'tcx> {
                     let value = state.locals[0]
                         .clone()
                         .ok_or("return value is not modeled")?;
+                    let mut post_bindings = bindings.clone();
+                    post_bindings.insert("result".to_owned(), value.clone());
+                    for contract in &contracts {
+                        if matches!(contract.kind, ContractKind::Ensures) {
+                            let text = contract
+                                .predicate
+                                .as_deref()
+                                .ok_or("missing postcondition")?;
+                            let safe = self.predicate(text, &post_bindings)?;
+                            self.require(
+                                id,
+                                terminator.source_info.span,
+                                &state.conditions,
+                                &safe,
+                                ObligationKind::Postcondition,
+                                text.to_owned(),
+                            )?;
+                        }
+                    }
                     returns.push(Return {
                         value,
                         conditions: state.conditions,
@@ -399,6 +497,26 @@ impl<'tcx> Engine<'tcx> {
                             "unmodeled call to {}",
                             self.tcx.def_path_str(callee)
                         ));
+                    }
+                    let callee_body = self.tcx.optimized_mir(callee);
+                    let call_bindings = self.bindings(callee_body, &values)?;
+                    for contract in self.contracts(callee) {
+                        if matches!(contract.kind, ContractKind::Requires) {
+                            let text = contract
+                                .predicate
+                                .as_deref()
+                                .ok_or("missing precondition")?;
+                            let safe = self.predicate(text, &call_bindings)?;
+                            self.require(
+                                id,
+                                terminator.source_info.span,
+                                &state.conditions,
+                                &safe,
+                                ObligationKind::CallPrecondition,
+                                format!("{} requires {text}", self.tcx.def_path_str(callee)),
+                            )?;
+                            state.conditions.push(safe);
+                        }
                     }
                     let results = self.execute(callee, values, state.conditions.clone(), &stack)?;
                     let target = target.ok_or("local call has no return edge")?;
@@ -602,8 +720,16 @@ impl<'tcx> Engine<'tcx> {
                     .ok_or("unsupported cast target")?;
                 symbolic::cast(value, bits, signed)
             }
-            Rvalue::Cast(CastKind::PointerCoercion(..), operand, target) if matches!(target.kind(), ty::Ref(_, element, mutability) if !mutability.is_mut() && matches!(element.kind(), ty::Slice(element) if *element == self.tcx.types.u8)) =>
-            {
+            Rvalue::Cast(CastKind::PointerCoercion(..), operand, target) => {
+                let ty::Ref(_, element, mutability) = target.kind() else {
+                    return Err("unsupported pointer coercion".to_owned());
+                };
+                let ty::Slice(element) = element.kind() else {
+                    return Err("only byte-slice coercions are modeled".to_owned());
+                };
+                if mutability.is_mut() || *element != self.tcx.types.u8 {
+                    return Err("only shared byte-slice coercions are modeled".to_owned());
+                }
                 let value = self.operand(id, body, state, operand)?;
                 if matches!(value, Value::Bytes { .. }) {
                     Ok(value)

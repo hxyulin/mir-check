@@ -34,6 +34,7 @@ pub struct Function {
 pub struct Proof {
     pub status: ProofStatus,
     pub assumptions: Vec<String>,
+    pub inputs: std::collections::BTreeMap<String, String>,
     pub obligations: Vec<Obligation>,
 }
 
@@ -219,6 +220,7 @@ pub enum ContractKind {
 #[serde(rename_all = "snake_case")]
 pub enum ContractStatus {
     PendingVerification,
+    VerifiedUnderPreconditions,
 }
 
 pub fn render(report: &Report) -> String {
@@ -261,7 +263,11 @@ pub fn render(report: &Report) -> String {
                 ContractKind::Ensures => "ensures",
             };
             let predicate = contract.predicate.as_deref().unwrap_or("");
-            let _ = writeln!(output, "    {kind}({predicate}): pending verification");
+            let status = match contract.status {
+                ContractStatus::PendingVerification => "pending verification",
+                ContractStatus::VerifiedUnderPreconditions => "verified under preconditions",
+            };
+            let _ = writeln!(output, "    {kind}({predicate}): {status}");
         }
         for site in &function.sites {
             let qualifier = if !site.enabled {
@@ -290,6 +296,9 @@ pub fn render(report: &Report) -> String {
         }
         if let Some(proof) = &function.proof {
             let _ = writeln!(output, "    verification: {}", proof.status.label());
+            for (name, expression) in &proof.inputs {
+                let _ = writeln!(output, "      input {name}: {expression}");
+            }
             for assumption in &proof.assumptions {
                 let _ = writeln!(output, "      assumes: {assumption}");
             }

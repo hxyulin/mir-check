@@ -59,3 +59,25 @@ Independent host checks exhaust all 65,536 u8 argument pairs for guarded additio
 five rejected panic cases. This validates representative translations; it is not a proof of
 the analyzer implementation. Contract predicates and function-level preconditions remain future
 work at this stage. The supported subset and resource limits are explicit in README.md.
+
+## Stage 4 evidence
+
+A restricted pure predicate evaluator checks entry domains, every reachable local call's bounds
+and postconditions at feasible returns. Callee bodies and return values are still analyzed,
+including when annotations claim no panic or a false return bound. Postcondition parameter
+bindings snapshot entry values. Unsupported names, expressions, type/range errors and
+inconsistent preconditions fail as unknown.
+
+A guarded call to an identity function requiring value < 16 passes. The same caller with a
+value <= 16 guard fails with value=16, although the identity body cannot panic. Removing caller
+precondition verification makes that regression test fail; the mutation was restored. Changing
+MIR's <= translation to < also makes the panic regression test fail; it was restored.
+
+The proof suite passes on the 64-bit host and thumbv7em-none-eabihf's 32-bit usize. Aborting and
+unwinding panic modes and enabled/disabled overflow checks are tested. Cargo verification is
+covered with both passing contracts and a failed call bound that retains its JSON report. The
+example crate demonstrates guarded byte reads and a bounded increment without runtime checks.
+
+This completes the initial contract slice of stage 4. Loop invariants, abstract interpretation,
+generic substitutions, dependency summaries, preserved type invariants and effect contracts
+remain future work. The analyzer implementation itself has not been formally verified.

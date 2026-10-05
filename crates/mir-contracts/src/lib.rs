@@ -19,13 +19,13 @@ pub fn no_panic(args: TokenStream, item: TokenStream) -> TokenStream {
     annotate("no_panic".to_owned(), item)
 }
 
-/// Declares a precondition. Syntax is checked; names and truth are not yet verified.
+/// Declares a precondition for static verification. The macro only checks expression syntax.
 #[proc_macro_attribute]
 pub fn requires(args: TokenStream, item: TokenStream) -> TokenStream {
     predicate("requires", args, item)
 }
 
-/// Declares a postcondition; `result` names the return value for future verification.
+/// Declares a postcondition; `result` names the return value during static verification.
 #[proc_macro_attribute]
 pub fn ensures(args: TokenStream, item: TokenStream) -> TokenStream {
     predicate("ensures", args, item)
