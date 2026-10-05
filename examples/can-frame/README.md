@@ -44,6 +44,8 @@ These are selected-root proofs, not a proof of every function or caller in the o
 From the mir-check repository root:
 
 ```sh
+target/debug/cargo-mir-check --verify --summary --entry Frame::new --entry Frame::data \
+  --manifest-path examples/can-frame/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 cargo test --locked -p mir-check --test compiler \
   vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
 cargo test --locked --manifest-path examples/can-frame/Cargo.toml
@@ -52,7 +54,7 @@ cargo build --locked --release --manifest-path examples/can-frame/Cargo.toml \
 ```
 
 Compiler integration tests locate the pinned proc-macro artifact and select proof roots directly.
-Full-crate cargo mir-check --verify is expected to fail because it selects the deliberately bad
+Without --entry, full-crate cargo mir-check --verify is expected to fail because it selects the bad
 call-bound harnesses and unsupported derived methods too.
 
 The bus validator's unchanged body contains nested loops, enum matches, two helper calls and

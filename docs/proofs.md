@@ -12,6 +12,12 @@ and signedness. Booleans are SMT booleans. Byte contents are SMT arrays; slice l
 valid-reference bounds. Struct fields are independent inputs, including private fields. No
 constructor invariant is inferred for an arbitrary struct parameter.
 
+Tuples and nested local structs recursively carry modeled fields, including shared references
+to supported values. Input bindings retain names such as packet.header.index and value.1.0.
+Reference snapshots do not track pointer identity or alias relationships; general mutation and
+mutable fields remain unsupported. Input construction is limited to eight levels and 128 values
+across arguments, so recursive reference shapes and large aggregate trees fail as unknown.
+
 The root's requires predicates restrict the input domain. The engine first checks that the domain
 is satisfiable, refusing inconsistent preconditions as unknown. It then interprets each MIR block,
 maintaining symbolic local values and path conditions. A branch adds its condition or its negation;
@@ -39,6 +45,13 @@ The root passes only after all feasible paths finish and all obligations pass. A
 that path with an obligation that its path conditions are impossible. Failed assertions still
 make the overall result refuted even though analysis can continue along their successful edge.
 Reports retain queries, models, declared assumptions, input bindings and trusted models used.
+
+Cargo root selectors match exact inventory names or crate-qualified names across selected
+targets. Only selected roots acquire independent proofs; callees can still be interpreted with
+the caller's particular values. A missing requested root fails after Cargo finishes, while
+preserving reports. Schema version 7 counts root outcomes separately from unselected bodies and
+distinct interpreted instances, and groups unknown obligations by reason. These are analysis
+counts, not runtime coverage or whole-crate safety percentages.
 
 ## Loops and limits
 

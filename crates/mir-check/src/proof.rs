@@ -16,6 +16,8 @@ use std::collections::{BTreeMap, VecDeque};
 const MAX_STEPS: usize = 256;
 const MAX_CALL_DEPTH: usize = 8;
 const MAX_QUERY_BYTES: usize = 200_000;
+const MAX_INPUT_DEPTH: usize = 8;
+const MAX_INPUT_VALUES: usize = 128;
 
 mod aggregates;
 mod builtins;
@@ -36,6 +38,8 @@ struct Engine<'tcx> {
     tcx: TyCtxt<'tcx>,
     declarations: Vec<String>,
     steps: usize,
+    input_depth: usize,
+    input_values: usize,
     proof: Proof,
 }
 
@@ -44,6 +48,8 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
         tcx,
         declarations: Vec::new(),
         steps: 0,
+        input_depth: 0,
+        input_values: 0,
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
@@ -126,8 +132,13 @@ impl<'tcx> Engine<'tcx> {
                 }
                 return Ok(());
             }
-            Value::Tuple(_)
-            | Value::MutableBytes { .. }
+            Value::Tuple(fields) => {
+                for (index, field) in fields.iter().enumerate() {
+                    self.input_binding(&format!("{name}.{index}"), field)?;
+                }
+                return Ok(());
+            }
+            Value::MutableBytes { .. }
             | Value::StaticText
             | Value::FormatArguments
             | Value::Function => {
@@ -194,6 +205,25 @@ impl<'tcx> Engine<'tcx> {
         ty: Ty<'tcx>,
         conditions: &mut Vec<String>,
     ) -> Result<Value, String> {
+        if self.input_depth >= MAX_INPUT_DEPTH {
+            return Err("input shape exceeds 8 levels of nesting".to_owned());
+        }
+        if self.input_values >= MAX_INPUT_VALUES {
+            return Err("input shape exceeds the 128-value budget".to_owned());
+        }
+        self.input_depth += 1;
+        self.input_values += 1;
+        let result = self.argument_value(id, ty, conditions);
+        self.input_depth -= 1;
+        result
+    }
+
+    fn argument_value(
+        &mut self,
+        id: DefId,
+        ty: Ty<'tcx>,
+        conditions: &mut Vec<String>,
+    ) -> Result<Value, String> {
         if let Some((bits, signed)) = self.integer_type(ty) {
             return Ok(Value::Int {
                 expression: self.fresh(&format!("(_ BitVec {bits})")),
@@ -204,20 +234,17 @@ impl<'tcx> Engine<'tcx> {
         match ty.kind() {
             ty::Bool => Ok(Value::Bool(self.fresh("Bool"))),
             ty::Tuple(fields) if fields.is_empty() => Ok(Value::Unit),
+            ty::Tuple(fields) => Ok(Value::Tuple(
+                fields
+                    .iter()
+                    .map(|field| self.argument(id, field, conditions))
+                    .collect::<Result<_, _>>()?,
+            )),
             ty::Ref(_, element, mutability) if !mutability.is_mut() => {
-                let local_struct = match element.kind() {
-                    ty::Adt(def, _) => def.is_struct() && def.did().is_local(),
-                    _ => false,
-                };
-                if local_struct {
-                    self.struct_input(id, *element, conditions)
-                } else if matches!(element.kind(), ty::Array(..))
-                    || self.integer_type(*element).is_some()
-                    || element.is_bool()
-                {
-                    self.argument(id, *element, conditions)
-                } else {
+                if matches!(element.kind(), ty::Slice(_)) {
                     self.byte_input(id, *element, conditions)
+                } else {
+                    self.argument(id, *element, conditions)
                 }
             }
             ty::Array(element, _) if *element == self.tcx.types.u8 => {
@@ -735,6 +762,8 @@ impl<'tcx> Engine<'tcx> {
                     | Value::Adt { .. }
                     | Value::MutableBytes { .. }
                     | Value::Elements(_)
+                    | Value::Tuple(_)
+                    | Value::Unit
                     | Value::Int { .. }
                     | Value::Bool(_)),
                 ) => value,
@@ -854,6 +883,8 @@ impl<'tcx> Engine<'tcx> {
                     Value::Bytes { .. }
                         | Value::Adt { .. }
                         | Value::Elements(_)
+                        | Value::Tuple(_)
+                        | Value::Unit
                         | Value::Int { .. }
                         | Value::Bool(_)
                 ) {

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use mir_check::Report;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,20 +16,38 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage: cargo mir-check [--verify] [cargo check arguments]\n\
+            "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
+            [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
-            --verify requires all local bodies to pass the restricted proof engine."
+            Repeat --entry to select exact or crate-qualified roots; missing roots fail.\n\
+            Without --entry, --verify requires all local bodies to pass."
         );
         return Ok(ExitCode::SUCCESS);
     }
-    let verify = args.first().is_some_and(|arg| arg == "--verify");
-    if verify {
-        args.remove(0);
+    let mut verify = false;
+    let mut summary = false;
+    let mut entries = Vec::new();
+    let mut cargo_args = Vec::new();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.to_str() {
+            Some("--verify") => verify = true,
+            Some("--summary") => summary = true,
+            Some("--entry") => {
+                let name = args.next().ok_or("--entry requires a function name")?;
+                entries.push(entry_name(name)?);
+            }
+            Some("--") => {
+                cargo_args.extend(args);
+                break;
+            }
+            Some(text) if text.starts_with("--entry=") => {
+                entries.push(entry_name(OsString::from(&text[8..]))?);
+            }
+            _ => cargo_args.push(arg),
+        }
     }
-    if args.first().is_some_and(|arg| arg == "--") {
-        args.remove(0);
-    }
-    if args
+    if cargo_args
         .iter()
         .any(|arg| arg == "--target-dir" || arg.to_string_lossy().starts_with("--target-dir="))
     {
@@ -46,13 +65,14 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut command = Command::new(sysroot.join("bin/cargo"));
     command
         .arg("check")
-        .args(args)
+        .args(cargo_args)
         .arg("--target-dir")
         .arg(root.join("build"))
         .env("RUSTC", sysroot.join("bin/rustc"))
         .env("RUSTC_WORKSPACE_WRAPPER", driver)
         .env_remove("RUSTC_WRAPPER")
         .env("MIR_CHECK_REPORT_DIR", &reports)
+        .env("MIR_CHECK_ENTRIES", serde_json::to_string(&entries)?)
         .env("CARGO_INCREMENTAL", "0");
     if verify {
         command.env("MIR_CHECK_VERIFY", "1");
@@ -60,23 +80,56 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         command.env_remove("MIR_CHECK_VERIFY");
     }
     let status = command.status()?;
-    if !status.success() {
-        eprintln!("JSON reports: {}", reports.display());
-        return Ok(ExitCode::FAILURE);
-    }
     let mut paths = std::fs::read_dir(&reports)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<Result<Vec<_>, _>>()?;
     paths.sort();
     if paths.is_empty() {
+        if !status.success() {
+            eprintln!("JSON reports: {}", reports.display());
+            return Ok(ExitCode::FAILURE);
+        }
         return Err("Cargo produced no inventories; check the selected targets".into());
     }
+    let mut collected = Vec::new();
     for path in paths {
         let report: Report = serde_json::from_slice(&std::fs::read(path)?)?;
-        print!("{}", mir_check::render(&report));
+        let rendered = if summary {
+            mir_check::render_coverage(&report)
+        } else {
+            mir_check::render(&report)
+        };
+        print!("{rendered}");
+        collected.push(report);
     }
-    println!("JSON reports: {}", reports.display());
-    Ok(ExitCode::SUCCESS)
+    let mut missing = false;
+    for entry in entries {
+        if !collected.iter().any(|report| {
+            report.functions.iter().any(|function| {
+                mir_check::entry_matches(&report.crate_name, &function.name, &entry)
+            })
+        }) {
+            eprintln!("mir-check: entry {entry:?} has no inventoried MIR body in selected targets");
+            missing = true;
+        }
+    }
+    if status.success() && !missing {
+        println!("JSON reports: {}", reports.display());
+        Ok(ExitCode::SUCCESS)
+    } else {
+        eprintln!("JSON reports: {}", reports.display());
+        Ok(ExitCode::FAILURE)
+    }
+}
+
+fn entry_name(name: OsString) -> Result<String, Box<dyn std::error::Error>> {
+    let name = name
+        .into_string()
+        .map_err(|_| "entry names must be UTF-8")?;
+    if name.is_empty() || name.starts_with('-') {
+        return Err("--entry requires a function name".into());
+    }
+    Ok(name)
 }
 
 fn main() -> ExitCode {

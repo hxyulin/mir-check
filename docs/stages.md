@@ -175,3 +175,34 @@ Formatting, warnings-denied Clippy, host tests, host and ARM fixture release bui
 checks and manual hooks pass. A separate ARM parser analysis discharges 45 obligations in about
 1.5 seconds on the development machine; this includes compiler/solver execution and excludes
 building the checker and proc macro.
+
+## Stage 9: selected Cargo roots, coverage reports and aggregate inputs
+
+Cargo accepts exact or crate-qualified entry names, including repeated selections across
+workspace members. Crates without matching roots retain inventories rather than attempting
+unrelated proofs. Missing names fail at the wrapper after collected reports have been retained.
+Failed verification also renders available reports, so summaries expose failures immediately.
+
+JSON schema version 7 includes per-crate root outcome counts, unselected bodies, distinct
+interpreted instance counts and unknown reasons grouped by affected root. --summary displays those
+results without the full site/obligation listing. Counts explicitly describe roots, not runtime
+coverage or whole-crate safety. Workspace tests cover qualified selection, same-named unknown
+roots, repeated selections, refuted roots and missing names.
+
+Input modeling adds tuples, nested local structs, concrete generic fields, supported shared
+reference fields and small fixed arrays of modeled values. Numeric contract projections preserve
+tuple facts. An eight-level depth limit and 128-value budget prevent recursive/oversized input
+construction from hanging; exhaustion and mutable fields remain unknown. Positive aggregate
+cases and a refuted off-by-one call guard run on the host and ARM target.
+
+The no_std contract example adds guarded_packet_read with a nested Header and shared byte slice.
+The root README now leads with a runnable Cargo parser proof. docs/usage.md explains selectors,
+targets, outcomes and schema fields; docs/coverage.md records supported behavior and evidence.
+
+There are 49 compiler integration tests and one metadata test. Cargo tests run the real parser
+and nested packet example on host/ARM, with one independently selected root per report. Tests
+also preserve the inventory-only distinction and ensure input-budget exhaustion cannot pass.
+
+Formatting, warnings-denied Clippy, host tests, release builds, dependency checks and manual hooks
+pass. The documented whole-contract, selected DR16 and selected CAN Cargo commands also prove;
+the latter two run for ARM, including an explicitly aborting/overflow-checked parser build.

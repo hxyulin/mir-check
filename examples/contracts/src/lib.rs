@@ -33,3 +33,26 @@ pub fn guarded_increment(value: u8) -> u8 {
         0
     }
 }
+
+pub struct Header {
+    pub index: usize,
+    pub enabled: bool,
+}
+
+pub struct Packet<'a> {
+    pub header: Header,
+    pub bytes: &'a [u8],
+}
+
+#[no_panic]
+#[ensures(match result {
+    Some(byte) => packet.header.enabled && packet.header.index < packet.bytes.len(),
+    None => !packet.header.enabled || packet.header.index >= packet.bytes.len(),
+})]
+pub fn guarded_packet_read(packet: &Packet<'_>) -> Option<u8> {
+    if packet.header.enabled && packet.header.index < packet.bytes.len() {
+        Some(read(packet.bytes, packet.header.index))
+    } else {
+        None
+    }
+}

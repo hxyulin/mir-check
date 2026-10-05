@@ -16,6 +16,101 @@ pub struct Report {
     pub rustc_arguments: Vec<String>,
     pub functions: Vec<Function>,
     pub traces: Vec<Trace>,
+    pub coverage: Coverage,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct Coverage {
+    pub inventoried_bodies: usize,
+    pub selected_roots: usize,
+    pub proved: usize,
+    pub refuted: usize,
+    pub unknown: usize,
+    pub unselected_bodies: usize,
+    pub interpreted_instances: usize,
+    pub gaps: Vec<CoverageGap>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CoverageGap {
+    pub reason: String,
+    pub roots: Vec<String>,
+}
+
+pub fn entry_matches(crate_name: &str, function_name: &str, entry: &str) -> bool {
+    entry == function_name || entry == format!("{crate_name}::{function_name}")
+}
+
+pub fn coverage(report: &Report) -> Coverage {
+    let mut result = Coverage {
+        inventoried_bodies: report.functions.len(),
+        ..Coverage::default()
+    };
+    let mut instances = BTreeSet::new();
+    let mut gaps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for function in &report.functions {
+        let Some(proof) = &function.proof else {
+            result.unselected_bodies += 1;
+            continue;
+        };
+        result.selected_roots += 1;
+        match proof.status {
+            ProofStatus::Proved => result.proved += 1,
+            ProofStatus::Refuted => result.refuted += 1,
+            ProofStatus::Unknown => result.unknown += 1,
+        }
+        instances.extend(proof.analyzed_bodies.iter());
+        for obligation in &proof.obligations {
+            if obligation.status == ProofStatus::Unknown {
+                gaps.entry(obligation.detail.clone())
+                    .or_default()
+                    .insert(function.name.clone());
+            }
+        }
+    }
+    result.interpreted_instances = instances.len();
+    result.gaps = gaps
+        .into_iter()
+        .map(|(reason, roots)| CoverageGap {
+            reason,
+            roots: roots.into_iter().collect(),
+        })
+        .collect();
+    result
+}
+
+pub fn render_coverage(report: &Report) -> String {
+    let coverage = &report.coverage;
+    let mut output = format!(
+        concat!(
+            "{} [{}]: inventoried bodies: {}, selected roots: {}\n",
+            "  PROVED {} | REFUTED {} | UNKNOWN {} | unselected {}\n",
+            "  {} distinct interpreted instances; counts describe roots, not runtime coverage\n"
+        ),
+        report.crate_name,
+        report.target,
+        coverage.inventoried_bodies,
+        coverage.selected_roots,
+        coverage.proved,
+        coverage.refuted,
+        coverage.unknown,
+        coverage.unselected_bodies,
+        coverage.interpreted_instances
+    );
+    for function in &report.functions {
+        if let Some(proof) = &function.proof {
+            let _ = writeln!(output, "  {} {}", proof.status.label(), function.name);
+        }
+    }
+    for gap in &coverage.gaps {
+        let _ = writeln!(
+            output,
+            "  gap: {} (roots: {})",
+            gap.reason,
+            gap.roots.join(", ")
+        );
+    }
+    output
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -249,6 +344,7 @@ pub fn render(report: &Report) -> String {
         report.panic_strategy,
         report.overflow_checks
     );
+    output.push_str(&render_coverage(report));
     for function in &report.functions {
         let _ = writeln!(
             output,

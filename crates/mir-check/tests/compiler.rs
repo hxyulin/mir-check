@@ -141,13 +141,20 @@ fn unresolved_calls_and_destructors_are_explicit_unknown_boundaries() {
 }
 
 #[test]
-fn guarded_accesses_remain_unverified_until_a_proof_engine_exists() {
+fn inventory_keeps_guarded_accesses_unverified() {
     let directory = Directory::new();
     let report = report(analyze(&fixture("bodies.rs"), &directory, &[]));
     assert!(has_site(&report, "guarded", SiteKind::BoundsCheck));
     let text = mir_check::render(&report);
     assert!(text.contains("inventory only; no proof"));
-    assert!(!text.contains("PROVED"));
+    assert!(!text.contains("verification: PROVED"));
+    assert_eq!(report.coverage.selected_roots, 0);
+    assert!(
+        report
+            .functions
+            .iter()
+            .all(|function| function.proof.is_none())
+    );
 }
 
 #[test]
@@ -1833,6 +1840,7 @@ fn result_question_mark_preserves_success_and_error_payloads() {
 fn inner(value: u8) -> Result<u8, u8> {
     if value <= 8 { Ok(value) } else { Err(value) }
 }
+
 fn outer(value: u8) -> Result<u8, u8> { Ok(inner(value)?) }
 pub fn payload(value: u8) {
     match outer(value) {
@@ -1860,4 +1868,324 @@ pub fn payload(value: u8) {
             .iter()
             .any(|body| body.contains("as core::ops::Try>::branch"))
     );
+}
+
+#[test]
+fn cargo_entries_select_workspace_roots_and_missing_or_failed_roots_cannot_pass() {
+    let directory = Directory::new();
+    std::fs::write(
+        directory.0.join("Cargo.toml"),
+        "[workspace]\nmembers=['first','second']\nresolver='3'\n",
+    )
+    .unwrap();
+    for name in ["first", "second"] {
+        let member = directory.0.join(name);
+        std::fs::create_dir(&member).unwrap();
+        std::fs::write(
+            member.join("Cargo.toml"),
+            format!(
+                "[package]\nname='{name}'\nversion='0.1.0'\nedition='2024'\n\
+                 [lib]\npath='lib.rs'\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            member.join("lib.rs"),
+            if name == "first" {
+                "#![no_std]\npub fn read(value: u8) -> u8 { value }\n\
+                 pub fn bad(value: u8) -> u8 { value + 1 }\n"
+            } else {
+                "#![no_std]\npub fn read(value: f32) -> f32 { value }\n"
+            },
+        )
+        .unwrap();
+    }
+    for (entries, expected, counts) in [
+        (vec!["first::read"], true, (1, 0, 0)),
+        (vec!["read"], false, (1, 0, 1)),
+        (vec!["first::read", "first::bad"], false, (1, 1, 0)),
+        (vec!["first::read", "absent"], false, (1, 0, 0)),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"));
+        command.args([
+            "mir-check",
+            "--verify",
+            "--summary",
+            "--workspace",
+            "--offline",
+        ]);
+        for entry in &entries {
+            if entries.len() == 1 {
+                command.arg(format!("--entry={entry}"));
+            } else {
+                command.args(["--entry", entry]);
+            }
+        }
+        let output = command.current_dir(&directory.0).output().unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.success(), expected, "{entries:?}: {stderr}");
+        let text = if expected { &stdout } else { &stderr };
+        let reports = text
+            .lines()
+            .find_map(|line| line.strip_prefix("JSON reports: "))
+            .unwrap();
+        let reports: Vec<Report> = std::fs::read_dir(reports)
+            .unwrap()
+            .map(|entry| {
+                serde_json::from_slice(&std::fs::read(entry.unwrap().path()).unwrap()).unwrap()
+            })
+            .collect();
+        assert_eq!(reports.len(), 2);
+        let actual = reports.iter().fold((0, 0, 0), |total, report| {
+            (
+                total.0 + report.coverage.proved,
+                total.1 + report.coverage.refuted,
+                total.2 + report.coverage.unknown,
+            )
+        });
+        assert_eq!(actual, counts, "{entries:?}: {stdout}");
+        assert!(stdout.contains("counts describe roots, not runtime coverage"));
+        if entries.contains(&"read") {
+            assert!(stdout.contains("gap: unsupported argument type f32"));
+        }
+        if entries.contains(&"absent") {
+            assert!(stderr.contains("entry \"absent\" has no inventoried MIR body"));
+        }
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"))
+        .args(["--verify", "--entry", "--lib"])
+        .current_dir(&directory.0)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires a function name"));
+}
+
+#[test]
+fn coverage_counts_root_results_separately_from_unselected_and_interpreted_bodies() {
+    let directory = Directory::new();
+    let output = analyze_from(
+        &fixture("proofs.rs"),
+        &directory,
+        &[
+            "--verify",
+            "--entry",
+            "next_byte",
+            "--entry",
+            "overflowing_sum",
+            "--entry",
+            "loop_unknown",
+        ],
+        &["-Coverflow-checks=yes"],
+    );
+    assert!(!output.status.success());
+    let analysis: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(analysis.schema_version, 7);
+    let coverage = &analysis.coverage;
+    assert_eq!(coverage.selected_roots, 3);
+    assert_eq!(
+        (coverage.proved, coverage.refuted, coverage.unknown),
+        (1, 1, 1)
+    );
+    assert_eq!(coverage.unselected_bodies, analysis.functions.len() - 3);
+    assert!(coverage.interpreted_instances >= 3);
+    assert!(
+        coverage
+            .gaps
+            .iter()
+            .any(|gap| gap.roots == ["loop_unknown"])
+    );
+    let inventory = report(analyze(&fixture("proofs.rs"), &directory, &[]));
+    assert_eq!(inventory.coverage.selected_roots, 0);
+    assert_eq!(inventory.coverage.proved, 0);
+    assert_eq!(
+        inventory.coverage.unselected_bodies,
+        inventory.functions.len()
+    );
+}
+
+#[test]
+fn nested_structs_tuples_and_shared_fields_preserve_call_bounds_on_host_and_arm() {
+    let directory = Directory::new();
+    let path = directory.0.join("aggregate_inputs.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+use mir_contracts::{requires, ensures};
+pub struct Header { index: usize }
+pub struct Wrapper<T> { value: T }
+pub struct Packet<'a> { header: Wrapper<Header>, bytes: &'a [u8] }
+pub struct Pair(pub u16, pub bool);
+#[requires(index < bytes.len())]
+fn read(bytes: &[u8], index: usize) -> u8 { bytes[index] }
+pub fn guarded(packet: &Packet<'_>) -> u8 {
+    if packet.header.value.index < packet.bytes.len() {
+        read(packet.bytes, packet.header.value.index)
+    } else { 0 }
+}
+pub fn invalid(packet: &Packet<'_>) -> u8 {
+    if packet.header.value.index <= packet.bytes.len() {
+        read(packet.bytes, packet.header.value.index)
+    } else { 0 }
+}
+#[requires(packet.header.value.index < packet.bytes.len())]
+pub fn precondition(packet: Packet<'_>) -> u8 {
+    read(packet.bytes, packet.header.value.index)
+}
+#[requires(value.0 < 16 && value.1.0 <= 7)]
+#[ensures(result.0 == value.0 && result.1 == value.1.0)]
+pub fn tuple(value: &(u16, (u8, bool))) -> (u16, u8) { (value.0, value.1.0) }
+#[ensures(result == value.0)]
+pub fn tuple_struct(value: Pair) -> u16 { value.0 }
+#[requires(index == 1)]
+#[ensures(result == values[1].index)]
+pub fn fixed_structs(values: [Header; 2], index: usize) -> usize { values[index].index }
+"#,
+    )
+    .unwrap();
+    let entries = [
+        "guarded",
+        "invalid",
+        "precondition",
+        "tuple",
+        "tuple_struct",
+        "fixed_structs",
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let (output, report) = verify_vendored(&path, &entries, &args);
+        assert!(!output.status.success());
+        for entry in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == entry)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status,
+                if entry == "invalid" {
+                    ProofStatus::Refuted
+                } else {
+                    ProofStatus::Proved
+                },
+                "{entry}: {:?}",
+                proof.obligations
+            );
+            if entry == "guarded" {
+                assert!(proof.inputs.contains_key("packet.header.value.index"));
+                assert!(proof.inputs.contains_key("packet.bytes"));
+                assert!(proof.obligations.iter().any(
+                    |obligation| obligation.kind == mir_check::ObligationKind::CallPrecondition
+                ));
+            }
+            if entry == "tuple" {
+                assert!(proof.inputs.contains_key("value.1.0"));
+            }
+        }
+    }
+}
+
+#[test]
+fn recursive_large_and_mutable_input_shapes_remain_unknown() {
+    let directory = Directory::new();
+    let path = directory.0.join("unknown_inputs.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+pub struct Node<'a> { next: &'a Node<'a> }
+pub struct Mutable<'a> { bytes: &'a mut [u8; 4] }
+pub fn recursive<'a>(node: &'a Node<'a>) -> &'a Node<'a> { node }
+pub fn large(values: [([u16; 16], [u16; 16]); 8]) -> u16 { values[0].0[0] }
+pub fn mutable(packet: Mutable<'_>) { packet.bytes[0] = 1; }
+"#,
+    )
+    .unwrap();
+    let entries = ["recursive", "large", "mutable"];
+    let (output, report) = verify_vendored(&path, &entries, &[]);
+    assert!(!output.status.success());
+    for entry in entries {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            ProofStatus::Unknown,
+            "{entry}: {:?}",
+            proof.obligations
+        );
+        assert!(proof.obligations.iter().any(|obligation| {
+            obligation.detail.contains(if entry == "mutable" {
+                "unsupported argument type"
+            } else {
+                "input shape exceeds"
+            })
+        }));
+    }
+}
+
+#[test]
+fn cargo_selected_real_parser_and_nested_packet_prove_on_host_and_arm() {
+    let directory = Directory::new();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for (example, entry) in [("dr16", "Raw::parse"), ("contracts", "guarded_packet_read")] {
+        let manifest = root.join(format!("examples/{example}/Cargo.toml"));
+        for target in [None, Some("thumbv7em-none-eabihf")] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"));
+            command
+                .args([
+                    "--verify",
+                    "--summary",
+                    "--entry",
+                    entry,
+                    "--lib",
+                    "--offline",
+                ])
+                .arg("--manifest-path")
+                .arg(&manifest);
+            if let Some(target) = target {
+                command.args(["--target", target]);
+            }
+            let output = command.current_dir(&directory.0).output().unwrap();
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(
+                output.status.success(),
+                "{example}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(stdout.contains(&format!("PROVED {entry}")));
+            let reports = stdout
+                .lines()
+                .find_map(|line| line.strip_prefix("JSON reports: "))
+                .unwrap();
+            let report_file = std::fs::read_dir(reports)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let report: Report =
+                serde_json::from_slice(&std::fs::read(report_file).unwrap()).unwrap();
+            assert_eq!(report.coverage.selected_roots, 1);
+            assert_eq!(report.coverage.proved, 1);
+            assert!(report.coverage.unselected_bodies > 0);
+            if let Some(target) = target {
+                assert_eq!(report.target, target);
+            } else {
+                assert!(report.target.contains(std::env::consts::ARCH));
+            }
+        }
+    }
 }

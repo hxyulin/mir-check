@@ -19,10 +19,13 @@ impl<'tcx> Engine<'tcx> {
             .fields
             .iter()
             .map(|field| {
-                let ty = field.ty(self.tcx, args).skip_norm_wip();
-                if matches!(ty.kind(), ty::Ref(..) | ty::Adt(..)) {
-                    return Err("reference and nested ADT input fields are not modeled".to_owned());
-                }
+                let ty = self
+                    .tcx
+                    .try_normalize_erasing_regions(
+                        ty::TypingEnv::fully_monomorphized(),
+                        field.ty(self.tcx, args),
+                    )
+                    .map_err(|error| format!("input field normalization failed: {error:?}"))?;
                 Ok((
                     field.name.as_str().to_owned(),
                     self.argument(id, ty, conditions)?,
@@ -50,10 +53,8 @@ impl<'tcx> Engine<'tcx> {
         let count = count
             .try_to_target_usize(self.tcx)
             .ok_or("unknown input array length")?;
-        if count > MAX_ARRAY_ELEMENTS as u64
-            || !(self.integer_type(*element).is_some() || element.is_bool())
-        {
-            return Err("only small integer and boolean array inputs are modeled".to_owned());
+        if count > MAX_ARRAY_ELEMENTS as u64 {
+            return Err("fixed array input exceeds 16 elements".to_owned());
         }
         Ok(Value::Elements(
             (0..count)

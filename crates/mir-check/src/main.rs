@@ -33,6 +33,7 @@ struct Checker {
     entries: Vec<String>,
     rustc_arguments: Vec<String>,
     verify: bool,
+    summary: bool,
 }
 
 impl Callbacks for Checker {
@@ -48,11 +49,33 @@ impl Callbacks for Checker {
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
         tcx.dcx().abort_if_errors();
-        match mir_check::build_traces(&mut report, &self.entries) {
+        let missing = self.entries.iter().find(|entry| {
+            !report
+                .functions
+                .iter()
+                .any(|function| mir_check::entry_matches(&report.crate_name, &function.name, entry))
+        });
+        if self.report_dir.is_none()
+            && let Some(entry) = missing
+        {
+            self.error = Some(format!("entry {entry:?} has no inventoried local MIR body"));
+            return Compilation::Stop;
+        }
+        let entries: Vec<_> = report
+            .functions
+            .iter()
+            .filter(|function| {
+                self.entries.iter().any(|entry| {
+                    mir_check::entry_matches(&report.crate_name, &function.name, entry)
+                })
+            })
+            .map(|function| function.name.clone())
+            .collect();
+        match mir_check::build_traces(&mut report, &entries) {
             Ok(()) => {
                 if self.verify {
                     for function in &mut report.functions {
-                        if !self.entries.is_empty() && !self.entries.contains(&function.name) {
+                        if !self.entries.is_empty() && !entries.contains(&function.name) {
                             continue;
                         }
                         let id = tcx
@@ -73,6 +96,7 @@ impl Callbacks for Checker {
                     }
                 }
                 tcx.dcx().abort_if_errors();
+                report.coverage = mir_check::coverage(&report);
                 if let Err(error) = self.emit(&report) {
                     self.error = Some(error.to_string());
                 } else if report.functions.iter().any(|function| {
@@ -104,6 +128,8 @@ impl Checker {
             std::fs::write(path, serde_json::to_vec_pretty(report)?)?;
         } else if self.json {
             println!("{}", serde_json::to_string_pretty(report)?);
+        } else if self.summary {
+            print!("{}", mir_check::render_coverage(report));
         } else {
             print!("{}", mir_check::render(report));
         }
@@ -141,7 +167,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 6,
+        schema_version: 7,
         compiler: env!("MIR_CHECK_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),
@@ -151,6 +177,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
         rustc_arguments: arguments.to_vec(),
         functions,
         traces: Vec::new(),
+        coverage: mir_check::Coverage::default(),
     }
 }
 
@@ -189,13 +216,32 @@ fn parse_contract(doc: &str) -> Option<Contract> {
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
     let report_dir = std::env::var_os("MIR_CHECK_REPORT_DIR").map(PathBuf::from);
+    let entries = if report_dir.is_some() {
+        match std::env::var("MIR_CHECK_ENTRIES") {
+            Ok(value) => match serde_json::from_str(&value) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    eprintln!("mir-check: invalid MIR_CHECK_ENTRIES: {error}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            Err(std::env::VarError::NotPresent) => Vec::new(),
+            Err(error) => {
+                eprintln!("mir-check: invalid MIR_CHECK_ENTRIES: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let mut checker = Checker {
         json: false,
         report_dir,
         error: None,
-        entries: Vec::new(),
+        entries,
         rustc_arguments: Vec::new(),
         verify: std::env::var_os("MIR_CHECK_VERIFY").is_some(),
+        summary: false,
     };
     if checker.report_dir.is_some() {
         if args.len() > 1 {
@@ -208,7 +254,8 @@ fn main() -> ExitCode {
             || args.len() == 1
         {
             println!(
-                "Usage: mir-check [--json] [--verify] [--entry FUNCTION] -- <rustc arguments>\n\
+                "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] -- \
+                <rustc arguments>\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail."
             );
             return ExitCode::SUCCESS;
@@ -221,6 +268,10 @@ fn main() -> ExitCode {
                 }
                 Some("--verify") => {
                     checker.verify = true;
+                    args.remove(1);
+                }
+                Some("--summary") => {
+                    checker.summary = true;
                     args.remove(1);
                 }
                 Some("--entry") => {

@@ -30,10 +30,11 @@ fn evaluate(
                 .ok_or_else(|| format!("unknown contract name {name}"))
         }
         Expr::Field(expr) => {
-            let syn::Member::Named(name) = &expr.member else {
-                return Err("only named contract fields are modeled".to_owned());
+            let name = match &expr.member {
+                syn::Member::Named(name) => name.to_string(),
+                syn::Member::Unnamed(index) => index.index.to_string(),
             };
-            evaluate(&expr.base, bindings, pointer_bits, None)?.field(&name.to_string())
+            evaluate(&expr.base, bindings, pointer_bits, None)?.field(&name)
         }
         Expr::Index(expr) => {
             let Expr::Lit(index) = expr.index.as_ref() else {

@@ -16,6 +16,12 @@ Compilation continues in Cargo mode and stops after analysis in direct mode. Com
 unknown entries and report-write failures produce a nonzero exit status. In inventory mode,
 success establishes only that the inventory was collected.
 
+Cargo accepts repeated exact or crate-qualified --entry selectors. Crates without a matching root
+retain inventories; the Cargo wrapper rejects any requested root absent from all selected targets.
+--summary prints outcomes and grouped unknown reasons. Available reports are rendered even after
+verification failure. Schema version 7 includes root coverage counts separately from distinct
+interpreted body instances; neither count claims runtime or whole-crate coverage.
+
 The report model uses std and serde. No compiler types escape the adapter, so JSON consumers
 do not need rustc internals. Inventory remains separate from the opt-in proof engine.
 
@@ -36,9 +42,15 @@ Structs, constructed local enums and core Option/Result/ControlFlow values prese
 Small integer/bool arrays support symbolic bounded indices; other elements require uniquely
 determined indices. Struct inputs do not acquire implicit invariants.
 
+Root inputs now include tuples, nested local structs, concrete generic fields, supported shared
+references within those values and small arrays of modeled aggregates. Input construction has an
+eight-level depth limit and a 128-value budget across arguments; recursive references and larger
+shapes remain unknown. General mutable-reference fields still fail before execution. Input
+bindings retain nested names such as packet.header.index and value.1.0.
+
 The contract evaluator accepts pure comparisons and boolean predicates,
-with modeled array/slice lengths, constant non-byte array indices, struct fields, integer casts
-and restricted Option matches.
+with modeled array/slice lengths, constant non-byte array indices, named/numeric fields, integer
+casts and restricted Option matches.
 It checks caller preconditions and every feasible return, using
 entry values for parameter names in postconditions. It never assumes a callee summary from
 annotations. Missing names, type errors, unsupported predicates and inconsistent entry domains
@@ -62,3 +74,8 @@ bounds and five channel bounds prove without entry preconditions on the host and
 Regression tests refute incorrect byte indices and channel masks; independent host tests compare
 4,608 frames against separate formulas. Other compiler tests cover generic call bounds, static
 dispatch, Result question-mark payloads and available dependency bodies with a rejected overflow.
+
+The contract example adds guarded_packet_read, which checks a nested header's index against a
+shared byte slice and proves the read callee's bound. Aggregate-input tests cover the host and ARM,
+tuple postconditions, fixed struct arrays and a refuted off-by-one caller guard. Workspace tests
+separate qualified roots from same-named unsupported functions and reject missing names.

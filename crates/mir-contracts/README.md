@@ -13,5 +13,10 @@ In ensures, result names the actual return value and parameter names denote entr
 Functions and methods with bodies are supported, including const fn. Receiver types outside the
 checker's modeled input subset remain unsupported for proof.
 
+The checker supports nested modeled fields and numeric tuple projections in predicates, such as
+packet.header.index or value.1.0. Constants can index fixed non-byte arrays. Arbitrary predicate
+calls, arithmetic, dynamic indexing and Result matches remain unsupported; the macros only check
+syntax and do not expand the checker's supported predicate language.
+
 Versioned HTML comments in doc attributes carry the declarations through macro expansion to
 the compiler adapter. This format is experimental and is not a trusted proof certificate.

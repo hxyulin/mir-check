@@ -29,6 +29,8 @@ values while the other bytes are zero. Runtime samples supplement the universal 
 From the mir-check repository root:
 
 ```sh
+target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
+  --manifest-path examples/dr16/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 cargo test --locked -p mir-check --test compiler \
   the_dr16_parser_proves_without_entry_bounds_on_host_and_arm
 cargo test --locked -p mir-check --test compiler \

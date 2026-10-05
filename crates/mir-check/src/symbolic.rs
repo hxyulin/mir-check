@@ -48,6 +48,13 @@ impl Value {
     }
 
     pub fn field(&self, name: &str) -> Result<Value, String> {
+        if let Self::Tuple(fields) = self {
+            let index = name.parse::<usize>().map_err(|error| error.to_string())?;
+            return fields
+                .get(index)
+                .cloned()
+                .ok_or_else(|| format!("unknown tuple field {index}"));
+        }
         let Self::Adt {
             name: ty_name,
             fields,
