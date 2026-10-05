@@ -1388,7 +1388,7 @@ pub fn beyond_budget() {
 }
 
 #[test]
-fn arbitrary_enum_slices_and_ambiguous_non_byte_indices_remain_unknown() {
+fn arbitrary_enum_slices_and_ambiguous_enum_indices_remain_unknown() {
     let (output, report) = verify_vendored(&vendored_source(), &["bus::check"], &[]);
     assert!(!output.status.success());
     let proof = report
@@ -1408,10 +1408,12 @@ fn arbitrary_enum_slices_and_ambiguous_non_byte_indices_remain_unknown() {
         r#"
 #![no_std]
 use mir_contracts::requires;
+#[derive(Clone, Copy)]
+enum Entry { First(u16), Second(u16) }
 #[requires(index < 2)]
 pub fn read(first: u16, second: u16, index: usize) -> u16 {
-    let values = [first, second];
-    values[index]
+    let values = [Entry::First(first), Entry::Second(second)];
+    match values[index] { Entry::First(value) | Entry::Second(value) => value }
 }
 "#,
     )
@@ -1485,4 +1487,385 @@ pub fn dynamic(value: u8) { panic!("value: {value}"); }
             assert!(proof.models.is_empty());
         }
     }
+}
+
+fn dr16_source() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/dr16/src/lib.rs")
+}
+
+#[test]
+fn the_vendored_dr16_parser_keeps_its_original_body() {
+    use quote::ToTokens;
+    fn body(source: &str) -> String {
+        syn::parse_file(source)
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|item| {
+                if let syn::Item::Impl(implementation) = item {
+                    implementation.items.into_iter().find_map(|item| {
+                        if let syn::ImplItem::Fn(method) = item {
+                            Some(method.block.to_token_stream().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    }
+    let original = std::fs::read_to_string(dr16_source().with_file_name("upstream.rs")).unwrap();
+    assert_eq!(
+        body(&original),
+        body(&std::fs::read_to_string(dr16_source()).unwrap())
+    );
+}
+
+#[test]
+fn the_dr16_parser_proves_without_entry_bounds_on_host_and_arm() {
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let (output, report) = verify_vendored(&dr16_source(), &["Raw::parse"], &args);
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == "Raw::parse")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Proved, "{:?}", proof.obligations);
+        assert!(output.status.success());
+        assert!(proof.assumptions.is_empty());
+        for body in [
+            "Result::<T, E>::ok",
+            "as core::ops::Try>::branch",
+            "closure#0",
+            "closure#1",
+            "closure#2",
+        ] {
+            assert!(
+                proof.analyzed_bodies.iter().any(|name| name.contains(body)),
+                "missing {body}"
+            );
+        }
+        for model in [
+            "slice to array",
+            "integer endian decoding",
+            "fixed array map",
+        ] {
+            assert!(
+                proof.models.iter().any(|name| name.contains(model)),
+                "missing {model}"
+            );
+        }
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .any(|obligation| matches!(obligation.kind, mir_checker::ObligationKind::Validity))
+        );
+    }
+}
+
+#[test]
+fn incorrect_dr16_indices_and_channel_masks_are_rejected() {
+    let original = std::fs::read_to_string(dr16_source()).unwrap();
+    for (before, after) in [("u(17)", "u(18)"), ("raw & 0x7FF", "raw & 0xFFFF")] {
+        let directory = Directory::new();
+        let path = directory.0.join("mutated_dr16.rs");
+        assert!(original.contains(before));
+        std::fs::write(&path, original.replacen(before, after, 1)).unwrap();
+        let (output, report) = verify_vendored(&path, &["Raw::parse"], &[]);
+        assert!(!output.status.success());
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == "Raw::parse")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            ProofStatus::Refuted,
+            "{after}: {:?}",
+            proof.obligations
+        );
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .any(|obligation| obligation.status == ProofStatus::Refuted
+                    && obligation.model.is_some())
+        );
+    }
+}
+
+#[test]
+fn concrete_generics_static_traits_and_read_only_closures_are_interpreted() {
+    let directory = Directory::new();
+    let path = directory.0.join("generic_calls.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+use mir_contracts::{requires, ensures};
+#[requires(value < 16)]
+#[ensures(result == value)]
+fn identity<T: Copy>(value: T) -> T { value }
+trait Read { fn read(&self) -> u16; }
+struct Number { value: u16 }
+impl Read for Number { fn read(&self) -> u16 { self.value } }
+fn read<T: Read>(number: &T) -> u16 { number.read() }
+fn apply<F: FnOnce(u16) -> u16>(function: F, value: u16) -> u16 { function(value) }
+fn same(value: u16) -> u16 { value }
+#[requires(value < 16)]
+#[ensures(result == value)]
+pub fn generic(value: u16) -> u16 { identity::<u16>(value) }
+#[requires(value == 16)]
+pub fn invalid_generic(value: u16) -> u16 { identity::<u16>(value) }
+#[ensures(result == value)]
+pub fn static_trait(value: u16) -> u16 { read(&Number { value }) }
+#[ensures(result == value)]
+pub fn captured(value: u16) -> u16 {
+    let saved = value;
+    apply(|_| saved, value)
+}
+#[ensures(result == value)]
+pub fn function_item(value: u16) -> u16 { apply(same, value) }
+#[ensures(result == value)]
+pub fn mapped_item(value: u16) -> u16 { [value].map(same)[0] }
+pub fn mutable_capture(value: u16) -> u16 {
+    let mut saved = value;
+    apply(|_| { saved = 0; saved }, value)
+}
+"#,
+    )
+    .unwrap();
+    let entries = [
+        "generic",
+        "invalid_generic",
+        "static_trait",
+        "captured",
+        "function_item",
+        "mapped_item",
+        "mutable_capture",
+    ];
+    let (output, report) = verify_vendored(&path, &entries, &[]);
+    assert!(!output.status.success());
+    for entry in entries {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            match entry {
+                "invalid_generic" => ProofStatus::Refuted,
+                "mutable_capture" => ProofStatus::Unknown,
+                _ => ProofStatus::Proved,
+            },
+            "{entry}: {:?}",
+            proof.obligations
+        );
+    }
+}
+
+#[test]
+fn scalar_arrays_boolean_casts_and_endian_decoding_preserve_values() {
+    let directory = Directory::new();
+    let path = directory.0.join("scalar_arrays.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+use mir_contracts::{requires, ensures};
+#[requires(index < 3)]
+#[ensures(result >= 0 && result <= 3)]
+pub fn integers(index: usize, values: [u16; 3]) -> u16 {
+    values.map(|value| value & 3)[index]
+}
+#[requires(index < 3)]
+#[ensures(result == value)]
+pub fn repeat(index: usize, value: i16) -> i16 { [value; 3][index] }
+#[requires(index < 3)]
+#[ensures(result <= 1)]
+pub fn booleans(index: usize, values: [bool; 3]) -> u8 { values[index] as u8 }
+#[ensures(result == value)]
+pub fn mapped_byte(value: u8) -> u8 { [value].map(|byte| byte)[0] }
+pub fn little(first: u8, second: u8) -> u16 {
+    let value = u16::from_le_bytes([first, second]);
+    assert!(value == (first as u16 | (second as u16) << 8));
+    value
+}
+pub fn big(first: u8, second: u8) -> u16 {
+    let value = u16::from_be_bytes([first, second]);
+    assert!(value == ((first as u16) << 8 | second as u16));
+    value
+}
+#[ensures(result >= 0 && result <= 3)]
+pub fn shifted(value: i16) -> i16 { (value >> 14) & 3 }
+"#,
+    )
+    .unwrap();
+    let entries = [
+        "integers",
+        "repeat",
+        "booleans",
+        "mapped_byte",
+        "little",
+        "big",
+        "shifted",
+    ];
+    let (output, report) = verify_vendored(&path, &entries, &[]);
+    for entry in entries {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            ProofStatus::Proved,
+            "{entry}: {:?}",
+            proof.obligations
+        );
+    }
+    assert!(output.status.success());
+}
+
+#[test]
+fn available_dependency_bodies_are_executed_with_concrete_type_arguments() {
+    let directory = Directory::new();
+    let dependency = directory.0.join("dependency.rs");
+    std::fs::write(
+        &dependency,
+        r#"
+#![no_std]
+pub fn identity<T: Copy>(value: T) -> T { value }
+#[inline]
+pub fn increment(value: u8) -> u8 { value + 1 }
+"#,
+    )
+    .unwrap();
+    let library = directory.0.join("libdependency.rlib");
+    let build = Command::new("rustup")
+        .args([
+            "run",
+            "nightly-2026-09-22",
+            "rustc",
+            "--crate-type=rlib",
+            "--edition=2024",
+            "--crate-name=dependency",
+            "-Cpanic=abort",
+            "-Coverflow-checks=yes",
+        ])
+        .arg(&dependency)
+        .arg("-o")
+        .arg(&library)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let source = directory.0.join("consumer.rs");
+    std::fs::write(
+        &source,
+        r#"
+#![no_std]
+use mir_contracts::{requires, ensures};
+#[ensures(result == value)]
+pub fn generic(value: u16) -> u16 { dependency::identity(value) }
+#[requires(value < 255)]
+#[ensures(result > value)]
+pub fn increment(value: u8) -> u8 { dependency::increment(value) }
+#[requires(value == 255)]
+pub fn overflow(value: u8) -> u8 { dependency::increment(value) }
+"#,
+    )
+    .unwrap();
+    let external = format!("dependency={}", library.display());
+    let entries = ["generic", "increment", "overflow"];
+    let (output, report) = verify_vendored(&source, &entries, &["--extern", &external]);
+    assert!(!output.status.success());
+    for entry in entries {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            if entry == "overflow" {
+                ProofStatus::Refuted
+            } else {
+                ProofStatus::Proved
+            },
+            "{entry}: {:?}",
+            proof.obligations
+        );
+        assert!(
+            proof
+                .analyzed_bodies
+                .iter()
+                .any(|body| body.starts_with("dependency::"))
+        );
+    }
+}
+
+#[test]
+fn result_question_mark_preserves_success_and_error_payloads() {
+    let directory = Directory::new();
+    let path = directory.0.join("result_calls.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+fn inner(value: u8) -> Result<u8, u8> {
+    if value <= 8 { Ok(value) } else { Err(value) }
+}
+fn outer(value: u8) -> Result<u8, u8> { Ok(inner(value)?) }
+pub fn payload(value: u8) {
+    match outer(value) {
+        Ok(result) => { assert!(value <= 8); assert!(result == value); }
+        Err(error) => { assert!(value > 8); assert!(error == value); }
+    }
+}
+"#,
+    )
+    .unwrap();
+    let (output, report) = verify_vendored(&path, &["payload"], &[]);
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "payload")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Proved, "{:?}", proof.obligations);
+    assert!(output.status.success());
+    assert!(
+        proof
+            .analyzed_bodies
+            .iter()
+            .any(|body| body.contains("as core::ops::Try>::branch"))
+    );
 }

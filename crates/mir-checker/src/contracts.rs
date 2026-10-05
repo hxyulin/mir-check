@@ -35,6 +35,26 @@ fn evaluate(
             };
             evaluate(&expr.base, bindings, pointer_bits, None)?.field(&name.to_string())
         }
+        Expr::Index(expr) => {
+            let Expr::Lit(index) = expr.index.as_ref() else {
+                return Err("contract array index must be an integer literal".to_owned());
+            };
+            let Lit::Int(index) = &index.lit else {
+                return Err("contract array index must be an integer literal".to_owned());
+            };
+            literal(index, false, pointer_bits, Some((pointer_bits, false)))?;
+            let index = index
+                .base10_parse::<usize>()
+                .map_err(|error| error.to_string())?;
+            let Value::Elements(elements) = evaluate(&expr.expr, bindings, pointer_bits, None)?
+            else {
+                return Err("contract indexing requires a fixed non-byte array".to_owned());
+            };
+            elements
+                .get(index)
+                .cloned()
+                .ok_or("contract array index is out of bounds".to_owned())
+        }
         Expr::Cast(expr) => {
             let syn::Type::Path(ty) = expr.ty.as_ref() else {
                 return Err("unsupported contract cast type".to_owned());

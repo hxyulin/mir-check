@@ -25,6 +25,7 @@ pub enum Value {
     Elements(Vec<Value>),
     StaticText,
     FormatArguments,
+    Function,
     Unit,
 }
 
@@ -41,6 +42,7 @@ impl Value {
             | Self::Bytes { .. }
             | Self::StaticText
             | Self::FormatArguments
+            | Self::Function
             | Self::Unit => false,
         }
     }
@@ -174,6 +176,13 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
 }
 
 pub fn cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
+    if let Value::Bool(expression) = value {
+        return Ok(Value::Int {
+            expression: format!("(ite {expression} (_ bv1 {bits}) (_ bv0 {bits}))"),
+            bits,
+            signed,
+        });
+    }
     let (expression, old_bits, old_signed) = value.integer()?;
     let expression = if bits < old_bits {
         format!("((_ extract {} 0) {expression})", bits - 1)
@@ -192,4 +201,53 @@ pub fn cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
         bits,
         signed,
     })
+}
+
+pub fn shift(leftward: bool, left: Value, right: Value) -> Result<Value, String> {
+    let (left, bits, signed) = left.integer()?;
+    let (right, _, _) = cast(right, bits, false)?.integer()?;
+    let amount = format!("(bvand {right} (_ bv{} {bits}))", bits - 1);
+    let operation = if leftward {
+        "bvshl"
+    } else if signed {
+        "bvashr"
+    } else {
+        "bvlshr"
+    };
+    Ok(Value::Int {
+        expression: format!("({operation} {left} {amount})"),
+        bits,
+        signed,
+    })
+}
+
+pub fn select_element(elements: &[Value], index: &Value) -> Result<Value, String> {
+    let (index, index_bits, _) = index.integer()?;
+    let mut result = elements.last().cloned().ok_or("empty array index")?;
+    for (position, element) in elements.iter().enumerate().rev().skip(1) {
+        let condition = format!("(= {index} (_ bv{position} {index_bits}))");
+        result = match (element, result) {
+            (
+                Value::Int {
+                    expression,
+                    bits,
+                    signed,
+                },
+                Value::Int {
+                    expression: otherwise,
+                    bits: other_bits,
+                    signed: other_signed,
+                },
+            ) if *bits == other_bits && *signed == other_signed => Value::Int {
+                expression: format!("(ite {condition} {expression} {otherwise})"),
+                bits: *bits,
+                signed: *signed,
+            },
+            (Value::Bool(expression), Value::Bool(otherwise)) => {
+                Value::Bool(format!("(ite {condition} {expression} {otherwise})"))
+            }
+            _ => return Err("array choice only models compatible scalar values".to_owned()),
+        };
+    }
+    Ok(result)
 }

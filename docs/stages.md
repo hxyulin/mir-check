@@ -142,3 +142,36 @@ the execution limit as successful completion makes the cutoff regression fail; i
 There are 37 compiler integration tests, one metadata behavior test and seven vendored runtime
 tests. Formatting, warnings-denied Clippy, host and ARM release builds, dependency checks and manual
 hooks pass. docs/proofs.md records the mechanism, trusted components and remaining coverage gaps.
+
+## Stage 8: broader MIR coverage and DR16 parsing
+
+Coverage takes priority over a broader soundness audit in this stage. Concrete generic arguments
+are substituted and normalized; static traits resolve to implementation bodies. Available
+dependency MIR, read-only closures and function items are executed with actual values. Reports
+in JSON schema version 6 list interpreted body instances separately from explicit library models.
+Missing MIR, unsupported shims and mutable captures remain unknown.
+
+Constructed Result and ControlFlow variants support core question-mark propagation. Small
+integer/bool arrays accept symbolic bounded indices and fixed-array map executes callable bodies
+in order. Integer shifts, boolean casts, lossless integer conversion, endian decoding and exact
+shared byte-slice-to-array conversion extend the supported operations. Compiler assume intrinsics
+are checked as validity obligations rather than silently added as assumptions.
+
+The unchanged Raw::parse body is vendored from the same firmware snapshot in examples/dr16.
+Its 42-block body proves panic freedom without entry preconditions on the host and ARM target.
+Postconditions establish exact-length rejection, switch bounds and all five channel bounds.
+The proof follows core Result/Option methods and three closures. Incorrect byte-index and channel
+mask mutations are refuted. Independent runtime tests compare 4,608 frames against separate
+decoding formulas and check input lengths zero through 40.
+
+There are 44 compiler integration tests, one metadata behavior test, seven CAN runtime tests and
+two DR16 runtime tests. New cases cover generic call bounds, static dispatch, function items,
+read-only closures, scalar arrays, endian values, Result success/error propagation and available
+dependency bodies, including a refuted dependency overflow. Formal interpreter/model auditing,
+general mutation, arbitrary enum inputs, floating point and broader iterator support remain work
+for later stages.
+
+Formatting, warnings-denied Clippy, host tests, host and ARM fixture release builds, dependency
+checks and manual hooks pass. A separate ARM parser analysis discharges 45 obligations in about
+1.5 seconds on the development machine; this includes compiler/solver execution and excludes
+building the checker and proc macro.

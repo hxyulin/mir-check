@@ -141,7 +141,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 5,
+        schema_version: 6,
         compiler: env!("MIR_CHECKER_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),

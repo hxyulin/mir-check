@@ -6,7 +6,8 @@ is independent of fleet-2027 and installs no firmware dependencies.
 
 The compiler adapter and panic inventory now include an opt-in proof engine for a restricted
 subset of typed MIR. It can prove panic freedom for guarded integer and byte-slice operations
-and trace symbolic arguments through local calls. It also checks a restricted contract language:
+and trace symbolic arguments through concrete local and available dependency calls. It also checks
+a restricted contract language:
 callee preconditions, caller bounds and postconditions.
 
 ## Build and use
@@ -85,27 +86,39 @@ panic condition must be unsatisfiable under the path conditions. The proof is un
 valid Rust inputs satisfying the selected function's declared preconditions; it is not based on
 test input coverage.
 
-Supported inputs are bool, integers, unit, shared byte slices, byte arrays and local structs with
-scalar or byte-array fields, including shared references to those structs. Struct input fields
+Supported inputs are bool, integers, unit, shared byte slices, byte arrays, small integer/bool
+arrays and local structs with modeled fields. Shared references to integers, booleans, arrays and
+those structs are supported. Input fields
 are arbitrary: private fields do not imply an invariant. Shared slice contents are SMT arrays.
-The engine models constructed structs, local enum variants and core Option variants, field
-projections and local byte-array initialization. Small constructed non-byte arrays have at most
-16 elements; indexing requires one uniquely determined index under the current path conditions.
-Arbitrary enum/struct slices and enum inputs remain unsupported. Local calls use actual symbolic
-arguments and return values.
+The engine models constructed structs, local enums, core Option/Result/ControlFlow variants, field
+projections and local array initialization. Non-byte arrays have at most 16 elements. Integer/bool
+elements support symbolic bounded indexing; enum/struct elements require a uniquely determined
+index. Arbitrary enum/struct slices and enum inputs remain unsupported.
 
-Pinned core models cover slice length, byte prefix indexing, lossless u8-to-usize conversion and
-copy_from_slice into an owned local byte array. Another narrow model constructs opaque formatting
+Calls resolve concrete generic substitutions and static trait implementations, then interpret
+available local or dependency MIR with actual arguments and return values. Read-only closures and
+function items can run through generic Fn/FnOnce calls and fixed-array map. Constructed Option and
+Result values support the question-mark operator by following their instantiated core bodies.
+Reports list interpreted bodies separately from explicit library models. Missing bodies and
+unsupported compiler shims remain UNKNOWN; a dependency is not automatically assumed safe.
+
+Pinned core models cover slice length, byte prefix indexing, lossless integer conversions,
+integer endian decoding, shared byte-slice-to-array conversion, fixed-array map and
+copy_from_slice into an owned local byte array. Array map executes each actual callable body in
+index order. Another narrow model constructs opaque formatting
 arguments from an evaluated static string, so literal panic messages can reach their panic call.
 The range and copy models check their panic conditions and model the exact copied bytes.
 Compiler identities and instantiated receiver types identify
 these operations; similarly named user methods receive no special treatment. These core models
 are trusted parts of the translator, not proofs of dependency implementations. Each root's report
-lists the models it used.
+lists the models it used. MIR assume intrinsics become validity obligations rather than unchecked
+assumptions.
 
-Mutable borrows are restricted to local byte arrays and their prefixes. They cannot cross local
-call boundaries, enter aggregates or escape as return values. Other external calls, unresolved
-trait dispatch, general mutable references, input enums, nested struct inputs, floats and
+Mutable borrows are restricted to local byte arrays and their prefixes; closure environments can
+be borrowed for read-only execution. Writes through captured references remain unsupported.
+Mutable byte-array borrows cannot cross call boundaries, enter aggregates or escape as returns.
+Unavailable external calls, unresolved trait dispatch, general mutable references, input enums,
+nested struct inputs, floats and
 unsupported statements fail as UNKNOWN. Finite loops can prove through complete symbolic
 unrolling. No path is silently truncated: an unfinished exploration at the step limit fails as
 UNKNOWN. Recursive calls still require an invariant and remain UNKNOWN.
@@ -114,7 +127,7 @@ UNKNOWN. Recursive calls still require an invariant and remain UNKNOWN.
 local bodies must pass. cargo mir-checker --verify applies this mode to Cargo workspace members.
 Inventory mode remains available without a solver.
 
-JSON schema version 5 includes a separate proof result per selected root, with PROVED, REFUTED and
+JSON schema version 6 includes a separate proof result per selected root, with PROVED, REFUTED and
 UNKNOWN outcomes. Every obligation includes the generated SMT query and, for a satisfiable
 failure, its solver model. Named input bindings make models interpretable; entry preconditions
 are listed as assumptions. Inventory sites keep their separate unverified status. Verification
@@ -157,12 +170,13 @@ ensures predicate must hold at every feasible return. result denotes the actual 
 parameter names refer to their entry values, even when the function reassigns its parameters.
 
 The supported predicate language includes named bool/integer parameters, integer and boolean
-literals, comparisons, &&, ||, !, parentheses, negative integer literals and read-only byte-slice
-or byte-array .len(), modeled named struct fields, integer casts and exhaustive unguarded
+literals, comparisons, &&, ||, !, parentheses, negative integer literals, read-only modeled array
+or byte-slice .len(), constant indices into fixed non-byte arrays, named struct fields, integer
+casts and exhaustive unguarded
 None/Some(name) matches on constructed core Option values. Literals are checked against the
 inferred target integer type and range.
-Arithmetic, indexing, arbitrary calls, mutation and unknown names are unsupported and fail as
-UNKNOWN. Inconsistent entry preconditions also fail as UNKNOWN instead of yielding a vacuous
+Arithmetic, dynamic indexing, arbitrary calls, mutation and unknown names are unsupported and fail
+as UNKNOWN. Inconsistent entry preconditions also fail as UNKNOWN instead of yielding a vacuous
 proof. A requires predicate is an obligation for analyzed callers; it adds no runtime protection
 against other callers violating that domain.
 
@@ -235,3 +249,20 @@ cargo test --locked -p mir-checker --test compiler \
 cargo test --locked -p mir-checker --test compiler \
   invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted
 ```
+
+examples/dr16 vendors the unchanged Raw::parse body from the same firmware snapshot. Its 42-block
+MIR body proves panic freedom for every valid byte slice on both the host and ARM target, without
+entry preconditions. Postconditions establish exact-length rejection, both switch bounds and all
+five decoded channel bounds. The analysis follows Result::ok, Option's question-mark machinery
+and three closure bodies, with explicit conversion, endian and array-map models.
+
+```sh
+cargo test --locked -p mir-checker --test compiler \
+  the_dr16_parser_proves_without_entry_bounds_on_host_and_arm
+cargo test --locked --manifest-path examples/dr16/Cargo.toml
+```
+
+Parser mutations introduce an out-of-range byte index or an incorrect channel mask; both are
+refuted. Independent runtime tests compare 4,608 frames against separate decoding formulas.
+See examples/dr16/README.md for provenance and scope. The floating-point Dr16::from_raw layer is
+not included in this fixture.

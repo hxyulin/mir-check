@@ -38,6 +38,30 @@ impl<'tcx> Engine<'tcx> {
         })
     }
 
+    pub(super) fn element_input(
+        &mut self,
+        id: DefId,
+        ty: Ty<'tcx>,
+        conditions: &mut Vec<String>,
+    ) -> Result<Value, String> {
+        let ty::Array(element, count) = ty.kind() else {
+            return Err("expected a fixed array input".to_owned());
+        };
+        let count = count
+            .try_to_target_usize(self.tcx)
+            .ok_or("unknown input array length")?;
+        if count > MAX_ARRAY_ELEMENTS as u64
+            || !(self.integer_type(*element).is_some() || element.is_bool())
+        {
+            return Err("only small integer and boolean array inputs are modeled".to_owned());
+        }
+        Ok(Value::Elements(
+            (0..count)
+                .map(|_| self.argument(id, *element, conditions))
+                .collect::<Result<_, _>>()?,
+        ))
+    }
+
     pub(super) fn aggregate(
         &self,
         id: DefId,
@@ -73,6 +97,17 @@ impl<'tcx> Engine<'tcx> {
                     data,
                 })
             }
+            AggregateKind::Closure(id, _) => Ok(Value::Adt {
+                name: self.tcx.def_path_str(*id),
+                variant: 0,
+                is_option: false,
+                discriminant: 0,
+                fields: values
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| (index.to_string(), value))
+                    .collect(),
+            }),
             AggregateKind::Array(_) => {
                 if values.len() > MAX_ARRAY_ELEMENTS {
                     return Err("fixed array element model size limit reached".to_owned());
@@ -84,6 +119,7 @@ impl<'tcx> Engine<'tcx> {
                 if !def.is_struct()
                     && !(def.is_enum() && id.is_local())
                     && self.tcx.lang_items().get(LangItem::Option) != Some(*id)
+                    && !self.standard_enum(*id)
                 {
                     return Err(
                         "only structs, constructed local enums and Option variants are modeled"
@@ -138,7 +174,20 @@ impl<'tcx> Engine<'tcx> {
                 return Ok(element.clone());
             }
         }
-        Err("fixed non-byte array index is not uniquely determined on this path".to_owned())
+        let bound = symbolic::binary(
+            "lt",
+            index.clone(),
+            symbolic::integer(elements.len() as u128, bits, false),
+        )?
+        .boolean()?;
+        let mut outside = conditions.to_vec();
+        outside.push(symbolic::not(&bound));
+        if self.feasible(&outside)? {
+            return Err("array read lacks a proven bounds check".to_owned());
+        }
+        symbolic::select_element(elements, index).map_err(|_| {
+            "non-scalar array index is not uniquely determined on this path".to_owned()
+        })
     }
 
     pub(super) fn repeated_bytes(
@@ -155,10 +204,23 @@ impl<'tcx> Engine<'tcx> {
         if count > MAX_ARRAY_BYTES {
             return Err("byte array model size limit reached".to_owned());
         }
-        let (expression, width, signed) = self.operand(id, body, state, operand)?.integer()?;
-        if width != 8 || signed {
-            return Err("only byte repeats are modeled".to_owned());
+        let value = self.operand(id, body, state, operand)?;
+        if !matches!(
+            value,
+            Value::Int {
+                bits: 8,
+                signed: false,
+                ..
+            }
+        ) {
+            if count > MAX_ARRAY_ELEMENTS as u64
+                || !matches!(value, Value::Int { .. } | Value::Bool(_))
+            {
+                return Err("only small scalar repeats are modeled".to_owned());
+            }
+            return Ok(Value::Elements(vec![value; count as usize]));
         }
+        let (expression, _, _) = value.integer()?;
         let bits = u32::from(self.tcx.sess.target.pointer_width);
         Ok(Value::Bytes {
             length: Box::new(symbolic::integer(count as u128, bits, false)),

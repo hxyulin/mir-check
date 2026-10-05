@@ -36,6 +36,7 @@ pub struct Proof {
     pub assumptions: Vec<String>,
     pub inputs: std::collections::BTreeMap<String, String>,
     pub models: Vec<String>,
+    pub analyzed_bodies: Vec<String>,
     pub obligations: Vec<Obligation>,
 }
 
@@ -72,6 +73,7 @@ pub struct Obligation {
 #[serde(rename_all = "snake_case")]
 pub enum ObligationKind {
     PanicSafety,
+    Validity,
     CallPrecondition,
     Postcondition,
     Unsupported,
@@ -302,6 +304,9 @@ pub fn render(report: &Report) -> String {
             }
             for assumption in &proof.assumptions {
                 let _ = writeln!(output, "      assumes: {assumption}");
+            }
+            for body in &proof.analyzed_bodies {
+                let _ = writeln!(output, "      interpreted body: {body}");
             }
             for model in &proof.models {
                 let _ = writeln!(output, "      trusted core model: {model}");

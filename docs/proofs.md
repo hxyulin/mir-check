@@ -61,17 +61,35 @@ explicit core models, and Z3. Bit-vector and array semantics preserve the suppor
 byte operations, but the translator has not been formally verified. Mutation tests and runtime
 replays check representative semantics; they do not establish correctness of the analyzer.
 
-Trusted models implement slice length, byte prefix ranges, u8-to-usize conversion, exact copies
-into owned local byte arrays, and opaque formatting arguments from evaluated static strings.
-Compiler identities and instantiated types select them. Arbitrary dependencies and dynamic
-formatters are not assumed safe. A solver model is not automatically replayed as a Rust test;
+Trusted models implement slice length, byte prefix ranges, lossless integer conversions, endian
+decoding, shared byte-slice-to-array conversion, fixed-array map, exact copies into owned byte
+arrays, and opaque formatting arguments from evaluated static strings. Array map executes each
+actual callable body; the model supplies array traversal and storage. Compiler identities and
+instantiated types select models. Dependencies and dynamic formatters are not assumed safe.
+A solver model is not automatically replayed as a Rust test;
 confirmed examples currently have separate runtime replay tests.
 
-Coverage remains limited by missing generic substitutions, cross-crate body analysis, arbitrary
-input enums or enum/struct slices, general mutation and aliasing, floats, closures, iterators,
-destructors and several MIR operations/constants. Constructed non-byte arrays are limited to
-16 elements and uniquely determined indices. There are no inductive loop invariants, automatic
-type invariants, dedicated termination checks or general effect contracts.
+Concrete generic arguments are substituted and normalized before execution. Static trait dispatch
+resolves to a concrete implementation. Available dependency bodies, read-only closures and
+function items are interpreted with actual values. Unsupported shims and missing MIR still fail
+as unknown. Reports identify interpreted instances separately from trusted models. Compiler
+assume intrinsics become validity obligations, so their predicates must be established on the
+current path.
+
+Coverage remains limited by arbitrary input enums or enum/struct slices, general mutation and
+aliasing, mutable captures, floats, trait objects, function pointers, general iterator machinery,
+destructors and several MIR operations/constants, including some promoted constants. Non-byte
+arrays are limited to 16 elements; symbolic bounded indices work for integers and booleans, while
+enum/struct elements need a uniquely determined index. Generic roots with unresolved type
+parameters remain unsupported. There are no inductive loop invariants, automatic type invariants,
+dedicated termination checks or general effect contracts.
+
+The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
+propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and
+decoded bounds for every valid byte slice on the host and ARM target, without entry assumptions.
+Separate tests cover Result question-mark success/error payloads and available external generic
+and inline bodies, including an overflowing dependency call that is refuted. This expands coverage;
+it is not a completed audit of the interpreter or its models.
 
 A selected-root result is conditional on its recorded preconditions and build configuration. It
 does not verify unselected callers, every workspace member, another compiler's binary, undefined

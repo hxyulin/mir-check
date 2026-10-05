@@ -19,6 +19,7 @@ const MAX_QUERY_BYTES: usize = 200_000;
 
 mod aggregates;
 mod builtins;
+mod library;
 
 #[derive(Clone)]
 struct State {
@@ -48,6 +49,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
             assumptions: Vec::new(),
             inputs: BTreeMap::new(),
             models: Vec::new(),
+            analyzed_bodies: Vec::new(),
             obligations: Vec::new(),
         },
     };
@@ -102,7 +104,8 @@ impl<'tcx> Engine<'tcx> {
                 "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
             );
         }
-        self.execute(id, arguments, conditions, &[])?;
+        let instance = ty::Instance::new_raw(id, ty::GenericArgs::identity_for_item(self.tcx, id));
+        self.execute(instance, arguments, conditions, &[])?;
         Ok(())
     }
 
@@ -117,11 +120,17 @@ impl<'tcx> Engine<'tcx> {
                 return Ok(());
             }
             Value::Unit => "()".to_owned(),
+            Value::Elements(elements) => {
+                for (index, element) in elements.iter().enumerate() {
+                    self.input_binding(&format!("{name}[{index}]"), element)?;
+                }
+                return Ok(());
+            }
             Value::Tuple(_)
-            | Value::Elements(_)
             | Value::MutableBytes { .. }
             | Value::StaticText
-            | Value::FormatArguments => {
+            | Value::FormatArguments
+            | Value::Function => {
                 return Err("argument binding is unsupported".to_owned());
             }
         };
@@ -143,6 +152,7 @@ impl<'tcx> Engine<'tcx> {
         arguments: &[Value],
     ) -> Result<BTreeMap<String, Value>, String> {
         let mut bindings = BTreeMap::new();
+        let mut bound_locals = BTreeMap::new();
         for debug in &body.var_debug_info {
             if let VarDebugInfoContents::Place(place) = debug.value
                 && place.projection.is_empty()
@@ -150,12 +160,13 @@ impl<'tcx> Engine<'tcx> {
                 && place.local.as_usize() <= body.arg_count
             {
                 let name = debug.name.as_str().to_owned();
-                if bindings
-                    .insert(name, arguments[place.local.as_usize() - 1].clone())
-                    .is_some()
+                if bound_locals
+                    .insert(name.clone(), place.local)
+                    .is_some_and(|local| local != place.local)
                 {
                     return Err("ambiguous argument name in contract bindings".to_owned());
                 }
+                bindings.insert(name, arguments[place.local.as_usize() - 1].clone());
             }
         }
         Ok(bindings)
@@ -200,11 +211,19 @@ impl<'tcx> Engine<'tcx> {
                 };
                 if local_struct {
                     self.struct_input(id, *element, conditions)
+                } else if matches!(element.kind(), ty::Array(..))
+                    || self.integer_type(*element).is_some()
+                    || element.is_bool()
+                {
+                    self.argument(id, *element, conditions)
                 } else {
                     self.byte_input(id, *element, conditions)
                 }
             }
-            ty::Array(..) => self.byte_input(id, ty, conditions),
+            ty::Array(element, _) if *element == self.tcx.types.u8 => {
+                self.byte_input(id, ty, conditions)
+            }
+            ty::Array(..) => self.element_input(id, ty, conditions),
             ty::Adt(def, _) if def.is_struct() && def.did().is_local() => {
                 self.struct_input(id, ty, conditions)
             }
@@ -332,19 +351,44 @@ impl<'tcx> Engine<'tcx> {
         });
     }
 
+    fn instantiated_body(&self, instance: ty::Instance<'tcx>) -> Result<Body<'tcx>, String> {
+        if !matches!(instance.def, ty::InstanceKind::Item(_)) {
+            return Err(format!("unmodeled call adapter {:?}", instance.def));
+        }
+        if !self.tcx.is_mir_available(instance.def_id()) {
+            return Err(format!(
+                "MIR body unavailable for {}",
+                self.tcx.def_path_str(instance.def_id())
+            ));
+        }
+        instance
+            .try_instantiate_mir_and_normalize_erasing_regions(
+                self.tcx,
+                ty::TypingEnv::fully_monomorphized(),
+                ty::EarlyBinder::bind(self.tcx, self.tcx.instance_mir(instance.def).clone()),
+            )
+            .map_err(|error| format!("MIR substitution failed: {error:?}"))
+    }
+
     fn execute(
         &mut self,
-        id: DefId,
+        instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
         conditions: Vec<String>,
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
+        let id = instance.def_id();
         if stack.contains(&id) || stack.len() >= MAX_CALL_DEPTH {
             return Err("recursion or call-depth limit requires an invariant".to_owned());
         }
         let mut stack = stack.to_vec();
         stack.push(id);
-        let body = self.tcx.optimized_mir(id);
+        let owned_body = self.instantiated_body(instance)?;
+        let body = &owned_body;
+        let name = format!("{} {:?}", self.tcx.def_path_str(id), instance.args);
+        if !self.proof.analyzed_bodies.contains(&name) {
+            self.proof.analyzed_bodies.push(name);
+        }
         if arguments.len() != body.arg_count {
             return Err("call arguments do not match the MIR body".to_owned());
         }
@@ -504,14 +548,74 @@ impl<'tcx> Engine<'tcx> {
                         )?;
                         continue;
                     }
-                    let values = args
+                    let mut values = args
                         .iter()
                         .map(|arg| self.operand(id, body, &state, &arg.node))
                         .collect::<Result<Vec<_>, _>>()?;
-                    if let Some(value) = self.builtin(
-                        id,
+                    let instance = ty::Instance::try_resolve(
+                        self.tcx,
+                        ty::TypingEnv::fully_monomorphized(),
                         callee,
                         generic_args.skip_binder(),
+                    )
+                    .map_err(|_| "call instance resolution failed".to_owned())?
+                    .ok_or_else(|| {
+                        format!("unresolved call to {}", self.tcx.def_path_str(callee))
+                    })?;
+                    let fn_trait = [LangItem::Fn, LangItem::FnMut, LangItem::FnOnce]
+                        .iter()
+                        .any(|item| {
+                            self.tcx.lang_items().get(*item) == Some(self.tcx.parent(callee))
+                        });
+                    let instance = if fn_trait
+                        && let ty::FnDef(id, args) = generic_args.skip_binder().type_at(0).kind()
+                    {
+                        let [Value::Function, Value::Tuple(parameters)] = values.as_slice() else {
+                            return Err(
+                                "function-item call arguments are not a Rust-call tuple".to_owned()
+                            );
+                        };
+                        values = parameters.clone();
+                        ty::Instance::new_raw(*id, args.skip_binder())
+                    } else {
+                        instance
+                    };
+                    let instance = if let ty::InstanceKind::Shim(ty::ShimKind::ClosureOnce {
+                        closure,
+                        ..
+                    }) = instance.def
+                    {
+                        let ty::Closure(id, args) = instance.args.type_at(0).kind() else {
+                            return Err("closure adapter receiver is not a closure".to_owned());
+                        };
+                        if *id != closure {
+                            return Err("closure adapter identity mismatch".to_owned());
+                        }
+                        ty::Instance::new_raw(closure, args)
+                    } else {
+                        instance
+                    };
+                    let callee = instance.def_id();
+                    if let Some(results) = self.library_call(
+                        instance,
+                        &values,
+                        &state,
+                        &stack,
+                        (id, terminator.source_info.span),
+                    )? {
+                        let target = target.ok_or("modeled call has no return edge")?;
+                        for result in results {
+                            let mut continuation = state.clone();
+                            continuation.conditions = result.conditions;
+                            self.write(&mut continuation, *destination, result.value)?;
+                            queue.push_back((target, continuation));
+                        }
+                        continue;
+                    }
+                    if let Some(value) = self.builtin(
+                        body,
+                        callee,
+                        instance.args,
                         &values,
                         &mut state,
                         terminator.source_info.span,
@@ -521,39 +625,25 @@ impl<'tcx> Engine<'tcx> {
                         queue.push_back((target, state));
                         continue;
                     }
-                    if !callee.is_local()
-                        || !self.tcx.is_mir_available(callee)
-                        || self.tcx.def_kind(self.tcx.parent(callee)) == DefKind::Trait
-                        || generic_args.iter().any(|arg| {
-                            matches!(arg.skip_binder().kind(), ty::GenericArgKind::Type(_))
-                        })
+                    if matches!(instance.def, ty::InstanceKind::Item(_))
+                        && self.tcx.def_kind(callee) == DefKind::Closure
                     {
-                        return Err(format!(
-                            "unmodeled call to {}",
-                            self.tcx.def_path_str(callee)
-                        ));
+                        let [closure, Value::Tuple(parameters)] = values.as_slice() else {
+                            return Err(
+                                "closure call arguments are not a Rust-call tuple".to_owned()
+                            );
+                        };
+                        let mut flattened = vec![closure.clone()];
+                        flattened.extend(parameters.iter().cloned());
+                        values = flattened;
                     }
-                    let callee_body = self.tcx.optimized_mir(callee);
-                    let call_bindings = self.bindings(callee_body, &values)?;
-                    for contract in self.contracts(callee) {
-                        if matches!(contract.kind, ContractKind::Requires) {
-                            let text = contract
-                                .predicate
-                                .as_deref()
-                                .ok_or("missing precondition")?;
-                            let safe = self.predicate(text, &call_bindings)?;
-                            self.require(
-                                id,
-                                terminator.source_info.span,
-                                &state.conditions,
-                                &safe,
-                                ObligationKind::CallPrecondition,
-                                format!("{} requires {text}", self.tcx.def_path_str(callee)),
-                            )?;
-                            state.conditions.push(safe);
-                        }
-                    }
-                    let results = self.execute(callee, values, state.conditions.clone(), &stack)?;
+                    let results = self.call_instance(
+                        instance,
+                        values,
+                        state.conditions.clone(),
+                        &stack,
+                        (id, terminator.source_info.span),
+                    )?;
                     let target = target.ok_or("local call has no return edge")?;
                     for result in results {
                         let mut continuation = state.clone();
@@ -562,8 +652,15 @@ impl<'tcx> Engine<'tcx> {
                         queue.push_back((target, continuation));
                     }
                 }
-                TerminatorKind::Drop { .. } => {
-                    return Err("destructor behavior is unmodeled".to_owned());
+                TerminatorKind::Drop { place, target, .. } => {
+                    if place
+                        .ty(&body.local_decls, self.tcx)
+                        .ty
+                        .needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
+                    {
+                        return Err("destructor behavior is unmodeled".to_owned());
+                    }
+                    queue.push_back((*target, state));
                 }
                 TerminatorKind::Unreachable => {
                     return Err("reachable MIR unreachable terminator".to_owned());
@@ -582,6 +679,24 @@ impl<'tcx> Engine<'tcx> {
         statement: &StatementKind<'tcx>,
     ) -> Result<(), String> {
         match statement {
+            StatementKind::Intrinsic(intrinsic) => match intrinsic.as_ref() {
+                rustc_middle::mir::NonDivergingIntrinsic::Assume(operand) => {
+                    let safe = self.operand(id, body, state, operand)?.boolean()?;
+                    self.require(
+                        id,
+                        self.tcx.def_span(id),
+                        &state.conditions,
+                        &safe,
+                        ObligationKind::Validity,
+                        "MIR assume must follow from the current path".to_owned(),
+                    )?;
+                    state.conditions.push(safe);
+                    Ok(())
+                }
+                rustc_middle::mir::NonDivergingIntrinsic::CopyNonOverlapping(_) => {
+                    Err("unmodeled pointer copy intrinsic".to_owned())
+                }
+            },
             StatementKind::Assign(assignment) => {
                 let (place, value) = assignment.as_ref();
                 let value = self.rvalue(id, body, state, value)?;
@@ -619,7 +734,9 @@ impl<'tcx> Engine<'tcx> {
                     value @ (Value::Bytes { .. }
                     | Value::Adt { .. }
                     | Value::MutableBytes { .. }
-                    | Value::Elements(_)),
+                    | Value::Elements(_)
+                    | Value::Int { .. }
+                    | Value::Bool(_)),
                 ) => value,
                 (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
                     .get(field.as_usize())
@@ -680,8 +797,20 @@ impl<'tcx> Engine<'tcx> {
             Operand::Copy(place) | Operand::Move(place) => self.place(state, *place),
             Operand::Constant(constant) => {
                 let ty = constant.const_.ty();
+                if matches!(ty.kind(), ty::FnDef(..)) {
+                    return Ok(Value::Function);
+                }
                 if matches!(ty.kind(), ty::Tuple(fields) if fields.is_empty()) {
                     return Ok(Value::Unit);
+                }
+                if matches!(
+                    constant.const_,
+                    rustc_middle::mir::Const::Val(rustc_middle::mir::ConstValue::ZeroSized, _)
+                ) && matches!(ty.kind(), ty::Adt(def, args)
+                        if self.tcx.lang_items().get(LangItem::Option) == Some(def.did())
+                            && args.type_at(0).is_never())
+                {
+                    return self.constructed(ty, 0, Vec::new());
                 }
                 if matches!(ty.kind(), ty::Ref(_, element, mutability)
                     if element.is_str() && !mutability.is_mut())
@@ -698,7 +827,7 @@ impl<'tcx> Engine<'tcx> {
                 let bits = constant
                     .const_
                     .try_eval_bits(self.tcx, ty::TypingEnv::post_analysis(self.tcx, id))
-                    .ok_or("unsupported MIR constant")?;
+                    .ok_or_else(|| format!("unsupported MIR constant {:?}", constant.const_))?;
                 if ty.is_bool() {
                     return Ok(Value::Bool((bits != 0).to_string()));
                 }
@@ -722,12 +851,24 @@ impl<'tcx> Engine<'tcx> {
                 let value = self.place(state, *place)?;
                 if matches!(
                     value,
-                    Value::Bytes { .. } | Value::Adt { .. } | Value::Elements(_)
+                    Value::Bytes { .. }
+                        | Value::Adt { .. }
+                        | Value::Elements(_)
+                        | Value::Int { .. }
+                        | Value::Bool(_)
                 ) {
                     Ok(value)
                 } else {
                     Err("only byte-array and slice reborrows are modeled".to_owned())
                 }
+            }
+            Rvalue::Ref(_, BorrowKind::Mut { .. }, place)
+                if matches!(
+                    place.ty(&body.local_decls, self.tcx).ty.kind(),
+                    ty::Closure(..)
+                ) =>
+            {
+                self.place(state, *place)
             }
             Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => self.mutable_bytes(state, *place),
             Rvalue::Repeat(operand, length) => {
@@ -746,6 +887,8 @@ impl<'tcx> Engine<'tcx> {
                 let left = self.operand(id, body, state, &operands.0)?;
                 let right = self.operand(id, body, state, &operands.1)?;
                 let operation = match operation {
+                    BinOp::Shl => return symbolic::shift(true, left, right),
+                    BinOp::Shr => return symbolic::shift(false, left, right),
                     BinOp::Add => "add",
                     BinOp::Sub => "sub",
                     BinOp::Mul => "mul",

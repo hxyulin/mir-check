@@ -36,7 +36,8 @@ and the payload harnesses for every accepted byte.
 
 The analysis trusts pinned core models for byte prefix indexing, slice length, u8-to-usize
 conversion and exact byte copies into owned local arrays. Reports list those models. General
-mutable aliases, derived implementations and arbitrary dependencies remain unsupported. Finite
+mutable aliases and some derived implementations remain unsupported. Available dependency bodies
+can now be interpreted, subject to the same MIR coverage and execution limits. Finite
 loops can prove only when every feasible path finishes within the execution budget.
 These are selected-root proofs, not a proof of every function or caller in the original crate.
 

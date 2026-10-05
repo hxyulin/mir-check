@@ -4,13 +4,17 @@ use rustc_span::Symbol;
 impl<'tcx> Engine<'tcx> {
     pub(super) fn builtin(
         &mut self,
-        caller: DefId,
+        caller_body: &Body<'tcx>,
         callee: DefId,
         args: ty::GenericArgsRef<'tcx>,
         values: &[Value],
         state: &mut State,
         span: Span,
     ) -> Result<Option<Value>, String> {
+        let caller = caller_body.source.def_id();
+        if self.tcx.def_kind(callee) == DefKind::Closure {
+            return Ok(None);
+        }
         if self.tcx.lang_items().get(LangItem::SliceLen) == Some(callee) {
             let [receiver] = values else {
                 return Err("slice len receiver is not modeled".to_owned());
@@ -30,8 +34,11 @@ impl<'tcx> Engine<'tcx> {
         }
         let signature = self
             .tcx
-            .fn_sig(callee)
-            .instantiate(self.tcx, args)
+            .try_normalize_erasing_regions(
+                ty::TypingEnv::fully_monomorphized(),
+                self.tcx.fn_sig(callee).instantiate(self.tcx, args),
+            )
+            .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
         let parent = self.tcx.parent(callee);
         let trait_id = if self.tcx.def_kind(parent) == DefKind::Trait {
@@ -135,24 +142,67 @@ impl<'tcx> Engine<'tcx> {
             .get(LangItem::From)
             .is_some_and(|id| trait_id == Some(id))
             && name == Symbol::intern("from")
-            && signature.inputs() == [self.tcx.types.u8]
-            && signature.output() == self.tcx.types.usize
+            && signature.inputs().len() == 1
+            && let Some((bits, signed)) = self.integer_type(signature.output())
+            && let Some((source_bits, source_signed)) = self.integer_type(signature.inputs()[0])
+            && ((!source_signed && (!signed || bits > source_bits)) || (source_signed && signed))
+            && bits >= source_bits
         {
             let [value] = values else {
                 return Err("conversion arity mismatch".to_owned());
             };
-            self.record_model(callee, "lossless u8 to usize");
-            return Ok(Some(symbolic::cast(
-                value.clone(),
-                u32::from(self.tcx.sess.target.pointer_width),
-                false,
-            )?));
+            self.record_model(callee, "lossless integer conversion");
+            return Ok(Some(symbolic::cast(value.clone(), bits, signed)?));
         }
         let core = self
             .tcx
             .lang_items()
             .get(LangItem::SliceLen)
             .map(|id| id.krate);
+        if Some(callee.krate) == core
+            && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+            && matches!(
+                name.as_str(),
+                "from_le_bytes" | "from_be_bytes" | "from_ne_bytes"
+            )
+            && signature.inputs().len() == 1
+            && let Some((bits, signed)) = self.integer_type(signature.output())
+            && self
+                .tcx
+                .type_of(parent)
+                .instantiate(self.tcx, args)
+                .skip_norm_wip()
+                == signature.output()
+            && matches!(signature.inputs()[0].kind(), ty::Array(element, length)
+                if *element == self.tcx.types.u8
+                    && length.try_to_target_usize(self.tcx) == Some(u64::from(bits / 8)))
+        {
+            let [Value::Bytes { data, .. }] = values else {
+                return Err("endian decoding requires a modeled byte array".to_owned());
+            };
+            let little = name == Symbol::intern("from_le_bytes")
+                || (name == Symbol::intern("from_ne_bytes")
+                    && self.tcx.data_layout.endian == rustc_abi::Endian::Little);
+            let count = bits / 8;
+            let pointer_bits = self.tcx.sess.target.pointer_width;
+            let mut bytes: Vec<_> = (0..count)
+                .map(|index| format!("(select {data} (_ bv{index} {pointer_bits}))"))
+                .collect();
+            if little {
+                bytes.reverse();
+            }
+            let mut bytes = bytes.into_iter();
+            let mut expression = bytes.next().ok_or("empty endian integer")?;
+            for byte in bytes {
+                expression = format!("(concat {expression} {byte})");
+            }
+            self.record_model(callee, "integer endian decoding; exact byte concatenation");
+            return Ok(Some(Value::Int {
+                expression,
+                bits,
+                signed,
+            }));
+        }
         let inherent_byte_slice =
             matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
                 && matches!(
@@ -169,13 +219,13 @@ impl<'tcx> Engine<'tcx> {
                 "byte copy; equal lengths and exact local-array updates",
             );
             return self
-                .copy_bytes(caller, self.tcx.optimized_mir(caller), values, state, span)
+                .copy_bytes(caller, caller_body, values, state, span)
                 .map(Some);
         }
         Ok(None)
     }
 
-    fn record_model(&mut self, callee: DefId, detail: &str) {
+    pub(super) fn record_model(&mut self, callee: DefId, detail: &str) {
         let model = format!("{}: {detail}", self.tcx.def_path_str(callee));
         if !self.proof.models.contains(&model) {
             self.proof.models.push(model);
