@@ -88,12 +88,17 @@ test input coverage.
 Supported inputs are bool, integers, unit, shared byte slices, byte arrays and local structs with
 scalar or byte-array fields, including shared references to those structs. Struct input fields
 are arbitrary: private fields do not imply an invariant. Shared slice contents are SMT arrays.
-The engine models constructed structs and core Option variants, field projections and local
-byte-array initialization. Local calls use actual symbolic arguments and return values.
+The engine models constructed structs, local enum variants and core Option variants, field
+projections and local byte-array initialization. Small constructed non-byte arrays have at most
+16 elements; indexing requires one uniquely determined index under the current path conditions.
+Arbitrary enum/struct slices and enum inputs remain unsupported. Local calls use actual symbolic
+arguments and return values.
 
 Pinned core models cover slice length, byte prefix indexing, lossless u8-to-usize conversion and
-copy_from_slice into an owned local byte array. They check range and copy-length panic conditions
-and model the exact copied bytes. Compiler identities and instantiated receiver types identify
+copy_from_slice into an owned local byte array. Another narrow model constructs opaque formatting
+arguments from an evaluated static string, so literal panic messages can reach their panic call.
+The range and copy models check their panic conditions and model the exact copied bytes.
+Compiler identities and instantiated receiver types identify
 these operations; similarly named user methods receive no special treatment. These core models
 are trusted parts of the translator, not proofs of dependency implementations. Each root's report
 lists the models it used.
@@ -101,7 +106,9 @@ lists the models it used.
 Mutable borrows are restricted to local byte arrays and their prefixes. They cannot cross local
 call boundaries, enter aggregates or escape as return values. Other external calls, unresolved
 trait dispatch, general mutable references, input enums, nested struct inputs, floats and
-unsupported statements fail as UNKNOWN. Reachable loops and recursive calls also remain UNKNOWN.
+unsupported statements fail as UNKNOWN. Finite loops can prove through complete symbolic
+unrolling. No path is silently truncated: an unfinished exploration at the step limit fails as
+UNKNOWN. Recursive calls still require an invariant and remain UNKNOWN.
 
 --entry selects roots for verification as well as call traces. Without entries, all inventoried
 local bodies must pass. cargo mir-checker --verify applies this mode to Cargo workspace members.
@@ -188,7 +195,8 @@ cargo deny check
 prek run --all-files --stage manual
 ```
 
-See docs/stages.md for the staged plan and crate READMEs for implementation boundaries.
+See docs/proofs.md for how obligations are generated and what the proof trusts, docs/stages.md
+for the staged plan and crate READMEs for implementation boundaries.
 
 ## Real-code fixtures
 
@@ -213,3 +221,17 @@ length rules with solver models. Removing an accessor precondition exposes the p
 failure. The fixture also contains intentionally failing call-bound harnesses; verifying every
 body, including derived methods, is expected to fail. These selected-root results do not establish
 whole-crate coverage. See examples/can-frame/README.md for provenance and the exact proof scope.
+
+The larger examples/can-frame/src/bus.rs fixture preserves the original bus validator and both
+helpers. The validator has 44 MIR blocks, nested loops, enum matches and collision/FD assertions.
+Two three-device configurations prove for symbolic IDs and slots satisfying their declared bounds
+on the host and ARM target. Five invalid configurations are refuted with solver models and replay
+as runtime panics. The arbitrary-slice validator entry itself remains UNKNOWN; these proofs cover
+the selected configuration families.
+
+```sh
+cargo test --locked -p mir-checker --test compiler \
+  nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm
+cargo test --locked -p mir-checker --test compiler \
+  invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted
+```

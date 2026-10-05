@@ -119,3 +119,26 @@ The compiler suite has 31 passing tests, plus the metadata behavior test and ind
 runtime checks covering IDs, lengths zero through 65 and every accepted payload index. Formatting,
 warnings-denied Clippy, release builds, dependency checks and manual hooks pass. These selected-root
 results are not whole-crate coverage or a formal verification of the translator.
+
+## Stage 7: larger bus validator
+
+The vendored Use enum, both helper methods and check retain their original bodies. The validator
+has 44 MIR blocks in the recorded build, including nested loops, enum matches, ID and slot checks,
+pairwise collisions and FD compatibility. Two three-device configuration families prove with
+symbolic IDs and slots on aarch64-apple-darwin and thumbv7em-none-eabihf. Five invalid families are
+refuted with solver models and replay as runtime panics in the original validator.
+
+The engine now follows constructed local enums and small constructed non-byte arrays. Indexing
+requires a uniquely determined index on the current path. Loops are completely unrolled within
+the existing execution budget; arbitrary input slices and larger loop domains remain unknown.
+The arbitrary &[Use] validator entry itself is unknown, rather than a whole-domain proof.
+
+Negative assertion paths exposed formatting setup before panic_fmt. A narrow compiler/type-checked
+model constructs opaque formatting arguments from evaluated static strings. Dynamic formatting
+and similarly named user methods remain unmodeled. Finite-loop tests check exact return values and
+panics after later iterations. Infinite or over-budget loops fail as unknown. Temporarily treating
+the execution limit as successful completion makes the cutoff regression fail; it was restored.
+
+There are 37 compiler integration tests, one metadata behavior test and seven vendored runtime
+tests. Formatting, warnings-denied Clippy, host and ARM release builds, dependency checks and manual
+hooks pass. docs/proofs.md records the mechanism, trusted components and remaining coverage gaps.

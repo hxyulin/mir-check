@@ -2,8 +2,9 @@
 
 Frame and FdFrame are copied from fleet-2027/shared/can-frame/src/lib.rs at commit
 b81a247a3295b13553087f5e328f201944a1eb61. The source is MIT OR Apache-2.0, matching this repository.
-The excerpt stops before Use and the bus-ID checker; those loop and enum properties are outside
-this experiment. src/upstream.rs is the unmodified excerpt. src/lib.rs adds metadata contracts;
+The first excerpt stops before Use and the bus-ID checker. A second excerpt in bus_upstream.rs
+preserves Use, both helpers and check; bus.rs adds annotations and verification harnesses.
+src/upstream.rs is the unmodified excerpt. src/lib.rs adds metadata contracts;
 the six method bodies remain unchanged and a regression test compares them to the snapshot.
 
 The fixture is a separate no_std crate. Only this vendored crate depends on mir-contracts.
@@ -35,7 +36,8 @@ and the payload harnesses for every accepted byte.
 
 The analysis trusts pinned core models for byte prefix indexing, slice length, u8-to-usize
 conversion and exact byte copies into owned local arrays. Reports list those models. General
-mutable aliases, loops, derived implementations and arbitrary dependencies remain unsupported.
+mutable aliases, derived implementations and arbitrary dependencies remain unsupported. Finite
+loops can prove only when every feasible path finishes within the execution budget.
 These are selected-root proofs, not a proof of every function or caller in the original crate.
 
 From the mir-checker repository root:
@@ -51,3 +53,28 @@ cargo build --locked --release --manifest-path examples/can-frame/Cargo.toml \
 Compiler integration tests locate the pinned proc-macro artifact and select proof roots directly.
 Full-crate cargo mir-checker --verify is expected to fail because it selects the deliberately bad
 call-bound harnesses and unsupported derived methods too.
+
+The bus validator's unchanged body contains nested loops, enum matches, two helper calls and
+assertions for ID validity, slot validity, collisions and FD compatibility. It has 44 MIR blocks
+in the recorded analysis build. shared_bus proves all classic three-device configurations with
+one exclusive ID and two distinct slots on another ID. fd_bus proves three distinct IDs containing
+a classic frame, a shared slot and an FD frame, with every device FD tolerant. IDs and slots remain
+symbolic; the harness requires the stated validity, distinctness and compatibility conditions.
+
+Both configuration families prove on the host and thumbv7em-none-eabihf. Five invalid families
+produce solver models: duplicate slots, out-of-range slots, duplicate frame IDs, out-of-range IDs
+and an FD-intolerant device sharing a bus with an FD frame. Runtime tests replay each failure in
+the original validator and exercise representative accepted IDs and all four slots.
+
+These results do not prove check for an arbitrary &[Use]. Root inputs of that type are still
+unsupported. The engine follows constructed local variants and small arrays, with each loop index
+uniquely determined on its path. The loop must completely finish; exceeding the 256-block budget
+returns UNKNOWN. A narrow trusted model for static formatting arguments permits the validator's
+literal panic messages; dynamic formatting and user formatters remain unsupported.
+
+```sh
+cargo test --locked -p mir-checker --test compiler \
+  nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm
+cargo test --locked -p mir-checker --test compiler \
+  invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted
+```

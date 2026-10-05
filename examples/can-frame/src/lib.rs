@@ -14,6 +14,8 @@
 
 use mir_contracts::{ensures, no_panic, requires};
 
+pub mod bus;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Frame {
     id: u16,

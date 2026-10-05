@@ -12,11 +12,21 @@ impl<'tcx> Engine<'tcx> {
         span: Span,
     ) -> Result<Option<Value>, String> {
         if self.tcx.lang_items().get(LangItem::SliceLen) == Some(callee) {
-            let [Value::Bytes { length, .. } | Value::MutableBytes { length, .. }] = values else {
+            let [receiver] = values else {
                 return Err("slice len receiver is not modeled".to_owned());
             };
             self.record_model(callee, "slice length");
-            return Ok(Some((**length).clone()));
+            return match receiver {
+                Value::Bytes { length, .. } | Value::MutableBytes { length, .. } => {
+                    Ok(Some((**length).clone()))
+                }
+                Value::Elements(elements) => Ok(Some(symbolic::integer(
+                    elements.len() as u128,
+                    u32::from(self.tcx.sess.target.pointer_width),
+                    false,
+                ))),
+                _ => Err("slice len receiver is not modeled".to_owned()),
+            };
         }
         let signature = self
             .tcx
@@ -38,6 +48,25 @@ impl<'tcx> Engine<'tcx> {
             None
         };
         let name = self.tcx.item_name(callee);
+        if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+            && matches!(
+                self.tcx.type_of(parent).instantiate(self.tcx, args).skip_norm_wip().kind(),
+                ty::Adt(def, _) if self.tcx.lang_items().get(LangItem::FormatArguments)
+                    == Some(def.did())
+            )
+            && (name == Symbol::intern("from_str") || name == Symbol::intern("from_str_nonconst"))
+            && signature.inputs().len() == 1
+            && matches!(signature.inputs()[0].kind(), ty::Ref(_, element, mutability)
+                if element.is_str() && !mutability.is_mut())
+            && matches!(signature.output().kind(), ty::Adt(def, _)
+                if self.tcx.lang_items().get(LangItem::FormatArguments) == Some(def.did()))
+        {
+            let [Value::StaticText] = values else {
+                return Err("format model requires an evaluated static string".to_owned());
+            };
+            self.record_model(callee, "static formatting arguments; opaque panic payload");
+            return Ok(Some(Value::FormatArguments));
+        }
         let index = self
             .tcx
             .lang_items()

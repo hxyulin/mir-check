@@ -22,6 +22,9 @@ pub enum Value {
         length: Box<Value>,
     },
     Tuple(Vec<Value>),
+    Elements(Vec<Value>),
+    StaticText,
+    FormatArguments,
     Unit,
 }
 
@@ -30,8 +33,15 @@ impl Value {
         match self {
             Self::MutableBytes { .. } => true,
             Self::Adt { fields, .. } => fields.iter().any(|(_, value)| value.contains_mutable()),
-            Self::Tuple(fields) => fields.iter().any(Self::contains_mutable),
-            Self::Bool(_) | Self::Int { .. } | Self::Bytes { .. } | Self::Unit => false,
+            Self::Tuple(fields) | Self::Elements(fields) => {
+                fields.iter().any(Self::contains_mutable)
+            }
+            Self::Bool(_)
+            | Self::Int { .. }
+            | Self::Bytes { .. }
+            | Self::StaticText
+            | Self::FormatArguments
+            | Self::Unit => false,
         }
     }
 

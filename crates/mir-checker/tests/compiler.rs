@@ -933,6 +933,14 @@ fn vendored_source() -> PathBuf {
 }
 
 fn verify_vendored(path: &Path, entries: &[&str], rustc_args: &[&str]) -> (Output, Report) {
+    let sibling = path.with_file_name("bus.rs");
+    if !sibling.exists()
+        && std::fs::read_to_string(path)
+            .unwrap()
+            .contains("pub mod bus;")
+    {
+        std::fs::copy(vendored_source().with_file_name("bus.rs"), sibling).unwrap();
+    }
     let directory = Directory::new();
     let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
         .parent()
@@ -1202,4 +1210,279 @@ pub fn caller(value: u8) -> u8 {
             .iter()
             .any(|obligation| obligation.detail.contains("mutable"))
     );
+}
+
+#[test]
+fn the_vendored_bus_validator_and_helpers_keep_the_original_bodies() {
+    fn bodies(source: &str) -> std::collections::BTreeMap<String, String> {
+        use quote::ToTokens;
+        let mut bodies = std::collections::BTreeMap::new();
+        for item in syn::parse_file(source).unwrap().items {
+            match item {
+                syn::Item::Fn(function) if function.sig.ident == "check" => {
+                    bodies.insert(
+                        "check".to_owned(),
+                        function.block.to_token_stream().to_string(),
+                    );
+                }
+                syn::Item::Impl(implementation) => {
+                    for item in implementation.items {
+                        if let syn::ImplItem::Fn(method) = item {
+                            bodies.insert(
+                                method.sig.ident.to_string(),
+                                method.block.to_token_stream().to_string(),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        bodies
+    }
+    let root = vendored_source().parent().unwrap().to_owned();
+    let original = bodies(&std::fs::read_to_string(root.join("bus_upstream.rs")).unwrap());
+    let annotated = bodies(&std::fs::read_to_string(root.join("bus.rs")).unwrap());
+    assert_eq!(original.len(), 3);
+    assert_eq!(original, annotated);
+}
+
+#[test]
+fn nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm() {
+    let entries = ["bus::shared_bus", "bus::fd_bus"];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let (output, report) = verify_vendored(&vendored_source(), &entries, &args);
+        for entry in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == entry)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status,
+                ProofStatus::Proved,
+                "{entry}: {:?}",
+                proof.obligations
+            );
+            assert!(!proof.assumptions.is_empty());
+            assert!(
+                proof
+                    .obligations
+                    .iter()
+                    .any(|obligation| obligation.function == "bus::check"
+                        && matches!(obligation.kind, mir_checker::ObligationKind::PanicSafety))
+            );
+        }
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted() {
+    let entries = [
+        "bus::duplicate_slot",
+        "bus::invalid_slot",
+        "bus::incompatible_fd",
+        "bus::duplicate_id",
+        "bus::invalid_id",
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let (output, report) = verify_vendored(&vendored_source(), &entries, &args);
+        assert!(!output.status.success());
+        for entry in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == entry)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status,
+                ProofStatus::Refuted,
+                "{entry}: {:?}",
+                proof.obligations
+            );
+            assert!(
+                proof
+                    .obligations
+                    .iter()
+                    .any(|obligation| obligation.function == "bus::check"
+                        && obligation.status == ProofStatus::Refuted
+                        && obligation.model.is_some())
+            );
+        }
+    }
+}
+
+#[test]
+fn finite_loops_finish_and_later_panics_are_not_hidden_by_unrolling() {
+    let directory = Directory::new();
+    let path = directory.0.join("loops.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+use mir_contracts::{requires, ensures};
+#[requires(count <= 4)]
+#[ensures(result == count)]
+pub fn finite(count: u8) -> u8 {
+    let mut done = 0;
+    while done < count { done += 1; }
+    done
+}
+pub fn late_panic() {
+    let mut done = 0;
+    while done < 3 { done += 1; }
+    assert!(done < 3);
+}
+pub fn nonterminating() { loop {} }
+pub fn beyond_budget() {
+    let mut done = 0;
+    while done < 300 { done += 1; }
+}
+"#,
+    )
+    .unwrap();
+    let entries = ["finite", "late_panic", "nonterminating", "beyond_budget"];
+    let (output, report) = verify_vendored(&path, &entries, &[]);
+    assert!(!output.status.success());
+    for (entry, status) in [
+        ("finite", ProofStatus::Proved),
+        ("late_panic", ProofStatus::Refuted),
+        ("nonterminating", ProofStatus::Unknown),
+        ("beyond_budget", ProofStatus::Unknown),
+    ] {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, status, "{entry}: {:?}", proof.obligations);
+        if status == ProofStatus::Unknown {
+            assert!(
+                proof
+                    .obligations
+                    .iter()
+                    .any(|obligation| obligation.detail.contains("step limit"))
+            );
+        }
+    }
+}
+
+#[test]
+fn arbitrary_enum_slices_and_ambiguous_non_byte_indices_remain_unknown() {
+    let (output, report) = verify_vendored(&vendored_source(), &["bus::check"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "bus::check")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Unknown);
+
+    let directory = Directory::new();
+    let path = directory.0.join("ambiguous_index.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+use mir_contracts::requires;
+#[requires(index < 2)]
+pub fn read(first: u16, second: u16, index: usize) -> u16 {
+    let values = [first, second];
+    values[index]
+}
+"#,
+    )
+    .unwrap();
+    let (output, report) = verify_vendored(&path, &["read"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "read")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Unknown);
+    assert!(
+        proof
+            .obligations
+            .iter()
+            .any(|obligation| obligation.detail.contains("not uniquely determined"))
+    );
+}
+
+#[test]
+fn static_panic_payloads_are_modeled_without_trusting_user_or_dynamic_formatting() {
+    let directory = Directory::new();
+    let path = directory.0.join("formatting.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+use mir_contracts::requires;
+#[requires(value == 1)]
+pub const fn literal(value: u8) {
+    assert!(value == 0, "expected zero");
+}
+struct User;
+impl User {
+    fn from_str(_: &'static str) -> Self { panic!(); }
+}
+pub fn fake() { let _ = User::from_str("text"); }
+pub fn dynamic(value: u8) { panic!("value: {value}"); }
+"#,
+    )
+    .unwrap();
+    let entries = ["literal", "fake", "dynamic"];
+    let (output, report) = verify_vendored(&path, &entries, &[]);
+    assert!(!output.status.success());
+    for (entry, status) in [
+        ("literal", ProofStatus::Refuted),
+        ("fake", ProofStatus::Refuted),
+        ("dynamic", ProofStatus::Unknown),
+    ] {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, status, "{entry}: {:?}", proof.obligations);
+        if entry == "literal" {
+            assert!(
+                proof
+                    .models
+                    .iter()
+                    .any(|model| model.contains("static formatting arguments"))
+            );
+        } else {
+            assert!(proof.models.is_empty());
+        }
+    }
 }

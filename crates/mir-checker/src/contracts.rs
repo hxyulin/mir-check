@@ -182,7 +182,12 @@ fn evaluate(
         {
             match evaluate(&expr.receiver, bindings, pointer_bits, None)? {
                 Value::Bytes { length, .. } => Ok(*length),
-                _ => Err("contract len requires a byte slice or array".to_owned()),
+                Value::Elements(elements) => Ok(symbolic::integer(
+                    elements.len() as u128,
+                    pointer_bits,
+                    false,
+                )),
+                _ => Err("contract len requires a modeled slice or array".to_owned()),
             }
         }
         _ => Err("unsupported or impure contract expression".to_owned()),

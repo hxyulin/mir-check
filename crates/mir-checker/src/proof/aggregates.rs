@@ -2,6 +2,7 @@ use super::*;
 use rustc_index::IndexVec;
 
 const MAX_ARRAY_BYTES: u64 = 128;
+const MAX_ARRAY_ELEMENTS: usize = 16;
 
 impl<'tcx> Engine<'tcx> {
     pub(super) fn struct_input(
@@ -72,11 +73,21 @@ impl<'tcx> Engine<'tcx> {
                     data,
                 })
             }
+            AggregateKind::Array(_) => {
+                if values.len() > MAX_ARRAY_ELEMENTS {
+                    return Err("fixed array element model size limit reached".to_owned());
+                }
+                Ok(Value::Elements(values))
+            }
             AggregateKind::Adt(id, variant, _, _, active) if active.is_none() => {
                 let def = self.tcx.adt_def(*id);
-                if !def.is_struct() && self.tcx.lang_items().get(LangItem::Option) != Some(*id) {
+                if !def.is_struct()
+                    && !(def.is_enum() && id.is_local())
+                    && self.tcx.lang_items().get(LangItem::Option) != Some(*id)
+                {
                     return Err(
-                        "only structs and constructed Option variants are modeled".to_owned()
+                        "only structs, constructed local enums and Option variants are modeled"
+                            .to_owned(),
                     );
                 }
                 let layout = def.variant(*variant);
@@ -102,6 +113,32 @@ impl<'tcx> Engine<'tcx> {
             }
             _ => Err("unsupported aggregate kind".to_owned()),
         }
+    }
+
+    pub(super) fn fixed_element(
+        &self,
+        elements: &[Value],
+        index: &Value,
+        conditions: &[String],
+    ) -> Result<Value, String> {
+        let (_, bits, signed) = index.integer()?;
+        if signed || bits != u32::from(self.tcx.sess.target.pointer_width) {
+            return Err("fixed array index type mismatch".to_owned());
+        }
+        for (position, element) in elements.iter().enumerate() {
+            let equal = symbolic::binary(
+                "eq",
+                index.clone(),
+                symbolic::integer(position as u128, bits, false),
+            )?
+            .boolean()?;
+            let mut different = conditions.to_vec();
+            different.push(symbolic::not(&equal));
+            if !self.feasible(&different)? {
+                return Ok(element.clone());
+            }
+        }
+        Err("fixed non-byte array index is not uniquely determined on this path".to_owned())
     }
 
     pub(super) fn repeated_bytes(

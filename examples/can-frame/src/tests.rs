@@ -28,3 +28,56 @@ fn constructors_preserve_valid_ids_lengths_and_payloads() {
         }
     }
 }
+
+#[test]
+fn distinct_classic_ids_and_slots_and_tolerant_fd_buses_are_accepted() {
+    for frame_id in [0, 1, 0x7FF] {
+        for shared_id in [0, 1, 0x7FF] {
+            if frame_id == shared_id {
+                continue;
+            }
+            for first_slot in 0..4 {
+                for second_slot in 0..4 {
+                    if first_slot != second_slot {
+                        super::bus::shared_bus(frame_id, shared_id, first_slot, second_slot);
+                    }
+                }
+                for fd_id in [0, 1, 0x7FF] {
+                    if fd_id != frame_id && fd_id != shared_id {
+                        super::bus::fd_bus(frame_id, shared_id, fd_id, first_slot);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "same slot")]
+fn a_duplicate_slot_panics_in_the_original_validator() {
+    super::bus::duplicate_slot(0x200, 2);
+}
+
+#[test]
+#[should_panic(expected = "four slots")]
+fn a_slot_past_three_panics_in_the_original_validator() {
+    super::bus::invalid_slot(0x200, 4);
+}
+
+#[test]
+#[should_panic(expected = "cannot tolerate FD")]
+fn an_incompatible_fd_bus_panics_in_the_original_validator() {
+    super::bus::incompatible_fd(0x200, 0x100);
+}
+
+#[test]
+#[should_panic(expected = "same CAN ID")]
+fn a_duplicate_frame_id_panics_in_the_original_validator() {
+    super::bus::duplicate_id(0x200);
+}
+
+#[test]
+#[should_panic(expected = "11 bits")]
+fn an_id_past_eleven_bits_panics_in_the_original_validator() {
+    super::bus::invalid_id(0x800);
+}

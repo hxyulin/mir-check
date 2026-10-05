@@ -21,13 +21,16 @@ do not need rustc internals. Inventory remains separate from the opt-in proof en
 
 Proof mode interprets a restricted subset of typed MIR, uses exact SMT bit-vectors for integer
 semantics and follows actual arguments and return values through local calls. Z3 runs as a
-subprocess. Every reachable panic condition must be unsatisfiable; unsupported behavior, loops,
-recursion and resource limits remain unknown and cause verification failure. No dependency
-analysis is present. Explicit trusted core models implement byte slice lengths, prefix indexing,
-u8-to-usize conversion and copying into owned local byte arrays. Their panic conditions are
-checked and their use is listed in each proof report. General mutation and mutable borrows across
-calls remain unsupported. Struct fields and constructed core Option values carry actual return
-facts through local calls; struct inputs do not acquire implicit invariants.
+subprocess. Every reachable panic condition must be unsatisfiable; unsupported behavior,
+recursion and resource limits remain unknown and cause verification failure. Finite loops are
+unrolled until every feasible path completes; unfinished paths never become a passing result.
+No dependency analysis is present. Explicit trusted core models implement slice lengths and indexing,
+u8-to-usize conversion, copying into owned local byte arrays and constructing opaque formatting
+arguments from evaluated static strings. Range and copy panic conditions are checked; model use
+is listed in each proof report. General mutation and mutable borrows across calls remain unsupported.
+Struct fields, constructed local enums and core Option values carry return facts through local calls.
+Small constructed non-byte arrays support uniquely determined indices;
+struct inputs do not acquire implicit invariants.
 
 The contract evaluator accepts pure comparisons and boolean predicates,
 with read-only byte lengths, modeled struct fields, integer casts and restricted Option matches.
@@ -41,3 +44,9 @@ unmodified source excerpt before testing analysis coverage. All six methods and 
 round-trip harnesses prove on the host and thumbv7em-none-eabihf. Mutation tests reject broken
 bounds, invalid IDs or FD lengths and lost payload copies. Separate cases reject similarly named
 user methods and keep unsupported mutable call boundaries unknown.
+
+The bus fixture adds a 44-block validator with nested loops, helper calls and enum matches. Tests
+prove two symbolic three-device configurations on the host and ARM target and refute five invalid
+configurations. Arbitrary enum slices and ambiguous non-byte indices remain unknown. Loop tests
+cover finite bounded domains, failures after later iterations, nontermination and the step limit.
+Static panic payload models do not extend to dynamic formatting or similarly named user methods.

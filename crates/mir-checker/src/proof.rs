@@ -11,7 +11,7 @@ use rustc_middle::mir::{
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::Span;
 use rustc_span::def_id::DefId;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 const MAX_STEPS: usize = 256;
 const MAX_CALL_DEPTH: usize = 8;
@@ -24,7 +24,6 @@ mod builtins;
 struct State {
     locals: Vec<Option<Value>>,
     conditions: Vec<String>,
-    visited: BTreeSet<usize>,
 }
 
 struct Return {
@@ -118,7 +117,11 @@ impl<'tcx> Engine<'tcx> {
                 return Ok(());
             }
             Value::Unit => "()".to_owned(),
-            Value::Tuple(_) | Value::MutableBytes { .. } => {
+            Value::Tuple(_)
+            | Value::Elements(_)
+            | Value::MutableBytes { .. }
+            | Value::StaticText
+            | Value::FormatArguments => {
                 return Err("argument binding is unsupported".to_owned());
             }
         };
@@ -360,7 +363,6 @@ impl<'tcx> Engine<'tcx> {
         let mut state = State {
             locals: vec![None; body.local_decls.len()],
             conditions,
-            visited: BTreeSet::new(),
         };
         for (local, argument) in body.args_iter().zip(arguments) {
             state.locals[local.as_usize()] = Some(argument);
@@ -374,9 +376,6 @@ impl<'tcx> Engine<'tcx> {
             }
             if !self.feasible(&state.conditions)? {
                 continue;
-            }
-            if !state.visited.insert(block.as_usize()) {
-                return Err("a reachable loop requires an invariant".to_owned());
             }
             for statement in &body.basic_blocks[block].statements {
                 self.statement(id, body, &mut state, &statement.kind)
@@ -617,7 +616,10 @@ impl<'tcx> Engine<'tcx> {
             value = match (projection, value) {
                 (
                     ProjectionElem::Deref,
-                    value @ (Value::Bytes { .. } | Value::Adt { .. } | Value::MutableBytes { .. }),
+                    value @ (Value::Bytes { .. }
+                    | Value::Adt { .. }
+                    | Value::MutableBytes { .. }
+                    | Value::Elements(_)),
                 ) => value,
                 (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
                     .get(field.as_usize())
@@ -655,6 +657,12 @@ impl<'tcx> Engine<'tcx> {
                         signed: false,
                     }
                 }
+                (ProjectionElem::Index(index), Value::Elements(elements)) => {
+                    let index = state.locals[index.as_usize()]
+                        .as_ref()
+                        .ok_or("index is unavailable")?;
+                    self.fixed_element(&elements, index, &state.conditions)?
+                }
                 _ => return Err(format!("unsupported place projection {projection:?}")),
             };
         }
@@ -674,6 +682,18 @@ impl<'tcx> Engine<'tcx> {
                 let ty = constant.const_.ty();
                 if matches!(ty.kind(), ty::Tuple(fields) if fields.is_empty()) {
                     return Ok(Value::Unit);
+                }
+                if matches!(ty.kind(), ty::Ref(_, element, mutability)
+                    if element.is_str() && !mutability.is_mut())
+                    && matches!(
+                        constant.const_,
+                        rustc_middle::mir::Const::Val(
+                            rustc_middle::mir::ConstValue::Slice { .. },
+                            _
+                        )
+                    )
+                {
+                    return Ok(Value::StaticText);
                 }
                 let bits = constant
                     .const_
@@ -700,7 +720,10 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::Use(operand, _) => self.operand(id, body, state, operand),
             Rvalue::Ref(_, BorrowKind::Shared, place) => {
                 let value = self.place(state, *place)?;
-                if matches!(value, Value::Bytes { .. } | Value::Adt { .. }) {
+                if matches!(
+                    value,
+                    Value::Bytes { .. } | Value::Adt { .. } | Value::Elements(_)
+                ) {
                     Ok(value)
                 } else {
                     Err("only byte-array and slice reborrows are modeled".to_owned())
@@ -775,6 +798,11 @@ impl<'tcx> Engine<'tcx> {
                         signed: true,
                     }),
                     (UnOp::PtrMetadata, Value::Bytes { length, .. }) => Ok(*length),
+                    (UnOp::PtrMetadata, Value::Elements(elements)) => Ok(symbolic::integer(
+                        elements.len() as u128,
+                        u32::from(self.tcx.sess.target.pointer_width),
+                        false,
+                    )),
                     _ => Err("unsupported unary operation".to_owned()),
                 }
             }
@@ -790,12 +818,15 @@ impl<'tcx> Engine<'tcx> {
                     return Err("unsupported pointer coercion".to_owned());
                 };
                 let ty::Slice(element) = element.kind() else {
-                    return Err("only byte-slice coercions are modeled".to_owned());
+                    return Err("only slice coercions are modeled".to_owned());
                 };
+                let value = self.operand(id, body, state, operand)?;
+                if !mutability.is_mut() && matches!(value, Value::Elements(_)) {
+                    return Ok(value);
+                }
                 if *element != self.tcx.types.u8 {
                     return Err("only byte-slice coercions are modeled".to_owned());
                 }
-                let value = self.operand(id, body, state, operand)?;
                 if matches!(
                     (&value, mutability.is_mut()),
                     (Value::Bytes { .. }, false) | (Value::MutableBytes { .. }, true)
