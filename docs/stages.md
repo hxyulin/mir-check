@@ -277,3 +277,17 @@ guarded call, refutes a violated dependency precondition and an overflow in the 
 and preserves an unknown result for unsupported float bit observation. Opt-out calls remain
 unknown because their bodies are absent. Tests also preserve configuration and encoded flags.
 There are 54 compiler integration tests and one metadata test.
+
+## Stage 14: measure fleet with retained dependency bodies
+
+The same 32 ARM units retain all 149 previously proved and all 46 previously refuted function
+outcomes. Dependency retention adds 47 proofs and 25 refutations, leaving 196 proved, 71 refuted
+and 709 unknown function-declaration roots. Missing dependency MIR drops from 237 to 16 first
+reported blockers. The remainder consists of prebuilt core helpers and a foreign critical-section
+function; no missing body is assumed safe.
+
+New passes include engineer arm/head controller constructors, robot PID configuration helpers
+and CAN bus constructors/readers. Newly reachable constant and pointer/mutation gaps become more
+visible. Independent mutable controller updates remain unsupported. The new survey data preserves
+the original/intermediate measurements and records transitions, first-gap reasons and fresh build
+costs. Verification of the already-built units takes 63.8 seconds on the development machine.
