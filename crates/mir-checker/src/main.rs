@@ -18,10 +18,14 @@ use rustc_span::Span;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+mod inventory;
+
 struct Checker {
     json: bool,
     report_dir: Option<PathBuf>,
     error: Option<String>,
+    entries: Vec<String>,
+    rustc_arguments: Vec<String>,
 }
 
 impl Callbacks for Checker {
@@ -35,9 +39,14 @@ impl Callbacks for Checker {
         _compiler: &interface::Compiler,
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
-        let report = collect(tcx);
-        if let Err(error) = self.emit(&report) {
-            self.error = Some(error.to_string());
+        let mut report = collect(tcx, &self.rustc_arguments);
+        match mir_checker::build_traces(&mut report, &self.entries) {
+            Ok(()) => {
+                if let Err(error) = self.emit(&report) {
+                    self.error = Some(error.to_string());
+                }
+            }
+            Err(error) => self.error = Some(error),
         }
         if self.report_dir.is_some() {
             Compilation::Continue
@@ -62,7 +71,7 @@ impl Checker {
     }
 }
 
-fn collect(tcx: TyCtxt<'_>) -> Report {
+fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     let mut functions = Vec::new();
     for &id in tcx.mir_keys(()) {
         if !matches!(
@@ -78,24 +87,29 @@ fn collect(tcx: TyCtxt<'_>) -> Report {
             .filter_map(|attribute| attribute.doc_str())
             .filter_map(|doc| parse_contract(doc.as_str()))
             .collect();
+        let (sites, local_calls) = inventory::collect(tcx, body);
         functions.push(Function {
             name: tcx.def_path_str(id.to_def_id()),
             source: source(tcx, tcx.def_span(id)),
             basic_blocks: body.basic_blocks.len(),
             arguments: body.arg_count,
             contracts,
+            sites,
+            local_calls,
         });
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 1,
+        schema_version: 2,
         compiler: env!("MIR_CHECKER_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),
         panic_strategy: format!("{:?}", tcx.sess.panic_strategy()).to_lowercase(),
         overflow_checks: tcx.sess.overflow_checks(),
         mir_phase: "optimized_mir with mir-opt-level=0".to_owned(),
+        rustc_arguments: arguments.to_vec(),
         functions,
+        traces: Vec::new(),
     }
 }
 
@@ -138,6 +152,8 @@ fn main() -> ExitCode {
         json: false,
         report_dir,
         error: None,
+        entries: Vec::new(),
+        rustc_arguments: Vec::new(),
     };
     if checker.report_dir.is_some() {
         if args.len() > 1 {
@@ -150,14 +166,27 @@ fn main() -> ExitCode {
             || args.len() == 1
         {
             println!(
-                "Usage: mir-checker [--json] -- <rustc arguments>\n\
+                "Usage: mir-checker [--json] [--entry FUNCTION] -- <rustc arguments>\n\
                 Inventory typed MIR using nightly-2026-09-22. No properties are proved yet."
             );
             return ExitCode::SUCCESS;
         }
-        if args.get(1).is_some_and(|arg| arg == "--json") {
-            checker.json = true;
-            args.remove(1);
+        loop {
+            match args.get(1).map(String::as_str) {
+                Some("--json") => {
+                    checker.json = true;
+                    args.remove(1);
+                }
+                Some("--entry") => {
+                    args.remove(1);
+                    if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
+                        eprintln!("mir-checker: --entry requires a function name");
+                        return ExitCode::FAILURE;
+                    }
+                    checker.entries.push(args.remove(1));
+                }
+                _ => break,
+            }
         }
         if args.get(1).is_some_and(|arg| arg == "--") {
             args.remove(1);
@@ -172,10 +201,11 @@ fn main() -> ExitCode {
             env!("MIR_CHECKER_SYSROOT").to_owned(),
         ]);
     }
+    checker.rustc_arguments = args[1..].to_vec();
     let status =
         rustc_driver::catch_with_exit_code(|| rustc_driver::run_compiler(&args, &mut checker));
     if let Some(error) = checker.error {
-        eprintln!("mir-checker: cannot write report: {error}");
+        eprintln!("mir-checker: {error}");
         return ExitCode::FAILURE;
     }
     status

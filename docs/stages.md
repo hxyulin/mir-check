@@ -25,3 +25,24 @@ collection, Cargo feature forwarding and repeat analysis. Removing an uncalled g
 inventory makes its integration test fail; the mutation was restored.
 
 Formatting, warnings-denied Clippy, release builds, dependency checks and manual hooks pass.
+
+## Stage 2 evidence
+
+The inventory detects bounds, arithmetic and explicit panic sites with panic=abort. Tests cover
+optional overflow settings, signed division overflow, unknown external/trait/indirect calls,
+destructors, guarded accesses, local call paths and recursion. Sites stay unverified and unknown
+entry selection fails. A user function named panic_fmt remains an ordinary local call.
+
+The existing CAN frame source was analyzed read-only on aarch64-apple-darwin and
+thumbv7em-none-eabihf, with aborting panics and overflow checks enabled. Both reports contained
+18 bodies and 33 sites, including five panic language-item calls. These are inventory counts,
+not findings that the guarded operations can panic or proofs that they cannot.
+
+The metadata crate also passes its behavior test under stable Rust 1.98.1. It does not evaluate
+even unresolved predicate names or false preconditions at runtime. Verification remains future
+work; unsupported contracts do not become trusted assumptions.
+
+Removing bounds checks from the inventory makes the abort-mode integration test fail; the
+mutation was restored. Formatting, warnings-denied Clippy, release builds, dependency checks
+and manual hooks pass. Compiler and metadata integration tests also cover malformed contracts
+and report-write failures.

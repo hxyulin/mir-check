@@ -4,9 +4,10 @@ A standalone Rust static-analysis experiment using typed MIR from rustc. Panic a
 first goal; verified contracts and restricted effects are intended extensions. This repository
 is independent of fleet-2027 and installs no firmware dependencies.
 
-Stage 1 provides a compiler adapter, a Cargo command and metadata-only contract attributes.
-It inventories local function bodies, including uncalled generic functions, and records contracts
-as pending verification. It does not prove panic freedom or any contract.
+Stages 1 and 2 provide a compiler adapter, a Cargo command, metadata-only contract attributes
+and a panic inventory. The tool enumerates checks, panic entry points and unresolved calls in
+local function bodies, including uncalled generics. Contracts remain pending verification.
+It does not prove panic freedom or any contract.
 
 ## Build and use
 
@@ -16,6 +17,7 @@ adapter uses unstable APIs and must be rebuilt with that exact compiler.
 ```sh
 cargo build --workspace --locked
 target/debug/mir-checker --json -- --crate-type=lib tests/fixtures/bodies.rs
+target/debug/mir-checker --entry root -- --crate-type=lib tests/fixtures/panics.rs
 cargo install --path crates/mir-checker --locked
 ```
 
@@ -37,6 +39,29 @@ and mandatory transformations, rather than source MIR or LLVM IR. The inventory 
 analysis build, not an artifact produced by another compiler. Cargo's target, features, panic
 strategy and overflow settings still matter. Const and static initializer bodies are excluded;
 runtime-capable const functions are included.
+
+## Panic inventory
+
+The report identifies MIR bounds, overflow, division, remainder and compiler-generated validity
+checks. Calls to rustc's panic language items are recognized by compiler identity, including in
+panic=abort builds. A user function with a panic-like name is not treated as a panic entry point.
+Optional overflow checks are marked disabled when the analysis build disables them; signed
+division overflow and division by zero remain active.
+
+External calls, unresolved trait dispatch, function pointers, unavailable local bodies, drop glue
+and inline assembly remain explicit unknown boundaries. Dependency bodies and destructor
+implementations are not followed. Checks under guards are still unverified; their presence does
+not establish a panicking input. An empty inventory does not establish safety either.
+
+In direct mode, --entry FUNCTION can be repeated to request one shortest structural local call
+path to each active site. Names must exactly match the names in the report. Recursive call graphs
+terminate. Paths ignore branch feasibility and generic substitutions, so they are explanations of
+call-graph connectivity, not counterexamples. This option is not yet available in Cargo mode.
+
+JSON schema version 2 includes source locations, block numbers, conditions, unwind actions,
+cleanup flags, structural CFG reachability, local call edges and the compiler arguments. All
+sites have unverified status. A successful exit means compilation and inventory completed; it
+does not mean contracts passed. Compilation, unknown-entry and report-write errors fail the run.
 
 ## Contracts
 

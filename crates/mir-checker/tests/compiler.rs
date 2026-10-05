@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mir_checker::{ContractKind, ContractStatus, Report};
+use mir_checker::{ContractKind, ContractStatus, Report, SiteKind, SiteStatus};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -31,14 +31,156 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn analyze(path: &Path, directory: &Directory, extra_args: &[&str]) -> Output {
+    analyze_from(path, directory, &[], extra_args)
+}
+
+fn analyze_from(
+    path: &Path,
+    directory: &Directory,
+    checker_args: &[&str],
+    rustc_args: &[&str],
+) -> Output {
     Command::new(env!("CARGO_BIN_EXE_mir-checker"))
-        .args(["--json", "--", "--crate-type=lib", "--edition=2024"])
+        .arg("--json")
+        .args(checker_args)
+        .args(["--", "--crate-type=lib", "--edition=2024"])
         .arg(path)
         .arg("--out-dir")
         .arg(&directory.0)
-        .args(extra_args)
+        .args(rustc_args)
         .output()
         .unwrap()
+}
+
+fn has_site(report: &Report, name: &str, kind: SiteKind) -> bool {
+    report
+        .functions
+        .iter()
+        .find(|function| function.name == name)
+        .unwrap()
+        .sites
+        .iter()
+        .any(|site| site.kind == kind && site.enabled && site.cfg_reachable)
+}
+
+#[test]
+fn bounds_arithmetic_and_explicit_panics_remain_visible_with_aborting_panics() {
+    let directory = Directory::new();
+    let report = report(analyze(
+        &fixture("panics.rs"),
+        &directory,
+        &["-Cpanic=abort", "-Coverflow-checks=yes"],
+    ));
+    assert_eq!(report.panic_strategy, "abort");
+    for (function, kind) in [
+        ("indexed", SiteKind::BoundsCheck),
+        ("sum", SiteKind::Overflow),
+        ("quotient", SiteKind::DivisionByZero),
+        ("quotient", SiteKind::Overflow),
+        ("remainder", SiteKind::RemainderByZero),
+        ("explicit_panic", SiteKind::PanicCall),
+        ("assertion", SiteKind::PanicCall),
+    ] {
+        assert!(
+            has_site(&report, function, kind),
+            "missing inventory for {function}"
+        );
+    }
+    assert!(
+        report
+            .functions
+            .iter()
+            .flat_map(|f| &f.sites)
+            .all(|site| matches!(site.status, SiteStatus::Unverified))
+    );
+}
+
+#[test]
+fn overflow_configuration_disables_optional_checks_but_preserves_division_failures() {
+    let directory = Directory::new();
+    let report = report(analyze(
+        &fixture("panics.rs"),
+        &directory,
+        &["-Coverflow-checks=no"],
+    ));
+    assert!(!report.overflow_checks);
+    assert!(!has_site(&report, "sum", SiteKind::Overflow));
+    assert!(has_site(&report, "quotient", SiteKind::Overflow));
+    assert!(has_site(&report, "quotient", SiteKind::DivisionByZero));
+    assert!(has_site(&report, "indexed", SiteKind::BoundsCheck));
+}
+
+#[test]
+fn unresolved_calls_and_destructors_are_explicit_unknown_boundaries() {
+    let directory = Directory::new();
+    let report = report(analyze(&fixture("panics.rs"), &directory, &[]));
+    for (function, kind) in [
+        ("unwrap_option", SiteKind::ExternalCall),
+        ("clamp", SiteKind::ExternalCall),
+        ("dynamic", SiteKind::TraitCall),
+        ("generic", SiteKind::TraitCall),
+        ("indirect", SiteKind::IndirectCall),
+        ("implicit_destructor", SiteKind::Drop),
+    ] {
+        assert!(
+            has_site(&report, function, kind),
+            "missing boundary for {function}"
+        );
+    }
+    assert!(!has_site(&report, "misleading_name", SiteKind::PanicCall));
+    assert!(
+        report
+            .functions
+            .iter()
+            .find(|f| f.name == "misleading_name")
+            .unwrap()
+            .local_calls
+            .iter()
+            .any(|call| call.callee == "panic_fmt")
+    );
+}
+
+#[test]
+fn guarded_accesses_remain_unverified_until_a_proof_engine_exists() {
+    let directory = Directory::new();
+    let report = report(analyze(&fixture("bodies.rs"), &directory, &[]));
+    assert!(has_site(&report, "guarded", SiteKind::BoundsCheck));
+    let text = mir_checker::render(&report);
+    assert!(text.contains("inventory only; no proof"));
+    assert!(!text.contains("PROVED"));
+}
+
+#[test]
+fn entry_traces_follow_local_calls_and_terminate_for_recursion() {
+    let directory = Directory::new();
+    let report = report(analyze_from(
+        &fixture("panics.rs"),
+        &directory,
+        &["--entry", "root", "--entry", "recursive"],
+        &[],
+    ));
+    assert!(report.traces.iter().any(|trace| {
+        trace.functions == ["root", "middle", "indexed"] && trace.kind == SiteKind::BoundsCheck
+    }));
+    assert!(report.traces.iter().any(|trace| {
+        trace.functions == ["recursive", "indexed"] && trace.kind == SiteKind::BoundsCheck
+    }));
+    assert!(report.traces.iter().all(|trace| trace.functions.len() <= 3));
+    assert!(mir_checker::render(&report).contains("feasibility unverified"));
+}
+
+#[test]
+fn an_entry_without_a_local_body_fails_instead_of_producing_an_empty_success() {
+    let directory = Directory::new();
+    let output = analyze_from(
+        &fixture("panics.rs"),
+        &directory,
+        &["--entry", "absent"],
+        &[],
+    );
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("no inventoried local MIR body"));
 }
 
 fn report(output: Output) -> Report {
@@ -76,6 +218,45 @@ fn compiler_errors_fail_analysis_without_a_success_report() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("mismatched types"));
+}
+
+#[test]
+fn a_report_write_failure_fails_the_compiler_wrapper() {
+    let directory = Directory::new();
+    let blocked = directory.0.join("not_a_directory");
+    std::fs::write(&blocked, "blocked").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-checker"))
+        .args(["rustc", "--crate-type=lib", "--edition=2024"])
+        .arg(fixture("bodies.rs"))
+        .arg("--out-dir")
+        .arg(&directory.0)
+        .env("MIR_CHECKER_REPORT_DIR", blocked)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mir-checker:"));
+}
+
+#[test]
+fn malformed_contracts_fail_compilation_without_a_success_report() {
+    let directory = Directory::new();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
+        .parent()
+        .unwrap();
+    let library = find_contract_library(profile).unwrap();
+    let external = format!("mir_contracts={}", library.display());
+    for (attribute, item) in [
+        ("no_panic(value > 0)", "pub fn invalid(value: u8) {}"),
+        ("requires(value >)", "pub fn invalid(value: u8) {}"),
+        ("requires(true)", "pub struct Invalid;"),
+    ] {
+        let path = directory.0.join("invalid_contract.rs");
+        std::fs::write(&path, format!("#[mir_contracts::{attribute}]\n{item}")).unwrap();
+        let output = analyze(&path, &directory, &["--extern", &external]);
+        assert!(!output.status.success(), "accepted {attribute}");
+        assert!(output.stdout.is_empty());
+    }
 }
 
 #[test]
