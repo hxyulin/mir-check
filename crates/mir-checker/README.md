@@ -28,3 +28,6 @@ with read-only byte lengths. It checks caller preconditions and every feasible r
 entry values for parameter names in postconditions. It never assumes a callee summary from
 annotations. Missing names, type errors, unsupported predicates and inconsistent entry domains
 fail verification; passing root metadata is marked verified under preconditions.
+
+Real-code fixtures live in examples/can-frame. Tests compare vendored method bodies to the
+unmodified source excerpt before testing analysis coverage.

@@ -897,3 +897,33 @@ fn cargo_contract_verification_returns_failure_and_preserves_its_report() {
         );
     }
 }
+
+#[test]
+fn the_vendored_frame_methods_keep_the_original_function_bodies() {
+    fn methods(source: &str) -> std::collections::BTreeMap<String, String> {
+        let mut bodies = std::collections::BTreeMap::new();
+        for item in syn::parse_file(source).unwrap().items {
+            if let syn::Item::Impl(implementation) = item {
+                let syn::Type::Path(ty) = *implementation.self_ty else {
+                    panic!("named type expected")
+                };
+                let name = ty.path.get_ident().unwrap().to_string();
+                for item in implementation.items {
+                    if let syn::ImplItem::Fn(method) = item {
+                        use quote::ToTokens;
+                        bodies.insert(
+                            format!("{name}::{}", method.sig.ident),
+                            method.block.to_token_stream().to_string(),
+                        );
+                    }
+                }
+            }
+        }
+        bodies
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/can-frame/src");
+    let original = methods(&std::fs::read_to_string(root.join("upstream.rs")).unwrap());
+    let annotated = methods(&std::fs::read_to_string(root.join("lib.rs")).unwrap());
+    assert_eq!(original.len(), 6);
+    assert_eq!(original, annotated);
+}

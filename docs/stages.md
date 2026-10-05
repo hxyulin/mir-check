@@ -81,3 +81,10 @@ example crate demonstrates guarded byte reads and a bounded increment without ru
 This completes the initial contract slice of stage 4. Loop invariants, abstract interpretation,
 generic substitutions, dependency summaries, preserved type invariants and effect contracts
 remain future work. The analyzer implementation itself has not been formally verified.
+
+## Stage 5: real-code fixture
+
+Frame and FdFrame are vendored from fleet-2027 at b81a247a3295b13553087f5e328f201944a1eb61.
+The original method bodies are preserved and compared against an unmodified source excerpt.
+The fixture adds constructor and accessor contracts without changing the original workspace.
+Runtime checks exercise valid and invalid IDs and all payload lengths from zero through 65.

@@ -175,3 +175,9 @@ prek run --all-files --stage manual
 ```
 
 See docs/stages.md for the staged plan and crate READMEs for implementation boundaries.
+
+## Real-code fixtures
+
+examples/can-frame vendors the Frame and FdFrame slice from fleet-2027 with metadata contracts.
+The original excerpt is retained, and tests check that the six method bodies are unchanged.
+Only the vendored crate depends on mir-contracts; the original workspace remains independent.

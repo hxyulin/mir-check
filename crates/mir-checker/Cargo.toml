@@ -13,6 +13,7 @@ syn.workspace = true
 
 [dev-dependencies]
 mir-contracts = { path = "../mir-contracts" }
+quote.workspace = true
 
 [[bin]]
 name = "mir-checker"
