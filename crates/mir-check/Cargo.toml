@@ -24,3 +24,7 @@ path = "src/main.rs"
 [[bin]]
 name = "cargo-mir-check"
 path = "src/cargo.rs"
+
+[[bin]]
+name = "mir-check-rustc"
+path = "src/compiler.rs"

@@ -3,6 +3,13 @@
 Host compiler adapter and report model. mir-check drives rustc directly; cargo-mir-check
 uses it as a Cargo workspace wrapper and collects per-crate reports in an isolated build directory.
 
+Cargo sets mir-check-rustc as the outer compiler wrapper and mir-check as the workspace wrapper.
+The outer wrapper appends -Zalways-encode-mir=yes and -Zmir-opt-level=0 without rewriting flags.
+It forwards to the workspace analyzer or the pinned compiler, so direct and transitive Cargo
+library dependencies retain ordinary non-inline bodies. Only workspace members emit inventories.
+Use --no-dependency-mir to disable retention. Prebuilt sysroot bodies, foreign declarations and
+unsupported operations remain unknown; retained code is interpreted rather than trusted.
+
 The adapter reads local typed runtime MIR using the pinned compiler and disables MIR
 optimization. It collects function locations, block counts, pending contracts, MIR checks, panic
 language-item calls and unknown call/drop boundaries. Optional entry selection shows structural

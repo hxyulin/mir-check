@@ -34,7 +34,7 @@ values. A downcast must prove the active tag before reading its payload. Reports
 | Branches | Path-sensitive states; discard a branch only after an unsat solver response | No state merging or abstract interpretation |
 | Loops | Complete finite unrolling through every feasible path | No inductive loop invariants; incomplete exploration is UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
-| Dependencies | Execute available instantiated MIR | Missing bodies are not assumed safe |
+| Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Read-only captures and supported generic Fn/FnOnce calls | Mutable captures and function pointers are unsupported |
 | Array map | Explicit traversal model, executing each actual callable body in index order | At most 16 elements; general iterators remain gaps |
 | Integer operations | Arithmetic, overflow flags, comparisons, casts, boolean casts, bit operations and shifts | Optional overflow checks depend on build settings |
@@ -75,7 +75,7 @@ and grouped unknown reasons. An empty inventory or zero selected roots establish
 | CAN frames | Six unchanged methods and two payload-preservation harnesses on host/ARM | Invalid lengths/IDs, relaxed FD rules and broken byte copies are refuted |
 | Bus validator | Two symbolic three-device families through 44-block nested-loop MIR on host/ARM | Five invalid families are refuted/replayed; arbitrary input slices remain UNKNOWN |
 | DR16 parser | Unchanged 42-block body, exact length and decoded bounds on host/ARM without entry assumptions | Bad index and channel mask are refuted; 4,608 sample frames use independent formulas |
-| Generic/dependency calls | Concrete local/foreign bodies and static trait dispatch preserve values | Generic precondition violation and dependency overflow are refuted |
+| Generic/dependency calls | Concrete bodies/static traits; non-inline transitive dependencies on host/ARM, with configuration and encoded flags preserved | Dependency precondition violations and overflow refute; opt-out calls and unsupported retained operations stay UNKNOWN |
 | Read-only callbacks | Captured closures, function items, map and question-mark payload propagation | Mutable captures remain UNKNOWN |
 | Aggregate inputs | Nested/generic structs, tuples, shared byte fields and fixed struct arrays on host/ARM | An off-by-one nested call guard is refuted; mutable/recursive/oversized shapes are UNKNOWN |
 | Floats | Host/ARM tests for NaN, zero signs, rounding, saturation and caller bounds | Bad NaN/zero/index/call assertions are refuted; remainder and raw bits remain UNKNOWN |

@@ -82,7 +82,7 @@ a confirmed Rust failure; mutation and replay tests provide independent evidence
 
 ## Use it in a project
 
-Install both command-line binaries from this checkout:
+Install the analyzer, Cargo command and compiler wrapper from this checkout:
 
 ```sh
 cargo install --path crates/mir-check --locked
@@ -103,6 +103,13 @@ inventories without being verified. Without entries, `--verify` checks every inv
 
 The checker follows reachable callee bodies and verifies their preconditions even when those
 callees are not independently selected as roots. Selecting a root does not verify its callers.
+
+Cargo analysis retains MIR for dependencies by default, including ordinary non-inline functions,
+and disables their MIR optimization. It appends these compiler options through `mir-check-rustc`
+while preserving Cargo configuration, profiles and Rust flags. Dependencies become available
+callee bodies, not independently selected roots. Use `--no-dependency-mir` to compare without
+retention. Prebuilt sysroot libraries are not rebuilt; remaining missing/unsupported bodies fail
+as UNKNOWN.
 Cargo target, features, profile, panic strategy and overflow settings remain part of the result.
 Each run uses a fresh build directory so Cargo caching cannot silently skip analysis.
 

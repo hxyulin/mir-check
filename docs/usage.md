@@ -60,6 +60,37 @@ Selected roots still execute reachable callees and check their call bounds. Unse
 do not acquire a universal proof just because one caller interpreted them with particular values.
 Metadata is marked verified only for independently selected roots that pass all obligations.
 
+## Dependency MIR
+
+Cargo analysis retains dependency MIR by default. The `mir-check-rustc` wrapper appends
+`-Zalways-encode-mir=yes` and `-Zmir-opt-level=0` to compiler invocations. This makes ordinary
+non-generic/non-inline dependency functions available, including transitive and shared path
+crates. Workspace members still produce the independently selected root reports; dependency
+bodies execute only when called by an analyzed root.
+
+The wrapper passes Cargo's arguments unchanged before appending the MIR options. It preserves
+`RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, target configuration, features, profiles, panic strategy
+and overflow settings. As before, mir-check owns the compiler and wrapper settings for its
+isolated analysis build. Dependency MIR optimization is deliberately fixed at level zero, even
+if a profile or user flag requests another MIR level. Code-generation optimization settings are
+preserved. Fresh target directories prevent reuse of dependencies built without these options.
+
+For a baseline or an inventory that does not need retained dependency bodies:
+
+```sh
+cargo mir-check --summary --no-dependency-mir --lib
+```
+
+Install all three binaries with the Cargo install command above, or build the whole workspace;
+`cargo-mir-check` expects both wrappers beside it. A checkout installed before this feature
+needs rebuilding/reinstalling. Direct driver analysis does not rebuild dependencies; its
+`--extern` inputs must already contain the required MIR.
+
+This mode does not rebuild precompiled core/std libraries or provide bodies for foreign
+functions. Having a body also does not imply that its operations are supported: raw pointers,
+mutable state, intrinsics and execution limits can still yield UNKNOWN. Dependency annotations
+continue to produce checked call/return obligations, not trusted summaries.
+
 ## Embedded builds
 
 The pinned toolchain includes thumbv7em-none-eabihf. This analyzes the fixture's ARM build:

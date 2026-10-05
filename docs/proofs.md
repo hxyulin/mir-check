@@ -95,11 +95,13 @@ A solver model is not automatically replayed as a Rust test;
 confirmed examples currently have separate runtime replay tests.
 
 Concrete generic arguments are substituted and normalized before execution. Static trait dispatch
-resolves to a concrete implementation. Available dependency bodies, read-only closures and
-function items are interpreted with actual values. Unsupported shims and missing MIR still fail
-as unknown. Reports identify interpreted instances separately from trusted models. Compiler
-assume intrinsics become validity obligations, so their predicates must be established on the
-current path.
+resolves to a concrete implementation. Available dependency bodies, read-only closures and function
+items are interpreted with actual values. Unsupported shims and missing MIR still fail as unknown.
+Cargo rebuilds direct/transitive dependencies with always-encode-mir and MIR optimization level
+zero, retaining ordinary function bodies without trusting them. The outer wrapper preserves other
+flags; --no-dependency-mir disables retention. Prebuilt sysroot libraries are not rebuilt. Reports
+identify interpreted instances separately from trusted models. Compiler assume intrinsics become
+validity obligations, so their predicates must be established on the current path.
 
 Coverage remains limited by enum/struct slices, general mutation and aliasing, mutable captures,
 unresolved generic inputs, float remainder/bit observation, trait objects, function pointers and

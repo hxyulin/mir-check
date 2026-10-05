@@ -2423,3 +2423,213 @@ fn array_patterns_preserve_minimum_lengths_and_start_and_end_offsets_on_host_and
         }
     }
 }
+
+#[test]
+fn dependency_mir_retention_preserves_transitive_bodies_bounds_and_build_flags_on_host_and_arm() {
+    let directory = Directory::new();
+    let consumer = directory.0.join("consumer");
+    for name in ["consumer", "dependency", "leaf"] {
+        std::fs::create_dir(directory.0.join(name)).unwrap();
+        std::fs::write(
+            directory.0.join(name).join("Cargo.toml"),
+            format!(
+                "[package]\nname='{name}'\nversion='0.1.0'\nedition='2024'\n\
+                 [lib]\npath='lib.rs'\n[workspace]\n[profile.dev]\nopt-level=2\n\
+                 debug=0\noverflow-checks=true\n{}",
+                match name {
+                    "consumer" => "[dependencies]\ndependency={path='../dependency'}\n",
+                    "dependency" => "[dependencies]\nleaf={path='../leaf'}\n",
+                    "leaf" => "",
+                    _ => unreachable!(),
+                }
+            ),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        directory.0.join("leaf/lib.rs"),
+        r#"
+#![no_std]
+#![forbid(unsafe_code)]
+#[cfg(not(configured_build))]
+compile_error!("dependency build flags were lost");
+pub fn increment(value: u8) -> u8 { value + 1 }
+pub fn bits(value: f32) -> u32 { value.to_bits() }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        directory.0.join("dependency/lib.rs"),
+        r#"
+#![no_std]
+#![forbid(unsafe_code)]
+#[doc = "<!-- mir-check:v1:requires:value < 255 -->"]
+#[doc = "<!-- mir-check:v1:ensures:result > value -->"]
+pub fn increment(value: u8) -> u8 { leaf::increment(value) }
+pub fn unchecked(value: u8) -> u8 { leaf::increment(value) }
+pub fn bits(value: f32) -> u32 { leaf::bits(value) }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        consumer.join("lib.rs"),
+        r#"
+#![no_std]
+#![forbid(unsafe_code)]
+#[cfg(not(configured_build))]
+compile_error!("workspace build flags were lost");
+#[cfg(ignored_build)]
+compile_error!("RUSTFLAGS must not override CARGO_ENCODED_RUSTFLAGS");
+pub fn guarded(value: u8) -> u8 {
+    if value < 255 { dependency::increment(value) } else { 0 }
+}
+pub fn bad_call() -> u8 { dependency::increment(255) }
+pub fn overflow() -> u8 { dependency::unchecked(255) }
+pub fn unsupported(value: f32) -> u32 { dependency::bits(value) }
+"#,
+    )
+    .unwrap();
+    std::fs::create_dir(consumer.join(".cargo")).unwrap();
+    std::fs::write(
+        consumer.join(".cargo/config.toml"),
+        "[build]\nrustflags=['--cfg=configured_build','-Cpanic=abort',\
+         '-Coverflow-checks=yes','-Zmir-opt-level=3']\n",
+    )
+    .unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for (retain, encoded) in [(false, false), (true, false), (true, true)] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"));
+            command
+                .args(["--verify", "--summary", "--lib", "--offline"])
+                .current_dir(&consumer)
+                .env_remove("RUSTFLAGS")
+                .env_remove("CARGO_ENCODED_RUSTFLAGS");
+            for entry in ["guarded", "bad_call", "overflow", "unsupported"] {
+                command.args(["--entry", entry]);
+            }
+            if !retain {
+                command.arg("--no-dependency-mir");
+            }
+            if encoded {
+                command.env("RUSTFLAGS", "--cfg=ignored_build");
+                command.env(
+                    "CARGO_ENCODED_RUSTFLAGS",
+                    [
+                        "--cfg=configured_build",
+                        "--cfg=encoded_build=\"two words\"",
+                        "-Cpanic=abort",
+                        "-Coverflow-checks=yes",
+                        "-Zmir-opt-level=3",
+                    ]
+                    .join("\u{1f}"),
+                );
+            }
+            if let Some(target) = target {
+                command.args(["--target", target]);
+            }
+            let output = command.output().unwrap();
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            let stderr = String::from_utf8(output.stderr).unwrap();
+            assert!(!output.status.success(), "{stdout}");
+            let reports = stderr
+                .lines()
+                .find_map(|line| line.strip_prefix("JSON reports: "))
+                .unwrap_or_else(|| panic!("{target:?} {retain} {encoded}: {stderr}"));
+            let paths: Vec<_> = std::fs::read_dir(reports)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .collect();
+            assert_eq!(
+                paths.len(),
+                1,
+                "dependencies must not become root inventories"
+            );
+            let report: Report =
+                serde_json::from_slice(&std::fs::read(&paths[0]).unwrap()).unwrap();
+            assert_eq!(report.crate_name, "consumer");
+            assert!(report.overflow_checks);
+            assert_eq!(report.panic_strategy, "abort");
+            assert!(
+                report
+                    .rustc_arguments
+                    .iter()
+                    .any(|arg| arg == "-Zmir-opt-level=3")
+            );
+            if retain {
+                assert!(
+                    report
+                        .rustc_arguments
+                        .iter()
+                        .any(|arg| arg == "-Zalways-encode-mir=yes")
+                );
+                assert!(
+                    report
+                        .rustc_arguments
+                        .iter()
+                        .any(|arg| arg == "-Zmir-opt-level=0")
+                );
+            }
+            if encoded {
+                assert!(
+                    report
+                        .rustc_arguments
+                        .iter()
+                        .any(|arg| arg == "--cfg=encoded_build=\"two words\"")
+                );
+            }
+            for (name, expected) in [
+                ("guarded", ProofStatus::Proved),
+                ("bad_call", ProofStatus::Refuted),
+                ("overflow", ProofStatus::Refuted),
+                ("unsupported", ProofStatus::Unknown),
+            ] {
+                let proof = report
+                    .functions
+                    .iter()
+                    .find(|f| f.name == name)
+                    .unwrap()
+                    .proof
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(
+                    proof.status,
+                    if retain {
+                        expected
+                    } else {
+                        ProofStatus::Unknown
+                    },
+                    "{target:?} {retain} {encoded} {name}: {:?}",
+                    proof.obligations
+                );
+                if retain && name == "guarded" {
+                    assert!(
+                        proof
+                            .analyzed_bodies
+                            .iter()
+                            .any(|body| body.starts_with("leaf::increment"))
+                    );
+                    assert!(
+                        proof.obligations.iter().any(|obligation| obligation.kind
+                            == mir_check::ObligationKind::CallPrecondition)
+                    );
+                }
+                if retain && name == "unsupported" {
+                    assert!(
+                        proof
+                            .analyzed_bodies
+                            .iter()
+                            .any(|body| body.starts_with("leaf::bits"))
+                    );
+                }
+                if !retain {
+                    assert!(
+                        proof
+                            .obligations
+                            .iter()
+                            .any(|obligation| obligation.detail.contains("MIR body unavailable"))
+                    );
+                }
+            }
+        }
+    }
+}

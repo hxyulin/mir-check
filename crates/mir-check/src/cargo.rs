@@ -17,15 +17,18 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
+            [--no-dependency-mir] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
             Repeat --entry to select exact or crate-qualified roots; missing roots fail.\n\
+            Dependency MIR is retained by default; --no-dependency-mir disables retention.\n\
             Without --entry, --verify requires all local bodies to pass."
         );
         return Ok(ExitCode::SUCCESS);
     }
     let mut verify = false;
     let mut summary = false;
+    let mut dependency_mir = true;
     let mut entries = Vec::new();
     let mut cargo_args = Vec::new();
     let mut args = args.into_iter();
@@ -33,6 +36,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         match arg.to_str() {
             Some("--verify") => verify = true,
             Some("--summary") => summary = true,
+            Some("--no-dependency-mir") => dependency_mir = false,
             Some("--entry") => {
                 let name = args.next().ok_or("--entry requires a function name")?;
                 entries.push(entry_name(name)?);
@@ -61,6 +65,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     if !driver.is_file() {
         return Err("mir-check must be installed beside cargo-mir-check".into());
     }
+    let compiler_wrapper = driver.with_file_name("mir-check-rustc");
+    if dependency_mir && !compiler_wrapper.is_file() {
+        return Err("mir-check-rustc must be installed beside cargo-mir-check".into());
+    }
     let sysroot = PathBuf::from(env!("MIR_CHECK_SYSROOT"));
     let mut command = Command::new(sysroot.join("bin/cargo"));
     command
@@ -74,6 +82,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env("MIR_CHECK_REPORT_DIR", &reports)
         .env("MIR_CHECK_ENTRIES", serde_json::to_string(&entries)?)
         .env("CARGO_INCREMENTAL", "0");
+    if dependency_mir {
+        command.env("RUSTC_WRAPPER", compiler_wrapper);
+    }
     if verify {
         command.env("MIR_CHECK_VERIFY", "1");
     } else {

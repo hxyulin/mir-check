@@ -260,3 +260,20 @@ The docs distinguish available foreign types from available foreign bodies and e
 independently proving a helper does not automatically summarize it at an unknown call boundary.
 Verification of the 32 already-built ARM units took 35.4 seconds, with more paths executed than
 the 11-second baseline. No firmware source, configuration or dependencies changed.
+
+## Stage 13: retain dependency MIR in Cargo analysis
+
+Cargo analysis now retains ordinary non-inline dependency bodies by default. The small
+mir-check-rustc outer wrapper appends always-encode-mir and MIR optimization level zero, forwarding
+to the workspace analyzer or the pinned compiler. It preserves Cargo configuration, profiles,
+features and Rust flags, including encoded arguments containing spaces. The existing fresh target
+directory prevents stale metadata from earlier builds. --no-dependency-mir provides a comparison
+mode. Prebuilt sysroot libraries are not rebuilt.
+
+Dependency crates are not added to independent root inventories. Their concrete bodies execute
+when called, with checked preconditions, actual returns and existing unsupported-operation limits.
+A host/ARM regression uses two ordinary no_std dependency crates in a chain. Retention proves a
+guarded call, refutes a violated dependency precondition and an overflow in the transitive body,
+and preserves an unknown result for unsupported float bit observation. Opt-out calls remain
+unknown because their bodies are absent. Tests also preserve configuration and encoded flags.
+There are 54 compiler integration tests and one metadata test.
