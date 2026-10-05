@@ -1,4 +1,4 @@
-use mir_checker::{LocalCall, Site, SiteKind, SiteStatus};
+use mir_check::{LocalCall, Site, SiteKind, SiteStatus};
 use rustc_attr_ir::LangItem;
 use rustc_hir::def::DefKind;
 use rustc_middle::mir::{AssertKind, Body, Operand, START_BLOCK, TerminatorKind};

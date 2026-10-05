@@ -41,10 +41,10 @@ can now be interpreted, subject to the same MIR coverage and execution limits. F
 loops can prove only when every feasible path finishes within the execution budget.
 These are selected-root proofs, not a proof of every function or caller in the original crate.
 
-From the mir-checker repository root:
+From the mir-check repository root:
 
 ```sh
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
 cargo test --locked --manifest-path examples/can-frame/Cargo.toml
 cargo build --locked --release --manifest-path examples/can-frame/Cargo.toml \
@@ -52,7 +52,7 @@ cargo build --locked --release --manifest-path examples/can-frame/Cargo.toml \
 ```
 
 Compiler integration tests locate the pinned proc-macro artifact and select proof roots directly.
-Full-crate cargo mir-checker --verify is expected to fail because it selects the deliberately bad
+Full-crate cargo mir-check --verify is expected to fail because it selects the deliberately bad
 call-bound harnesses and unsupported derived methods too.
 
 The bus validator's unchanged body contains nested loops, enum matches, two helper calls and
@@ -74,8 +74,8 @@ returns UNKNOWN. A narrow trusted model for static formatting arguments permits 
 literal panic messages; dynamic formatting and user formatters remain unsupported.
 
 ```sh
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted
 ```

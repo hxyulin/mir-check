@@ -1,8 +1,14 @@
-# mir-checker
+# mir-check
 
-A standalone Rust static-analysis experiment using typed MIR from rustc. Panic analysis is the
-first goal; verified contracts and restricted effects are intended extensions. This repository
-is independent of fleet-2027 and installs no firmware dependencies.
+A Rust MIR analyzer for panic freedom and function contracts. It uses symbolic execution and Z3
+to check supported paths, including bounds passed between functions, without runtime assertions
+from contract annotations. It works with no_std code and can analyze an embedded target from a
+host machine.
+
+This is an experimental side project with a pinned nightly compiler and a limited supported
+subset. Unsupported behavior returns UNKNOWN and fails verification. The analyzer and its
+library models have not completed a soundness audit. This repository is independent of the
+firmware project that supplied its real-code fixtures.
 
 The compiler adapter and panic inventory now include an opt-in proof engine for a restricted
 subset of typed MIR. It can prove panic freedom for guarded integer and byte-slice operations
@@ -16,10 +22,12 @@ The toolchain file pins nightly-2026-09-22, including rustc-dev and LLVM tooling
 adapter uses unstable APIs and must be rebuilt with that exact compiler.
 
 ```sh
+git clone https://github.com/hxyulin/mir-check.git
+cd mir-check
 cargo build --workspace --locked
-target/debug/mir-checker --json -- --crate-type=lib tests/fixtures/bodies.rs
-target/debug/mir-checker --entry root -- --crate-type=lib tests/fixtures/panics.rs
-cargo install --path crates/mir-checker --locked
+target/debug/mir-check --json -- --crate-type=lib tests/fixtures/bodies.rs
+target/debug/mir-check --entry root -- --crate-type=lib tests/fixtures/panics.rs
+cargo install --path crates/mir-check --locked
 ```
 
 Proof mode needs Z3. Install the pinned solver into the development environment:
@@ -27,23 +35,23 @@ Proof mode needs Z3. Install the pinned solver into the development environment:
 ```sh
 uv venv .venv
 uv pip install --python .venv/bin/python -r requirements-solver.txt
-target/debug/mir-checker --verify --entry next_byte -- \
+target/debug/mir-check --verify --entry next_byte -- \
   --crate-type=lib --edition=2024 tests/fixtures/proofs.rs
 ```
 
-Alternatively put z3 on PATH or set MIR_CHECKER_Z3 to its executable. The adapter invokes Z3
+Alternatively put z3 on PATH or set MIR_CHECK_Z3 to its executable. The adapter invokes Z3
 as a subprocess, without unsafe Rust bindings. Development tests require the solver.
 
 From another Rust project:
 
 ```sh
-cargo mir-checker --lib
-cargo mir-checker --verify --lib
-cargo mir-checker --manifest-path path/to/Cargo.toml --all-targets
+cargo mir-check --lib
+cargo mir-check --verify --lib
+cargo mir-check --manifest-path path/to/Cargo.toml --all-targets
 ```
 
 The Cargo command forwards arguments to cargo check, uses the checker's pinned compiler and
-analyzes workspace members. Each run gets a fresh directory under target/mir-checker in the
+analyzes workspace members. Each run gets a fresh directory under target/mir-check in the
 current directory, containing build artifacts and per-crate JSON reports. This deliberately
 rebuilds dependencies so Cargo caching cannot silently skip analysis. These directories can be
 deleted after use. --target-dir is reserved by the tool.
@@ -124,7 +132,7 @@ unrolling. No path is silently truncated: an unfinished exploration at the step 
 UNKNOWN. Recursive calls still require an invariant and remain UNKNOWN.
 
 --entry selects roots for verification as well as call traces. Without entries, all inventoried
-local bodies must pass. cargo mir-checker --verify applies this mode to Cargo workspace members.
+local bodies must pass. cargo mir-check --verify applies this mode to Cargo workspace members.
 Inventory mode remains available without a solver.
 
 JSON schema version 6 includes a separate proof result per selected root, with PROVED, REFUTED and
@@ -190,7 +198,7 @@ See examples/contracts for a runnable no_std crate with guarded reads and a boun
 From this repository root, after building and installing the solver:
 
 ```sh
-target/debug/cargo-mir-checker --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
+target/debug/cargo-mir-check --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
 ```
 
 This prototype can establish the listed obligations for its supported subset and recorded build.
@@ -212,6 +220,10 @@ prek run --all-files --stage manual
 See docs/proofs.md for how obligations are generated and what the proof trusts, docs/stages.md
 for the staged plan and crate READMEs for implementation boundaries.
 
+GitHub Actions runs the compiler/proof suite and vendored runtime tests on Linux and macOS,
+including ARM proofs and fixture release builds. It installs the pinned Rust toolchain and Z3
+from this repository. Local dependency checks and manual hooks are listed above.
+
 ## Real-code fixtures
 
 examples/can-frame vendors the Frame and FdFrame slice from fleet-2027 with metadata contracts.
@@ -225,7 +237,7 @@ declared capacity bounds. Two additional harnesses prove the constructor-to-acce
 and byte-for-byte payload preservation for every permitted index.
 
 ```sh
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
 cargo test --locked --manifest-path examples/can-frame/Cargo.toml
 ```
@@ -244,9 +256,9 @@ as runtime panics. The arbitrary-slice validator entry itself remains UNKNOWN; t
 the selected configuration families.
 
 ```sh
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted
 ```
 
@@ -257,7 +269,7 @@ five decoded channel bounds. The analysis follows Result::ok, Option's question-
 and three closure bodies, with explicit conversion, endian and array-map models.
 
 ```sh
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   the_dr16_parser_proves_without_entry_bounds_on_host_and_arm
 cargo test --locked --manifest-path examples/dr16/Cargo.toml
 ```

@@ -1,8 +1,10 @@
 [package]
-name = "mir-checker"
+name = "mir-check"
+description = "Experimental Rust MIR analysis for panic freedom and function contracts"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 build = "build.rs"
 
@@ -16,9 +18,9 @@ mir-contracts = { path = "../mir-contracts" }
 quote.workspace = true
 
 [[bin]]
-name = "mir-checker"
+name = "mir-check"
 path = "src/main.rs"
 
 [[bin]]
-name = "cargo-mir-checker"
+name = "cargo-mir-check"
 path = "src/cargo.rs"

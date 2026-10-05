@@ -1,6 +1,6 @@
 # mir-contracts
 
-Host procedural macros declaring no_panic, requires and ensures contracts for mir-checker.
+Host procedural macros declaring no_panic, requires and ensures contracts for mir-check.
 Consumers can use stable Rust and no_std. The attributes add doc metadata without evaluating
 predicates, modifying function bodies or adding target runtime dependencies.
 

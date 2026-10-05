@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mir_checker::{ContractKind, ContractStatus, ProofStatus, Report, SiteKind, SiteStatus};
+use mir_check::{ContractKind, ContractStatus, ProofStatus, Report, SiteKind, SiteStatus};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,7 +12,7 @@ struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {
         let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("mir-checker-{}-{id}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("mir-check-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -40,7 +40,7 @@ fn analyze_from(
     checker_args: &[&str],
     rustc_args: &[&str],
 ) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_mir-checker"))
+    Command::new(env!("CARGO_BIN_EXE_mir-check"))
         .arg("--json")
         .args(checker_args)
         .args(["--", "--crate-type=lib", "--edition=2024"])
@@ -145,7 +145,7 @@ fn guarded_accesses_remain_unverified_until_a_proof_engine_exists() {
     let directory = Directory::new();
     let report = report(analyze(&fixture("bodies.rs"), &directory, &[]));
     assert!(has_site(&report, "guarded", SiteKind::BoundsCheck));
-    let text = mir_checker::render(&report);
+    let text = mir_check::render(&report);
     assert!(text.contains("inventory only; no proof"));
     assert!(!text.contains("PROVED"));
 }
@@ -166,7 +166,7 @@ fn entry_traces_follow_local_calls_and_terminate_for_recursion() {
         trace.functions == ["recursive", "indexed"] && trace.kind == SiteKind::BoundsCheck
     }));
     assert!(report.traces.iter().all(|trace| trace.functions.len() <= 3));
-    assert!(mir_checker::render(&report).contains("feasibility unverified"));
+    assert!(mir_check::render(&report).contains("feasibility unverified"));
 }
 
 #[test]
@@ -225,25 +225,23 @@ fn a_report_write_failure_fails_the_compiler_wrapper() {
     let directory = Directory::new();
     let blocked = directory.0.join("not_a_directory");
     std::fs::write(&blocked, "blocked").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_mir-checker"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
         .args(["rustc", "--crate-type=lib", "--edition=2024"])
         .arg(fixture("bodies.rs"))
         .arg("--out-dir")
         .arg(&directory.0)
-        .env("MIR_CHECKER_REPORT_DIR", blocked)
+        .env("MIR_CHECK_REPORT_DIR", blocked)
         .output()
         .unwrap();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("mir-checker:"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("mir-check:"));
 }
 
 #[test]
 fn malformed_contracts_fail_compilation_without_a_success_report() {
     let directory = Directory::new();
-    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
-        .parent()
-        .unwrap();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-check")).parent().unwrap();
     let library = find_contract_library(profile).unwrap();
     let external = format!("mir_contracts={}", library.display());
     for (attribute, item) in [
@@ -262,9 +260,7 @@ fn malformed_contracts_fail_compilation_without_a_success_report() {
 #[test]
 fn contracts_are_collected_as_unverified_metadata() {
     let directory = Directory::new();
-    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
-        .parent()
-        .unwrap();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-check")).parent().unwrap();
     let contract_library = find_contract_library(profile).unwrap();
     let external = format!("mir_contracts={}", contract_library.display());
     let report = report(analyze(
@@ -380,7 +376,7 @@ fn guards_and_valid_local_calls_discharge_all_panic_obligations() {
                 .iter()
                 .all(|o| o.status == ProofStatus::Proved)
         );
-        assert!(mir_checker::render(&report).contains("verification: PROVED"));
+        assert!(mir_check::render(&report).contains("verification: PROVED"));
     }
 }
 
@@ -429,7 +425,7 @@ fn reachable_loops_and_missing_solvers_fail_as_unknown() {
         ProofStatus::Unknown
     );
     let directory = Directory::new();
-    let output = Command::new(env!("CARGO_BIN_EXE_mir-checker"))
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
         .args([
             "--verify",
             "--json",
@@ -440,7 +436,7 @@ fn reachable_loops_and_missing_solvers_fail_as_unknown() {
             "--edition=2024",
         ])
         .arg(fixture("proofs.rs"))
-        .env("MIR_CHECKER_Z3", directory.0.join("missing_solver"))
+        .env("MIR_CHECK_Z3", directory.0.join("missing_solver"))
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -508,7 +504,7 @@ fn main() {
     let path = directory.0.join("replay.rs");
     std::fs::write(&path, harness).unwrap();
     let executable = directory.0.join("replay");
-    let output = Command::new(Path::new(env!("MIR_CHECKER_SYSROOT")).join("bin/rustc"))
+    let output = Command::new(Path::new(env!("MIR_CHECK_SYSROOT")).join("bin/rustc"))
         .args(["--edition=2024", "-Coverflow-checks=yes"])
         .arg(path)
         .arg("-o")
@@ -539,8 +535,8 @@ fn cargo_analysis_revisits_a_crate_and_forwards_feature_selection() {
     .unwrap();
     let mut report_directories = Vec::new();
     for _ in 0..2 {
-        let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-checker"))
-            .args(["mir-checker", "--lib", "--features", "extra", "--offline"])
+        let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"))
+            .args(["mir-check", "--lib", "--features", "extra", "--offline"])
             .current_dir(&directory.0)
             .output()
             .unwrap();
@@ -570,9 +566,7 @@ fn cargo_analysis_revisits_a_crate_and_forwards_feature_selection() {
 
 fn verify_contract(name: &str, rustc_args: &[&str]) -> (Output, Report) {
     let directory = Directory::new();
-    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
-        .parent()
-        .unwrap();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-check")).parent().unwrap();
     let library = find_contract_library(profile).unwrap();
     let external = format!("mir_contracts={}", library.display());
     let mut args = vec!["--extern", external.as_str(), "-Coverflow-checks=yes"];
@@ -633,7 +627,7 @@ fn callee_domains_caller_bounds_and_return_values_are_proved_separately() {
             assert!(proof.assumptions.is_empty());
             assert!(proof.obligations.iter().any(|obligation| matches!(
                 obligation.kind,
-                mir_checker::ObligationKind::CallPrecondition
+                mir_check::ObligationKind::CallPrecondition
             )));
             let callee = report
                 .functions
@@ -668,7 +662,7 @@ fn violating_a_call_bound_fails_even_when_the_callee_cannot_panic() {
         assert!(
             proof.obligations.iter().any(|obligation| matches!(
                 obligation.kind,
-                mir_checker::ObligationKind::CallPrecondition
+                mir_check::ObligationKind::CallPrecondition
             ) && obligation.status
                 == ProofStatus::Refuted
                 && obligation.model.is_some()),
@@ -713,7 +707,7 @@ fn annotations_are_never_trusted_in_place_of_body_or_postcondition_proofs() {
             assert!(
                 proof.obligations.iter().any(|obligation| matches!(
                     obligation.kind,
-                    mir_checker::ObligationKind::Postcondition
+                    mir_check::ObligationKind::Postcondition
                 ) && obligation.status
                     == ProofStatus::Refuted),
                 "{name}"
@@ -722,7 +716,7 @@ fn annotations_are_never_trusted_in_place_of_body_or_postcondition_proofs() {
         if name == "use_lying_postcondition" {
             assert!(proof.obligations.iter().any(|obligation| matches!(
                 obligation.kind,
-                mir_checker::ObligationKind::PanicSafety
+                mir_check::ObligationKind::PanicSafety
             ) && obligation.status
                 == ProofStatus::Refuted));
         }
@@ -854,8 +848,8 @@ fn cargo_contract_verification_returns_failure_and_preserves_its_report() {
             ),
         )
         .unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-checker"))
-            .args(["mir-checker", "--verify", "--lib", "--offline"])
+        let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"))
+            .args(["mir-check", "--verify", "--lib", "--offline"])
             .current_dir(&directory.0)
             .output()
             .unwrap();
@@ -942,9 +936,7 @@ fn verify_vendored(path: &Path, entries: &[&str], rustc_args: &[&str]) -> (Outpu
         std::fs::copy(vendored_source().with_file_name("bus.rs"), sibling).unwrap();
     }
     let directory = Directory::new();
-    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
-        .parent()
-        .unwrap();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-check")).parent().unwrap();
     let library = find_contract_library(profile).unwrap();
     let external = format!("mir_contracts={}", library.display());
     let mut checker = vec!["--verify"];
@@ -1014,7 +1006,7 @@ fn vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
                 );
                 assert!(proof.obligations.iter().any(|obligation| matches!(
                     obligation.kind,
-                    mir_checker::ObligationKind::Postcondition
+                    mir_check::ObligationKind::Postcondition
                 )));
             }
             if function.name.ends_with("::data") {
@@ -1024,7 +1016,7 @@ fn vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
             if function.name.ends_with("round_trip") {
                 assert!(proof.obligations.iter().any(|obligation| matches!(
                     obligation.kind,
-                    mir_checker::ObligationKind::CallPrecondition
+                    mir_check::ObligationKind::CallPrecondition
                 )
                     && obligation.detail.contains("::data requires")));
             }
@@ -1053,7 +1045,7 @@ fn a_caller_cannot_pass_a_frame_with_an_invalid_stored_length() {
         assert_eq!(proof.status, ProofStatus::Refuted, "{entry}");
         assert!(proof.obligations.iter().any(|obligation| matches!(
             obligation.kind,
-            mir_checker::ObligationKind::CallPrecondition
+            mir_check::ObligationKind::CallPrecondition
         ) && obligation.status
             == ProofStatus::Refuted
             && obligation.model.is_some()));
@@ -1276,7 +1268,7 @@ fn nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm() {
                     .obligations
                     .iter()
                     .any(|obligation| obligation.function == "bus::check"
-                        && matches!(obligation.kind, mir_checker::ObligationKind::PanicSafety))
+                        && matches!(obligation.kind, mir_check::ObligationKind::PanicSafety))
             );
         }
         assert!(
@@ -1567,7 +1559,7 @@ fn the_dr16_parser_proves_without_entry_bounds_on_host_and_arm() {
             proof
                 .obligations
                 .iter()
-                .any(|obligation| matches!(obligation.kind, mir_checker::ObligationKind::Validity))
+                .any(|obligation| matches!(obligation.kind, mir_check::ObligationKind::Validity))
         );
     }
 }

@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "mir-checker-contract-example"
+name = "mir-check-contract-example"
 version = "0.1.0"
 dependencies = [
  "mir-contracts",

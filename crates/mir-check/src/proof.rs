@@ -1,7 +1,7 @@
 use super::contracts;
 use super::solver::{self, Answer};
 use super::symbolic::{self, Value};
-use mir_checker::{Contract, ContractKind, Obligation, ObligationKind, Proof, ProofStatus};
+use mir_check::{Contract, ContractKind, Obligation, ObligationKind, Proof, ProofStatus};
 use rustc_attr_ir::{HasAttrs, LangItem};
 use rustc_hir::def::DefKind;
 use rustc_middle::mir::{

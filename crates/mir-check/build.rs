@@ -10,12 +10,12 @@ fn main() {
     let version = output(&rustc, &["-vV"]);
     assert!(
         version.contains(COMPILER_COMMIT),
-        "mir-checker requires nightly-2026-09-22; compiler APIs and ABI must match"
+        "mir-check requires nightly-2026-09-22; compiler APIs and ABI must match"
     );
     let sysroot = output(&rustc, &["--print", "sysroot"]);
-    println!("cargo:rustc-env=MIR_CHECKER_SYSROOT={sysroot}");
+    println!("cargo:rustc-env=MIR_CHECK_SYSROOT={sysroot}");
     println!(
-        "cargo:rustc-env=MIR_CHECKER_COMPILER={}",
+        "cargo:rustc-env=MIR_CHECK_COMPILER={}",
         version.lines().next().unwrap()
     );
     let target = std::env::var("CARGO_CFG_TARGET_OS").expect("Cargo supplies the target OS");

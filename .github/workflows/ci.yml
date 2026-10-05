@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        run: >-
+          rustup toolchain install nightly-2026-09-22 --profile minimal
+          --component rustc-dev,llvm-tools,rust-src,rustfmt,clippy
+          --target thumbv7em-none-eabihf
+      - name: Install pinned solver
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -r requirements-solver.txt
+      - name: Check formatting and lints
+        run: |
+          cargo fmt --all --check
+          cargo lint
+          for example in contracts can-frame dr16; do
+            cargo fmt --manifest-path examples/$example/Cargo.toml --all --check
+            cargo clippy --locked --manifest-path examples/$example/Cargo.toml \
+              --all-targets -- -D warnings
+          done
+      - name: Run proofs and runtime tests
+        run: |
+          cargo test --workspace --locked
+          for example in contracts can-frame dr16; do
+            cargo test --locked --manifest-path examples/$example/Cargo.toml
+          done
+      - name: Build host tool and ARM fixtures
+        run: |
+          cargo build --workspace --release --locked
+          for example in contracts can-frame dr16; do
+            cargo build --locked --release --manifest-path examples/$example/Cargo.toml \
+              --target thumbv7em-none-eabihf
+          done

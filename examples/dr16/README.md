@@ -26,12 +26,12 @@ with solver models. Independent host tests check lengths zero through 40 and com
 against separate packed-channel and field-decoding formulas: every byte position takes all 256
 values while the other bytes are zero. Runtime samples supplement the universal symbolic proof.
 
-From the mir-checker repository root:
+From the mir-check repository root:
 
 ```sh
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   the_dr16_parser_proves_without_entry_bounds_on_host_and_arm
-cargo test --locked -p mir-checker --test compiler \
+cargo test --locked -p mir-check --test compiler \
   incorrect_dr16_indices_and_channel_masks_are_rejected
 cargo test --locked --manifest-path examples/dr16/Cargo.toml
 cargo build --locked --release --manifest-path examples/dr16/Cargo.toml \

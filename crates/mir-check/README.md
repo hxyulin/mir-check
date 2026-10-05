@@ -1,6 +1,6 @@
-# mir-checker
+# mir-check
 
-Host compiler adapter and report model. mir-checker drives rustc directly; cargo-mir-checker
+Host compiler adapter and report model. mir-check drives rustc directly; cargo-mir-check
 uses it as a Cargo workspace wrapper and collects per-crate reports in an isolated build directory.
 
 The adapter reads local typed runtime MIR using the pinned compiler and disables MIR

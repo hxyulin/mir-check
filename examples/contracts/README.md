@@ -6,7 +6,7 @@ bounded increment, including caller preconditions and the increment's return-val
 After building the root workspace and installing the solver, run from the repository root:
 
 ```sh
-target/debug/cargo-mir-checker --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
+target/debug/cargo-mir-check --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
 ```
 
 Changing guarded_increment's condition from value < 15 to value <= 15 fails verification:

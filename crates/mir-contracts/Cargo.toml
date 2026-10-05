@@ -1,8 +1,10 @@
 [package]
 name = "mir-contracts"
+description = "Metadata-only contracts for mir-check static analysis"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [lib]

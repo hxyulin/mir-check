@@ -24,7 +24,7 @@ pub fn check(query: &str) -> Answer {
 }
 
 fn run(query: &str) -> Result<String, String> {
-    let solver = std::env::var_os("MIR_CHECKER_Z3")
+    let solver = std::env::var_os("MIR_CHECK_Z3")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.venv/bin/z3");

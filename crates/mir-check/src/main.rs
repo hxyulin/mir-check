@@ -10,7 +10,7 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use mir_checker::{Contract, ContractKind, ContractStatus, Function, ProofStatus, Report, Source};
+use mir_check::{Contract, ContractKind, ContractStatus, Function, ProofStatus, Report, Source};
 use rustc_attr_ir::HasAttrs;
 use rustc_driver::{Callbacks, Compilation};
 use rustc_hir::def::DefKind;
@@ -48,7 +48,7 @@ impl Callbacks for Checker {
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
         tcx.dcx().abort_if_errors();
-        match mir_checker::build_traces(&mut report, &self.entries) {
+        match mir_check::build_traces(&mut report, &self.entries) {
             Ok(()) => {
                 if self.verify {
                     for function in &mut report.functions {
@@ -105,7 +105,7 @@ impl Checker {
         } else if self.json {
             println!("{}", serde_json::to_string_pretty(report)?);
         } else {
-            print!("{}", mir_checker::render(report));
+            print!("{}", mir_check::render(report));
         }
         Ok(())
     }
@@ -142,7 +142,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
         schema_version: 6,
-        compiler: env!("MIR_CHECKER_COMPILER").to_owned(),
+        compiler: env!("MIR_CHECK_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),
         panic_strategy: format!("{:?}", tcx.sess.panic_strategy()).to_lowercase(),
@@ -169,7 +169,7 @@ fn source(tcx: TyCtxt<'_>, span: Span) -> Source {
 
 fn parse_contract(doc: &str) -> Option<Contract> {
     let payload = doc
-        .strip_prefix("<!-- mir-checker:v1:")?
+        .strip_prefix("<!-- mir-check:v1:")?
         .strip_suffix(" -->")?;
     let (kind, predicate) = if payload == "no_panic" {
         (ContractKind::NoPanic, None)
@@ -188,14 +188,14 @@ fn parse_contract(doc: &str) -> Option<Contract> {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
-    let report_dir = std::env::var_os("MIR_CHECKER_REPORT_DIR").map(PathBuf::from);
+    let report_dir = std::env::var_os("MIR_CHECK_REPORT_DIR").map(PathBuf::from);
     let mut checker = Checker {
         json: false,
         report_dir,
         error: None,
         entries: Vec::new(),
         rustc_arguments: Vec::new(),
-        verify: std::env::var_os("MIR_CHECKER_VERIFY").is_some(),
+        verify: std::env::var_os("MIR_CHECK_VERIFY").is_some(),
     };
     if checker.report_dir.is_some() {
         if args.len() > 1 {
@@ -208,7 +208,7 @@ fn main() -> ExitCode {
             || args.len() == 1
         {
             println!(
-                "Usage: mir-checker [--json] [--verify] [--entry FUNCTION] -- <rustc arguments>\n\
+                "Usage: mir-check [--json] [--verify] [--entry FUNCTION] -- <rustc arguments>\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail."
             );
             return ExitCode::SUCCESS;
@@ -226,7 +226,7 @@ fn main() -> ExitCode {
                 Some("--entry") => {
                     args.remove(1);
                     if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
-                        eprintln!("mir-checker: --entry requires a function name");
+                        eprintln!("mir-check: --entry requires a function name");
                         return ExitCode::FAILURE;
                     }
                     checker.entries.push(args.remove(1));
@@ -242,16 +242,13 @@ fn main() -> ExitCode {
         .iter()
         .any(|arg| arg == "--sysroot" || arg.starts_with("--sysroot="))
     {
-        args.extend([
-            "--sysroot".to_owned(),
-            env!("MIR_CHECKER_SYSROOT").to_owned(),
-        ]);
+        args.extend(["--sysroot".to_owned(), env!("MIR_CHECK_SYSROOT").to_owned()]);
     }
     checker.rustc_arguments = args[1..].to_vec();
     let status =
         rustc_driver::catch_with_exit_code(|| rustc_driver::run_compiler(&args, &mut checker));
     if let Some(error) = checker.error {
-        eprintln!("mir-checker: {error}");
+        eprintln!("mir-check: {error}");
         return ExitCode::FAILURE;
     }
     status

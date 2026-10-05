@@ -43,6 +43,6 @@ fn annotate(payload: String, item: TokenStream) -> TokenStream {
         Ok(item) => item,
         Err(error) => return error.to_compile_error().into(),
     };
-    let metadata = format!("<!-- mir-checker:v1:{payload} -->");
+    let metadata = format!("<!-- mir-check:v1:{payload} -->");
     quote!(#[doc = #metadata] #item).into()
 }
