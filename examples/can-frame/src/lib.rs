@@ -73,8 +73,12 @@ impl FdFrame {
     #[no_panic]
     #[ensures(match result {
         Some(frame) => frame.id == id && frame.id <= 0x7FF
-            && frame.len <= 64 && frame.len as usize == data.len(),
-        None => id > 0x7FF || !(data.len() <= 8 || data.len() == 12 || data.len() == 16 || data.len() == 20 || data.len() == 24 || data.len() == 32 || data.len() == 48 || data.len() == 64),
+            && frame.len <= 64 && frame.len as usize == data.len()
+            && (frame.len <= 8 || frame.len == 12 || frame.len == 16 || frame.len == 20
+                || frame.len == 24 || frame.len == 32 || frame.len == 48 || frame.len == 64),
+        None => id > 0x7FF || !(data.len() <= 8 || data.len() == 12 || data.len() == 16
+            || data.len() == 20 || data.len() == 24 || data.len() == 32
+            || data.len() == 48 || data.len() == 64),
     })]
     pub fn new(id: u16, data: &[u8]) -> Option<Self> {
         let len = data.len();
@@ -107,3 +111,55 @@ impl FdFrame {
 
 #[cfg(test)]
 mod tests;
+
+#[no_panic]
+#[requires(id <= 0x7FF && data.len() <= 8 && index < data.len())]
+pub fn classic_payload_round_trip(id: u16, data: &[u8], index: usize) -> u8 {
+    match Frame::new(id, data) {
+        Some(frame) => {
+            let bytes = frame.data();
+            assert!(bytes[index] == data[index]);
+            bytes[index]
+        }
+        None => panic!(),
+    }
+}
+
+#[no_panic]
+#[requires(id <= 0x7FF && index < data.len()
+    && (data.len() <= 8 || data.len() == 12 || data.len() == 16 || data.len() == 20
+        || data.len() == 24 || data.len() == 32 || data.len() == 48 || data.len() == 64))]
+pub fn fd_payload_round_trip(id: u16, data: &[u8], index: usize) -> u8 {
+    match FdFrame::new(id, data) {
+        Some(frame) => {
+            let bytes = frame.data();
+            assert!(bytes[index] == data[index]);
+            bytes[index]
+        }
+        None => panic!(),
+    }
+}
+
+#[no_panic]
+#[requires(len == 9)]
+pub fn classic_bad_length(len: u8) -> usize {
+    Frame {
+        id: 1,
+        len,
+        data: [0; 8],
+    }
+    .data()
+    .len()
+}
+
+#[no_panic]
+#[requires(len == 65)]
+pub fn fd_bad_length(len: u8) -> usize {
+    FdFrame {
+        id: 1,
+        len,
+        data: [0; 64],
+    }
+    .data()
+    .len()
+}

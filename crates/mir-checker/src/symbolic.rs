@@ -10,11 +10,46 @@ pub enum Value {
         length: Box<Value>,
         data: String,
     },
+    Adt {
+        name: String,
+        variant: usize,
+        is_option: bool,
+        discriminant: u128,
+        fields: Vec<(String, Value)>,
+    },
+    MutableBytes {
+        owner: usize,
+        length: Box<Value>,
+    },
     Tuple(Vec<Value>),
     Unit,
 }
 
 impl Value {
+    pub fn contains_mutable(&self) -> bool {
+        match self {
+            Self::MutableBytes { .. } => true,
+            Self::Adt { fields, .. } => fields.iter().any(|(_, value)| value.contains_mutable()),
+            Self::Tuple(fields) => fields.iter().any(Self::contains_mutable),
+            Self::Bool(_) | Self::Int { .. } | Self::Bytes { .. } | Self::Unit => false,
+        }
+    }
+
+    pub fn field(&self, name: &str) -> Result<Value, String> {
+        let Self::Adt {
+            name: ty_name,
+            fields,
+            ..
+        } = self
+        else {
+            return Err("field access requires a modeled struct".to_owned());
+        };
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value.clone())
+            .ok_or_else(|| format!("unknown contract field {name} in {ty_name}"))
+    }
     pub fn boolean(&self) -> Result<String, String> {
         match self {
             Self::Bool(expression) => Ok(expression.clone()),

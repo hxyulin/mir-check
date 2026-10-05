@@ -85,17 +85,29 @@ panic condition must be unsatisfiable under the path conditions. The proof is un
 valid Rust inputs satisfying the selected function's declared preconditions; it is not based on
 test input coverage.
 
-Supported inputs are bool, integers, unit, shared byte slices and byte arrays. Shared slice
-contents are modeled as SMT arrays. Local calls are analyzed with the actual symbolic arguments
-and return values. The compiler-identified slice length method has a built-in model. Other
-external calls, trait dispatch, mutable references, floats and unsupported statements fail as
-UNKNOWN. Reachable loops and recursive calls also remain UNKNOWN.
+Supported inputs are bool, integers, unit, shared byte slices, byte arrays and local structs with
+scalar or byte-array fields, including shared references to those structs. Struct input fields
+are arbitrary: private fields do not imply an invariant. Shared slice contents are SMT arrays.
+The engine models constructed structs and core Option variants, field projections and local
+byte-array initialization. Local calls use actual symbolic arguments and return values.
+
+Pinned core models cover slice length, byte prefix indexing, lossless u8-to-usize conversion and
+copy_from_slice into an owned local byte array. They check range and copy-length panic conditions
+and model the exact copied bytes. Compiler identities and instantiated receiver types identify
+these operations; similarly named user methods receive no special treatment. These core models
+are trusted parts of the translator, not proofs of dependency implementations. Each root's report
+lists the models it used.
+
+Mutable borrows are restricted to local byte arrays and their prefixes. They cannot cross local
+call boundaries, enter aggregates or escape as return values. Other external calls, unresolved
+trait dispatch, general mutable references, input enums, nested struct inputs, floats and
+unsupported statements fail as UNKNOWN. Reachable loops and recursive calls also remain UNKNOWN.
 
 --entry selects roots for verification as well as call traces. Without entries, all inventoried
 local bodies must pass. cargo mir-checker --verify applies this mode to Cargo workspace members.
 Inventory mode remains available without a solver.
 
-JSON schema version 4 includes a separate proof result per selected root, with PROVED, REFUTED and
+JSON schema version 5 includes a separate proof result per selected root, with PROVED, REFUTED and
 UNKNOWN outcomes. Every obligation includes the generated SMT query and, for a satisfiable
 failure, its solver model. Named input bindings make models interpretable; entry preconditions
 are listed as assumptions. Inventory sites keep their separate unverified status. Verification
@@ -139,7 +151,9 @@ parameter names refer to their entry values, even when the function reassigns it
 
 The supported predicate language includes named bool/integer parameters, integer and boolean
 literals, comparisons, &&, ||, !, parentheses, negative integer literals and read-only byte-slice
-or byte-array .len(). Literals are checked against the inferred target integer type and range.
+or byte-array .len(), modeled named struct fields, integer casts and exhaustive unguarded
+None/Some(name) matches on constructed core Option values. Literals are checked against the
+inferred target integer type and range.
 Arithmetic, indexing, arbitrary calls, mutation and unknown names are unsupported and fail as
 UNKNOWN. Inconsistent entry preconditions also fail as UNKNOWN instead of yielding a vacuous
 proof. A requires predicate is an obligation for analyzed callers; it adds no runtime protection
@@ -181,3 +195,21 @@ See docs/stages.md for the staged plan and crate READMEs for implementation boun
 examples/can-frame vendors the Frame and FdFrame slice from fleet-2027 with metadata contracts.
 The original excerpt is retained, and tests check that the six method bodies are unchanged.
 Only the vendored crate depends on mir-contracts; the original workspace remains independent.
+
+All six methods prove on the host and thumbv7em-none-eabihf with panic=abort and overflow checks
+enabled: both constructors, both ID getters and both data accessors. Constructor postconditions
+cover ID validity, accepted payload lengths and exact stored lengths. Accessor proofs assume the
+declared capacity bounds. Two additional harnesses prove the constructor-to-accessor call bounds
+and byte-for-byte payload preservation for every permitted index.
+
+```sh
+cargo test --locked -p mir-checker --test compiler \
+  vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
+cargo test --locked --manifest-path examples/can-frame/Cargo.toml
+```
+
+Regression tests reject changed guards, invalid stored lengths, incorrect copies and relaxed FD
+length rules with solver models. Removing an accessor precondition exposes the possible range
+failure. The fixture also contains intentionally failing call-bound harnesses; verifying every
+body, including derived methods, is expected to fail. These selected-root results do not establish
+whole-crate coverage. See examples/can-frame/README.md for provenance and the exact proof scope.

@@ -1,4 +1,4 @@
-use super::{FdFrame, Frame};
+use super::{FdFrame, Frame, classic_payload_round_trip, fd_payload_round_trip};
 
 #[test]
 fn constructors_preserve_valid_ids_lengths_and_payloads() {
@@ -11,6 +11,9 @@ fn constructors_preserve_valid_ids_lengths_and_payloads() {
             if let Some(frame) = classic {
                 assert_eq!(frame.id(), id);
                 assert_eq!(frame.data(), data);
+                for (index, byte) in data.iter().enumerate() {
+                    assert_eq!(classic_payload_round_trip(id, data, index), *byte);
+                }
             }
             let fd = FdFrame::new(id, data);
             let valid = len <= 8 || matches!(len, 12 | 16 | 20 | 24 | 32 | 48 | 64);
@@ -18,6 +21,9 @@ fn constructors_preserve_valid_ids_lengths_and_payloads() {
             if let Some(frame) = fd {
                 assert_eq!(frame.id(), id);
                 assert_eq!(frame.data(), data);
+                for (index, byte) in data.iter().enumerate() {
+                    assert_eq!(fd_payload_round_trip(id, data, index), *byte);
+                }
             }
         }
     }

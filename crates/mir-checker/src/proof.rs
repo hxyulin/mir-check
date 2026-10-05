@@ -17,6 +17,9 @@ const MAX_STEPS: usize = 256;
 const MAX_CALL_DEPTH: usize = 8;
 const MAX_QUERY_BYTES: usize = 200_000;
 
+mod aggregates;
+mod builtins;
+
 #[derive(Clone)]
 struct State {
     locals: Vec<Option<Value>>,
@@ -45,6 +48,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
             inputs: BTreeMap::new(),
+            models: Vec::new(),
             obligations: Vec::new(),
         },
     };
@@ -82,15 +86,7 @@ impl<'tcx> Engine<'tcx> {
         }
         let bindings = self.bindings(body, &arguments)?;
         for (name, value) in &bindings {
-            let description = match value {
-                Value::Int { expression, .. } | Value::Bool(expression) => expression.clone(),
-                Value::Bytes { length, data } => {
-                    format!("len={}, data={data}", length.integer()?.0)
-                }
-                Value::Unit => "()".to_owned(),
-                Value::Tuple(_) => return Err("tuple argument binding is unsupported".to_owned()),
-            };
-            self.proof.inputs.insert(name.clone(), description);
+            self.input_binding(name, value)?;
         }
         for contract in self.contracts(id) {
             if matches!(contract.kind, ContractKind::Requires) {
@@ -108,6 +104,25 @@ impl<'tcx> Engine<'tcx> {
             );
         }
         self.execute(id, arguments, conditions, &[])?;
+        Ok(())
+    }
+
+    fn input_binding(&mut self, name: &str, value: &Value) -> Result<(), String> {
+        let description = match value {
+            Value::Int { expression, .. } | Value::Bool(expression) => expression.clone(),
+            Value::Bytes { length, data } => format!("len={}, data={data}", length.integer()?.0),
+            Value::Adt { fields, .. } => {
+                for (field, value) in fields {
+                    self.input_binding(&format!("{name}.{field}"), value)?;
+                }
+                return Ok(());
+            }
+            Value::Unit => "()".to_owned(),
+            Value::Tuple(_) | Value::MutableBytes { .. } => {
+                return Err("argument binding is unsupported".to_owned());
+            }
+        };
+        self.proof.inputs.insert(name.to_owned(), description);
         Ok(())
     }
 
@@ -176,9 +191,20 @@ impl<'tcx> Engine<'tcx> {
             ty::Bool => Ok(Value::Bool(self.fresh("Bool"))),
             ty::Tuple(fields) if fields.is_empty() => Ok(Value::Unit),
             ty::Ref(_, element, mutability) if !mutability.is_mut() => {
-                self.byte_input(id, *element, conditions)
+                let local_struct = match element.kind() {
+                    ty::Adt(def, _) => def.is_struct() && def.did().is_local(),
+                    _ => false,
+                };
+                if local_struct {
+                    self.struct_input(id, *element, conditions)
+                } else {
+                    self.byte_input(id, *element, conditions)
+                }
             }
             ty::Array(..) => self.byte_input(id, ty, conditions),
+            ty::Adt(def, _) if def.is_struct() && def.did().is_local() => {
+                self.struct_input(id, ty, conditions)
+            }
             _ => Err(format!("unsupported argument type {ty:?}")),
         }
     }
@@ -319,6 +345,9 @@ impl<'tcx> Engine<'tcx> {
         if arguments.len() != body.arg_count {
             return Err("call arguments do not match the MIR body".to_owned());
         }
+        if arguments.iter().any(Value::contains_mutable) {
+            return Err("mutable local borrows cannot cross an unmodeled call boundary".to_owned());
+        }
         let bindings = self.bindings(body, &arguments)?;
         let contracts = self.contracts(id);
         if bindings.contains_key("result")
@@ -418,6 +447,9 @@ impl<'tcx> Engine<'tcx> {
                     let value = state.locals[0]
                         .clone()
                         .ok_or("return value is not modeled")?;
+                    if value.contains_mutable() {
+                        return Err("mutable local borrows cannot escape their frame".to_owned());
+                    }
                     let mut post_bindings = bindings.clone();
                     post_bindings.insert("result".to_owned(), value.clone());
                     for contract in &contracts {
@@ -477,12 +509,16 @@ impl<'tcx> Engine<'tcx> {
                         .iter()
                         .map(|arg| self.operand(id, body, &state, &arg.node))
                         .collect::<Result<Vec<_>, _>>()?;
-                    if self.tcx.lang_items().get(LangItem::SliceLen) == Some(callee) {
-                        let [Value::Bytes { length, .. }] = values.as_slice() else {
-                            return Err("slice len receiver is not modeled".to_owned());
-                        };
-                        self.write(&mut state, *destination, (**length).clone())?;
-                        let target = target.ok_or("slice len has no return edge")?;
+                    if let Some(value) = self.builtin(
+                        id,
+                        callee,
+                        generic_args.skip_binder(),
+                        &values,
+                        &mut state,
+                        terminator.source_info.span,
+                    )? {
+                        self.write(&mut state, *destination, value)?;
+                        let target = target.ok_or("modeled call has no return edge")?;
                         queue.push_back((target, state));
                         continue;
                     }
@@ -540,7 +576,7 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn statement(
-        &self,
+        &mut self,
         id: DefId,
         body: &Body<'tcx>,
         state: &mut State,
@@ -579,11 +615,27 @@ impl<'tcx> Engine<'tcx> {
             .ok_or_else(|| format!("uninitialized or unsupported local {:?}", place.local))?;
         for projection in place.projection {
             value = match (projection, value) {
-                (ProjectionElem::Deref, value @ Value::Bytes { .. }) => value,
+                (
+                    ProjectionElem::Deref,
+                    value @ (Value::Bytes { .. } | Value::Adt { .. } | Value::MutableBytes { .. }),
+                ) => value,
                 (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
                     .get(field.as_usize())
                     .cloned()
                     .ok_or("tuple field missing")?,
+                (ProjectionElem::Field(field, _), Value::Adt { fields, .. }) => fields
+                    .get(field.as_usize())
+                    .map(|(_, value)| value.clone())
+                    .ok_or("ADT field missing")?,
+                (ProjectionElem::Downcast(_, expected), value @ Value::Adt { .. }) => {
+                    let Value::Adt { variant, .. } = &value else {
+                        unreachable!()
+                    };
+                    if *variant != expected.as_usize() {
+                        return Err("enum downcast does not match the modeled variant".to_owned());
+                    }
+                    value
+                }
                 (ProjectionElem::Index(index), Value::Bytes { data, length }) => {
                     let index = state.locals[index.as_usize()]
                         .as_ref()
@@ -648,11 +700,24 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::Use(operand, _) => self.operand(id, body, state, operand),
             Rvalue::Ref(_, BorrowKind::Shared, place) => {
                 let value = self.place(state, *place)?;
-                if matches!(value, Value::Bytes { .. }) {
+                if matches!(value, Value::Bytes { .. } | Value::Adt { .. }) {
                     Ok(value)
                 } else {
                     Err("only byte-array and slice reborrows are modeled".to_owned())
                 }
+            }
+            Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => self.mutable_bytes(state, *place),
+            Rvalue::Repeat(operand, length) => {
+                self.repeated_bytes(id, body, state, operand, *length)
+            }
+            Rvalue::Discriminant(place) => {
+                let Value::Adt { discriminant, .. } = self.place(state, *place)? else {
+                    return Err("unmodeled discriminant".to_owned());
+                };
+                let (bits, signed) = self
+                    .integer_type(value.ty(&body.local_decls, self.tcx))
+                    .ok_or("unsupported discriminant type")?;
+                Ok(symbolic::integer(discriminant, bits, signed))
             }
             Rvalue::BinaryOp(operation, operands) => {
                 let left = self.operand(id, body, state, &operands.0)?;
@@ -727,11 +792,14 @@ impl<'tcx> Engine<'tcx> {
                 let ty::Slice(element) = element.kind() else {
                     return Err("only byte-slice coercions are modeled".to_owned());
                 };
-                if mutability.is_mut() || *element != self.tcx.types.u8 {
-                    return Err("only shared byte-slice coercions are modeled".to_owned());
+                if *element != self.tcx.types.u8 {
+                    return Err("only byte-slice coercions are modeled".to_owned());
                 }
                 let value = self.operand(id, body, state, operand)?;
-                if matches!(value, Value::Bytes { .. }) {
+                if matches!(
+                    (&value, mutability.is_mut()),
+                    (Value::Bytes { .. }, false) | (Value::MutableBytes { .. }, true)
+                ) {
                     Ok(value)
                 } else {
                     Err("unsupported pointer coercion".to_owned())
@@ -745,6 +813,7 @@ impl<'tcx> Engine<'tcx> {
                         .collect::<Result<_, _>>()?,
                 ))
             }
+            Rvalue::Aggregate(kind, fields) => self.aggregate(id, body, state, kind, fields),
             other => Err(format!("unsupported rvalue {other:?}")),
         }
     }

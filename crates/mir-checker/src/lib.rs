@@ -35,6 +35,7 @@ pub struct Proof {
     pub status: ProofStatus,
     pub assumptions: Vec<String>,
     pub inputs: std::collections::BTreeMap<String, String>,
+    pub models: Vec<String>,
     pub obligations: Vec<Obligation>,
 }
 
@@ -301,6 +302,9 @@ pub fn render(report: &Report) -> String {
             }
             for assumption in &proof.assumptions {
                 let _ = writeln!(output, "      assumes: {assumption}");
+            }
+            for model in &proof.models {
+                let _ = writeln!(output, "      trusted core model: {model}");
             }
             for obligation in &proof.obligations {
                 let _ = writeln!(

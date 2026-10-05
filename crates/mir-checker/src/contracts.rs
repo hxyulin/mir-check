@@ -29,6 +29,104 @@ fn evaluate(
                 .cloned()
                 .ok_or_else(|| format!("unknown contract name {name}"))
         }
+        Expr::Field(expr) => {
+            let syn::Member::Named(name) = &expr.member else {
+                return Err("only named contract fields are modeled".to_owned());
+            };
+            evaluate(&expr.base, bindings, pointer_bits, None)?.field(&name.to_string())
+        }
+        Expr::Cast(expr) => {
+            let syn::Type::Path(ty) = expr.ty.as_ref() else {
+                return Err("unsupported contract cast type".to_owned());
+            };
+            let name = ty
+                .path
+                .get_ident()
+                .ok_or("qualified contract cast type")?
+                .to_string();
+            let target = match name.as_str() {
+                "u8" => (8, false),
+                "u16" => (16, false),
+                "u32" => (32, false),
+                "u64" => (64, false),
+                "u128" => (128, false),
+                "usize" => (pointer_bits, false),
+                "i8" => (8, true),
+                "i16" => (16, true),
+                "i32" => (32, true),
+                "i64" => (64, true),
+                "i128" => (128, true),
+                "isize" => (pointer_bits, true),
+                _ => return Err("unsupported contract cast target".to_owned()),
+            };
+            symbolic::cast(
+                evaluate(&expr.expr, bindings, pointer_bits, None)?,
+                target.0,
+                target.1,
+            )
+        }
+        Expr::Match(expr) => {
+            let Value::Adt {
+                variant,
+                is_option: true,
+                fields,
+                ..
+            } = evaluate(&expr.expr, bindings, pointer_bits, None)?
+            else {
+                return Err("contract match only models constructed Option values".to_owned());
+            };
+            let mut selected = None;
+            let mut seen = [false; 2];
+            for arm in &expr.arms {
+                if arm.guard.is_some() {
+                    return Err("contract match guards are unsupported".to_owned());
+                }
+                let (tag, binding) = match &arm.pat {
+                    syn::Pat::Path(pattern) if pattern.path.is_ident("None") => (0, None),
+                    syn::Pat::Ident(pattern)
+                        if pattern.ident == "None"
+                            && pattern.subpat.is_none()
+                            && pattern.mutability.is_none()
+                            && pattern.by_ref.is_none() =>
+                    {
+                        (0, None)
+                    }
+                    syn::Pat::TupleStruct(pattern)
+                        if pattern.path.is_ident("Some") && pattern.elems.len() == 1 =>
+                    {
+                        let syn::Pat::Ident(name) = &pattern.elems[0] else {
+                            return Err("Some requires a named contract binding".to_owned());
+                        };
+                        if name.by_ref.is_some()
+                            || name.mutability.is_some()
+                            || name.subpat.is_some()
+                        {
+                            return Err("unsupported Option contract binding".to_owned());
+                        }
+                        (1, Some(name.ident.to_string()))
+                    }
+                    _ => return Err("contract match requires None and Some(name) arms".to_owned()),
+                };
+                if seen[tag] {
+                    return Err("duplicate Option contract arm".to_owned());
+                }
+                seen[tag] = true;
+                if variant == tag {
+                    let mut inner = bindings.clone();
+                    if let Some(name) = binding {
+                        let [(_, value)] = fields.as_slice() else {
+                            return Err("invalid Some payload".to_owned());
+                        };
+                        inner.insert(name, value.clone());
+                    }
+                    selected = Some(evaluate(&arm.body, &inner, pointer_bits, expected)?);
+                }
+            }
+            if !seen.iter().all(|arm| *arm) {
+                return Err("nonexhaustive Option contract match".to_owned());
+            }
+            selected.ok_or("unknown Option contract variant".to_owned())
+        }
         Expr::Lit(expr) => match &expr.lit {
             Lit::Bool(value) => Ok(Value::Bool(value.value.to_string())),
             Lit::Int(value) => literal(value, false, pointer_bits, expected),

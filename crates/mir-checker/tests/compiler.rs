@@ -927,3 +927,279 @@ fn the_vendored_frame_methods_keep_the_original_function_bodies() {
     assert_eq!(original.len(), 6);
     assert_eq!(original, annotated);
 }
+
+fn vendored_source() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/can-frame/src/lib.rs")
+}
+
+fn verify_vendored(path: &Path, entries: &[&str], rustc_args: &[&str]) -> (Output, Report) {
+    let directory = Directory::new();
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-checker"))
+        .parent()
+        .unwrap();
+    let library = find_contract_library(profile).unwrap();
+    let external = format!("mir_contracts={}", library.display());
+    let mut checker = vec!["--verify"];
+    for entry in entries {
+        checker.extend(["--entry", entry]);
+    }
+    let mut args = vec![
+        "--extern",
+        external.as_str(),
+        "-Coverflow-checks=yes",
+        "-Cpanic=abort",
+    ];
+    args.extend_from_slice(rustc_args);
+    let output = analyze_from(path, &directory, &checker, &args);
+    let report = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "{entries:?}: {error}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    (output, report)
+}
+
+#[test]
+fn vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm() {
+    let entries = [
+        "Frame::new",
+        "Frame::data",
+        "Frame::id",
+        "FdFrame::new",
+        "FdFrame::data",
+        "FdFrame::id",
+        "classic_payload_round_trip",
+        "fd_payload_round_trip",
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let (output, report) = verify_vendored(&vendored_source(), &entries, &args);
+        let selected: Vec<_> = report
+            .functions
+            .iter()
+            .filter(|function| function.proof.is_some())
+            .collect();
+        assert_eq!(selected.len(), entries.len());
+        for function in selected {
+            let proof = function.proof.as_ref().unwrap();
+            assert_eq!(
+                proof.status,
+                ProofStatus::Proved,
+                "{} {target:?}",
+                function.name
+            );
+            assert!(!proof.obligations.is_empty());
+            assert!(function.contracts.iter().all(|contract| matches!(
+                contract.status,
+                ContractStatus::VerifiedUnderPreconditions
+            )));
+            if function.name.ends_with("::new") {
+                assert!(proof.assumptions.is_empty());
+                assert!(
+                    proof
+                        .models
+                        .iter()
+                        .any(|model| model.contains("copy_from_slice"))
+                );
+                assert!(proof.obligations.iter().any(|obligation| matches!(
+                    obligation.kind,
+                    mir_checker::ObligationKind::Postcondition
+                )));
+            }
+            if function.name.ends_with("::data") {
+                assert_eq!(proof.assumptions.len(), 1);
+                assert!(proof.inputs.contains_key("self.len"));
+            }
+            if function.name.ends_with("round_trip") {
+                assert!(proof.obligations.iter().any(|obligation| matches!(
+                    obligation.kind,
+                    mir_checker::ObligationKind::CallPrecondition
+                )
+                    && obligation.detail.contains("::data requires")));
+            }
+        }
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn a_caller_cannot_pass_a_frame_with_an_invalid_stored_length() {
+    for entry in ["classic_bad_length", "fd_bad_length"] {
+        let (output, report) = verify_vendored(&vendored_source(), &[entry], &[]);
+        assert!(!output.status.success(), "accepted {entry}");
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted, "{entry}");
+        assert!(proof.obligations.iter().any(|obligation| matches!(
+            obligation.kind,
+            mir_checker::ObligationKind::CallPrecondition
+        ) && obligation.status
+            == ProofStatus::Refuted
+            && obligation.model.is_some()));
+    }
+}
+
+#[test]
+fn broken_real_code_guards_lengths_and_payload_copies_are_rejected() {
+    let original = std::fs::read_to_string(vendored_source()).unwrap();
+    for (entry, before, after) in [
+        (
+            "Frame::new",
+            "if id > 0x7FF || data.len() > 8",
+            "if id > 0x7FF || data.len() > 9",
+        ),
+        ("Frame::new", "len: data.len() as u8,", "len: 9,"),
+        (
+            "Frame::new",
+            "if id > 0x7FF || data.len() > 8",
+            "if id > 0x800 || data.len() > 8",
+        ),
+        (
+            "Frame::new",
+            "bytes[..data.len()].copy_from_slice(data);",
+            "bytes[..7].copy_from_slice(data);",
+        ),
+        (
+            "classic_payload_round_trip",
+            "bytes[..data.len()].copy_from_slice(data);",
+            "let _ = &mut bytes;",
+        ),
+        (
+            "FdFrame::new",
+            "let valid = len <= 8 || matches!(len, 12 | 16 | 20 | 24 | 32 | 48 | 64);",
+            "let valid = len <= 64;",
+        ),
+    ] {
+        assert!(original.contains(before));
+        let directory = Directory::new();
+        let path = directory.0.join("mutated.rs");
+        std::fs::write(&path, original.replacen(before, after, 1)).unwrap();
+        let (output, report) = verify_vendored(&path, &[entry], &[]);
+        assert!(!output.status.success(), "accepted mutation: {after}");
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            ProofStatus::Refuted,
+            "mutation {after}: {:?}",
+            proof.obligations
+        );
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .any(|obligation| obligation.status == ProofStatus::Refuted
+                    && obligation.model.is_some())
+        );
+    }
+}
+
+#[test]
+fn accessor_bounds_are_explicit_and_cannot_be_inferred_from_private_fields_alone() {
+    let original = std::fs::read_to_string(vendored_source()).unwrap();
+    let directory = Directory::new();
+    let path = directory.0.join("without_domain.rs");
+    std::fs::write(&path, original.replace("#[requires(self.len <= 8)]", "")).unwrap();
+    let (output, report) = verify_vendored(&path, &["Frame::data"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|function| function.name == "Frame::data")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Refuted);
+    assert!(proof.assumptions.is_empty());
+}
+
+#[test]
+fn core_models_do_not_trust_similarly_named_user_methods() {
+    let directory = Directory::new();
+    let path = directory.0.join("fake_copy.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+struct Fake { value: u8 }
+impl Fake {
+    fn copy_from_slice(&self, source: &[u8]) {
+        let _ = (self.value, source);
+        panic!();
+    }
+}
+pub fn caller(value: u8, source: &[u8]) {
+    Fake { value }.copy_from_slice(source);
+}
+"#,
+    )
+    .unwrap();
+    let (output, report) = verify_vendored(&path, &["caller"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|function| function.name == "caller")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Refuted);
+    assert!(proof.models.is_empty());
+}
+
+#[test]
+fn mutable_array_borrows_cannot_cross_an_unmodeled_call_boundary() {
+    let directory = Directory::new();
+    let path = directory.0.join("mutable_call.rs");
+    std::fs::write(
+        &path,
+        r#"
+#![no_std]
+fn fill(bytes: &mut [u8], value: u8) { bytes[0] = value; }
+pub fn caller(value: u8) -> u8 {
+    let mut bytes = [0; 8];
+    fill(&mut bytes, value);
+    bytes[0]
+}
+"#,
+    )
+    .unwrap();
+    let (output, report) = verify_vendored(&path, &["caller"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|function| function.name == "caller")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Unknown);
+    assert!(
+        proof
+            .obligations
+            .iter()
+            .any(|obligation| obligation.detail.contains("mutable"))
+    );
+}

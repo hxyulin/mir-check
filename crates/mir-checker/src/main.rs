@@ -1,9 +1,11 @@
 #![feature(rustc_private)]
 #![forbid(unsafe_code)]
 
+extern crate rustc_abi;
 extern crate rustc_attr_ir;
 extern crate rustc_driver;
 extern crate rustc_hir;
+extern crate rustc_index;
 extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
@@ -139,7 +141,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 4,
+        schema_version: 5,
         compiler: env!("MIR_CHECKER_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),

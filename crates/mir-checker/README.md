@@ -23,11 +23,21 @@ Proof mode interprets a restricted subset of typed MIR, uses exact SMT bit-vecto
 semantics and follows actual arguments and return values through local calls. Z3 runs as a
 subprocess. Every reachable panic condition must be unsatisfiable; unsupported behavior, loops,
 recursion and resource limits remain unknown and cause verification failure. No dependency
-analysis is present. The contract evaluator accepts only pure comparisons and boolean predicates,
-with read-only byte lengths. It checks caller preconditions and every feasible return, using
+analysis is present. Explicit trusted core models implement byte slice lengths, prefix indexing,
+u8-to-usize conversion and copying into owned local byte arrays. Their panic conditions are
+checked and their use is listed in each proof report. General mutation and mutable borrows across
+calls remain unsupported. Struct fields and constructed core Option values carry actual return
+facts through local calls; struct inputs do not acquire implicit invariants.
+
+The contract evaluator accepts pure comparisons and boolean predicates,
+with read-only byte lengths, modeled struct fields, integer casts and restricted Option matches.
+It checks caller preconditions and every feasible return, using
 entry values for parameter names in postconditions. It never assumes a callee summary from
 annotations. Missing names, type errors, unsupported predicates and inconsistent entry domains
 fail verification; passing root metadata is marked verified under preconditions.
 
 Real-code fixtures live in examples/can-frame. Tests compare vendored method bodies to the
-unmodified source excerpt before testing analysis coverage.
+unmodified source excerpt before testing analysis coverage. All six methods and two payload
+round-trip harnesses prove on the host and thumbv7em-none-eabihf. Mutation tests reject broken
+bounds, invalid IDs or FD lengths and lost payload copies. Separate cases reject similarly named
+user methods and keep unsupported mutable call boundaries unknown.

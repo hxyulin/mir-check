@@ -88,3 +88,34 @@ Frame and FdFrame are vendored from fleet-2027 at b81a247a3295b13553087f5e328f20
 The original method bodies are preserved and compared against an unmodified source excerpt.
 The fixture adds constructor and accessor contracts without changing the original workspace.
 Runtime checks exercise valid and invalid IDs and all payload lengths from zero through 65.
+
+## Stage 6: real-code proofs
+
+All six unchanged Frame/FdFrame method bodies now prove on aarch64-apple-darwin and
+thumbv7em-none-eabihf, with panic=abort and overflow checks enabled. Constructors establish ID,
+accepted-length and exact stored-length postconditions without entry assumptions. Data accessors
+prove safe slicing and returned lengths under explicit capacity preconditions; private fields do
+not imply an invariant for arbitrary struct inputs.
+
+Two payload harnesses prove the constructor-to-accessor path, each callee's required bound and
+exact payload equality at every permitted index. Actual constructor bodies supply caller facts;
+annotations are not trusted summaries. Struct fields, constructed core Option variants and local
+byte arrays extend the modeled MIR subset. Pure contracts gain named fields, integer casts and
+restricted exhaustive Option matches.
+
+Pinned core models cover byte prefix ranges, slice length, u8-to-usize conversion and exact copies
+into local arrays. Their range and copy-length panic conditions are checked. They are trusted
+parts of the translator and are listed per root in JSON schema version 5. Mutable borrows cannot
+cross local calls or escape through aggregates/returns. General mutation, input enums, nested
+struct inputs, arbitrary dependencies, loops and derived methods remain unsupported.
+
+Regression tests reject invalid stored lengths at accessor calls, weakened constructor guards,
+invalid FD lengths and incorrect or missing payload copies. Removing an accessor precondition
+also fails. A user method named copy_from_slice receives no trusted model, and mutable call
+boundaries remain unknown. Temporarily disabling the translator's destination-byte updates makes
+the real-code round-trip test fail as refuted; the mutation was restored.
+
+The compiler suite has 31 passing tests, plus the metadata behavior test and independent vendored
+runtime checks covering IDs, lengths zero through 65 and every accepted payload index. Formatting,
+warnings-denied Clippy, release builds, dependency checks and manual hooks pass. These selected-root
+results are not whole-crate coverage or a formal verification of the translator.
