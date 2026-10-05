@@ -6,6 +6,8 @@ The repository's toolchain file installs the exact nightly compiler and componen
 rustc_driver. Build the host analyzer with that toolchain even when analyzing another target.
 
 ```sh
+git clone https://github.com/hxyulin/mir-check.git
+cd mir-check
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-solver.txt
 cargo build --workspace --locked

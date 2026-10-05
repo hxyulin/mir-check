@@ -1,4 +1,40 @@
-# mir-check
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/public/mark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/public/mark.svg">
+    <img src="docs/public/mark.svg" alt="mir-check logo" width="128" height="128">
+  </picture>
+</p>
+<h1 align="center">mir-check</h1>
+<p align="center">Panic freedom and function contracts, checked from Rust MIR.</p>
+<p align="center">
+  <a href="https://github.com/hxyulin/mir-check/actions/workflows/ci.yml">
+    <img alt="CI status"
+      src="https://github.com/hxyulin/mir-check/actions/workflows/ci.yml/badge.svg?branch=main">
+  </a>
+  <a href="https://github.com/hxyulin/mir-check/actions/workflows/docs.yml">
+    <img alt="Documentation status"
+      src="https://github.com/hxyulin/mir-check/actions/workflows/docs.yml/badge.svg?branch=main">
+  </a>
+  <a href="rust-toolchain.toml">
+    <img alt="Rust nightly 2026-09-22"
+      src="https://img.shields.io/badge/Rust-nightly--2026--09--22-dea584?logo=rust">
+  </a>
+  <a href="docs/proofs.md">
+    <img alt="Status: experimental"
+      src="https://img.shields.io/badge/status-experimental-d4a24a">
+  </a>
+  <a href="#license">
+    <img alt="MIT or Apache-2.0"
+      src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue">
+  </a>
+</p>
+<p align="center">
+  <a href="https://hxyulin.github.io/mir-check/">Documentation</a> ·
+  <a href="https://hxyulin.github.io/mir-check/usage.html">Getting started</a> ·
+  <a href="https://hxyulin.github.io/mir-check/examples.html">Examples</a> ·
+  <a href="https://hxyulin.github.io/mir-check/fleet-survey.html">Fleet survey</a>
+</p>
 
 A Rust MIR analyzer for panic freedom and function contracts. It uses symbolic execution and Z3
 to check supported paths, including bounds passed between functions. Contract annotations add
@@ -34,6 +70,15 @@ Repeat the command with `--target thumbv7em-none-eabihf` to analyze the ARM buil
 UNKNOWN. Omit it for the full inventory, obligations, assumptions and solver models. Per-crate
 JSON reports are written under `target/mir-check/<run>/reports`, including failed verification.
 These counts describe analysis roots, not runtime test coverage or the safety of unselected code.
+
+| Result | What it tells you |
+| --- | --- |
+| **PROVED** | Every feasible path completed and every obligation passed for the selected root domain |
+| **REFUTED** | The solver found a failing assignment for a translated obligation |
+| **UNKNOWN** | Unsupported behavior, a missing body or a limit prevented a complete proof |
+
+Only a run where every selected root proves succeeds. A solver assignment is not automatically
+a confirmed Rust failure; mutation and replay tests provide independent evidence for fixtures.
 
 ## Use it in a project
 
@@ -131,6 +176,10 @@ See [the coverage matrix](docs/coverage.md) for evidence and limits, and
 JSON schema version 7 includes per-root proofs and a per-crate coverage summary. Inventory sites
 keep their separate unverified status even when a selected root proves their paths safe.
 
+The [fleet workspace survey](docs/fleet-survey.md) checks unchanged shared crates, board support
+and robot firmware. It separates generated MIR roots from function declarations, records the
+build configuration and explains why the current tool cannot prove whole control loops.
+
 ## Real-code fixtures
 
 The fixtures retain original firmware bodies and test their tokens against source snapshots.
@@ -149,6 +198,9 @@ entire firmware crates. The CAN fixture deliberately includes failing roots.
 
 ## Development
 
+Bug reports, small real-code examples and contributions are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for useful reports and implementation expectations.
+
 ```sh
 cargo fmt --all --check
 cargo lint
@@ -160,3 +212,19 @@ prek run --all-files --stage manual
 
 GitHub Actions runs proofs and runtime tests on Linux and macOS, including ARM proofs and fixture
 release builds. See [docs](docs/README.md) for the guides and staged implementation evidence.
+
+The searchable documentation site uses the same Markdown guides. To work on it with Node.js 22
+or newer:
+
+```sh
+npm ci
+npm run docs:dev
+npm run docs:build
+```
+
+See [documentation development](docs/development.md) for previews and GitHub Pages deployment.
+
+## License
+
+mir-check is available under either the [MIT license](LICENSE-MIT) or the
+[Apache License 2.0](LICENSE-APACHE), at your option.

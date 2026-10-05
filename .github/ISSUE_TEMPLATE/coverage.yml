@@ -1,0 +1,23 @@
+name: Coverage request
+description: A Rust or MIR feature that currently returns UNKNOWN.
+body:
+  - type: textarea
+    id: example
+    attributes:
+      label: Example and desired guarantee
+      description: Show the function or caller and the panic or contract obligation to check.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: gap
+    attributes:
+      label: Current gap
+      description: Include the command, target, build settings and first unsupported report reason.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Where this would help
+      description: Describe the parser, library, embedded loop or other code this would cover.

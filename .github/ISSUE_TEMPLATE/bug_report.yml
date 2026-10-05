@@ -1,0 +1,31 @@
+name: Analysis bug
+description: A wrong result, crash or unexpected verification failure.
+body:
+  - type: textarea
+    id: example
+    attributes:
+      label: Minimal Rust example
+      description: Include contracts, relevant callees and the root's intended input domain.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and build configuration
+      description: Include the revision, target, features, profile and any Rust compiler flags.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Actual and expected result
+      description: Include relevant obligations, gap reasons or solver assignments from the report.
+    validations:
+      required: true
+  - type: textarea
+    id: replay
+    attributes:
+      label: Runtime evidence
+      description: If available, describe how the recorded input reproduces a panic or wrong result.

@@ -1,5 +1,7 @@
 # Stages
 
+The original four-step outline was:
+
 1. Compiler adapter: pinned rustc_driver integration, typed local MIR bodies, source locations,
    Cargo integration, JSON reports and a metadata-only contract crate.
 2. Panic inventory: enumerate checks and calls, classify unresolved boundaries, and show
@@ -206,3 +208,21 @@ also preserve the inventory-only distinction and ensure input-budget exhaustion 
 Formatting, warnings-denied Clippy, host tests, release builds, dependency checks and manual hooks
 pass. The documented whole-contract, selected DR16 and selected CAN Cargo commands also prove;
 the latter two run for ARM, including an explicitly aborting/overflow-checked parser build.
+
+## Stage 10: fleet measurement and published documentation
+
+The unchanged fleet-2027 workspaces were inventoried and their 32 ARM compilation units checked
+independently. The [survey](fleet-survey.md) records compiler/profile scope, generated-root skew,
+counterexample interpretation and measured time. The actual DR16 parser proves without entry
+preconditions. Whole firmware applications remain outside the current supported subset.
+
+The README adds a theme-aware mark, status badges and direct guide links. VitePress publishes the
+existing guides with local search, sidebar navigation and light/dark themes. A dedicated Pages
+workflow builds pull requests and deploys main. Node dependencies are locked; the patched Vite
+override leaves the dependency audit clear. Contribution and issue templates request minimal
+examples, build configuration and evidence without treating solver assignments as runtime bugs.
+
+Validation includes the Rust formatting/lint/test/release/dependency checks, manual file hooks,
+the documentation production build and browser checks of page links, search and desktop/mobile
+themes. No firmware source or dependency was changed. See [development](development.md) for the
+documentation build and publication procedure.
