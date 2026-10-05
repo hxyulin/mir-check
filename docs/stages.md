@@ -245,3 +245,18 @@ Four new compiler integration tests cover positive, refuted and unknown cases on
 including foreign no_std inputs, NaN/zero/rounding/cast edge cases and off-by-one call guards.
 There are 53 compiler integration tests and one metadata test. The fleet survey reruns the same
 32 ARM units to measure newly supported paths without modifying firmware.
+
+## Stage 12: compare fleet coverage and classify remaining blockers
+
+The expanded fleet survey proves 149 of the same 976 function-declaration roots, up from 25.
+All previous proved/refuted roots retain their outcomes; 124 unknowns now prove and 21 refute.
+The baseline data is preserved, and a separate JSON summary records the new per-unit counts,
+changed roots and first reported unknown reasons. Source paths in the published data are relative
+to the firmware repository.
+
+The largest remaining groups are mutable inputs, missing dependency MIR and constants. Removing
+input blockers exposes these later boundaries, so their counts can grow without regressions.
+The docs distinguish available foreign types from available foreign bodies and explain why
+independently proving a helper does not automatically summarize it at an unknown call boundary.
+Verification of the 32 already-built ARM units took 35.4 seconds, with more paths executed than
+the 11-second baseline. No firmware source, configuration or dependencies changed.
