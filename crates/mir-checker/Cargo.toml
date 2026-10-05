@@ -1,0 +1,22 @@
+[package]
+name = "mir-checker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+mir-contracts = { path = "../mir-contracts" }
+
+[[bin]]
+name = "mir-checker"
+path = "src/main.rs"
+
+[[bin]]
+name = "cargo-mir-checker"
+path = "src/cargo.rs"
