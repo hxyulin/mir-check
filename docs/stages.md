@@ -46,3 +46,16 @@ Removing bounds checks from the inventory makes the abort-mode integration test 
 mutation was restored. Formatting, warnings-denied Clippy, release builds, dependency checks
 and manual hooks pass. Compiler and metadata integration tests also cover malformed contracts
 and report-write failures.
+
+## Stage 3 evidence
+
+The first proof engine uses exact path-sensitive symbolic execution and Z3 bit-vectors before
+adding abstract interpretation. It proves guarded byte access, checked integer guards and safe
+local calls. Off-by-one guards, overflow, division failures, invalid call arguments and stale
+guards are refuted with solver models. Loops and missing solvers fail as unknown. Compiler MIR
+lint errors cannot emit a success report.
+
+Independent host checks exhaust all 65,536 u8 argument pairs for guarded addition and replay
+five rejected panic cases. This validates representative translations; it is not a proof of
+the analyzer implementation. Contract predicates and function-level preconditions remain future
+work at this stage. The supported subset and resource limits are explicit in README.md.

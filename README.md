@@ -4,10 +4,9 @@ A standalone Rust static-analysis experiment using typed MIR from rustc. Panic a
 first goal; verified contracts and restricted effects are intended extensions. This repository
 is independent of fleet-2027 and installs no firmware dependencies.
 
-Stages 1 and 2 provide a compiler adapter, a Cargo command, metadata-only contract attributes
-and a panic inventory. The tool enumerates checks, panic entry points and unresolved calls in
-local function bodies, including uncalled generics. Contracts remain pending verification.
-It does not prove panic freedom or any contract.
+The compiler adapter and panic inventory now include an opt-in proof engine for a restricted
+subset of typed MIR. It can prove panic freedom for guarded integer and byte-slice operations
+and trace concrete arguments through local calls. Contracts remain pending verification.
 
 ## Build and use
 
@@ -20,6 +19,18 @@ target/debug/mir-checker --json -- --crate-type=lib tests/fixtures/bodies.rs
 target/debug/mir-checker --entry root -- --crate-type=lib tests/fixtures/panics.rs
 cargo install --path crates/mir-checker --locked
 ```
+
+Proof mode needs Z3. Install the pinned solver into the development environment:
+
+```sh
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements-solver.txt
+target/debug/mir-checker --verify --entry next_byte -- \
+  --crate-type=lib --edition=2024 tests/fixtures/proofs.rs
+```
+
+Alternatively put z3 on PATH or set MIR_CHECKER_Z3 to its executable. The adapter invokes Z3
+as a subprocess, without unsafe Rust bindings. Development tests require the solver.
 
 From another Rust project:
 
@@ -62,6 +73,38 @@ JSON schema version 2 includes source locations, block numbers, conditions, unwi
 cleanup flags, structural CFG reachability, local call edges and the compiler arguments. All
 sites have unverified status. A successful exit means compilation and inventory completed; it
 does not mean contracts passed. Compilation, unknown-entry and report-write errors fail the run.
+
+## Panic proofs
+
+--verify uses path-sensitive symbolic execution of typed MIR and SMT bit-vectors, preserving
+integer widths, signed comparisons, casts, wrapping operations and checked arithmetic. Each
+panic condition must be unsatisfiable under the path conditions. The proof is universal over
+valid Rust inputs to the selected function; it is not based on test input coverage.
+
+Supported inputs are bool, integers, unit, shared byte slices and byte arrays. Shared slice
+contents are modeled as SMT arrays. Local calls are analyzed with the actual symbolic arguments
+and return values. The compiler-identified slice length method has a built-in model. Other
+external calls, trait dispatch, mutable references, floats and unsupported statements fail as
+UNKNOWN. Reachable loops and recursive calls also remain UNKNOWN.
+
+--entry selects roots for verification as well as call traces. Without entries, all inventoried
+local bodies must pass. cargo mir-checker --verify applies this mode to Cargo workspace members.
+Inventory mode remains available without a solver.
+
+JSON schema version 3 adds a separate proof result per selected root, with PROVED, REFUTED and
+UNKNOWN outcomes. Every obligation includes the generated SMT query and, for a satisfiable
+failure, its solver model. Inventory sites keep their separate unverified status. Verification
+exits nonzero for either REFUTED or UNKNOWN. Compiler errors discovered while fetching MIR
+suppress the report entirely.
+
+Proofs describe the recorded analysis compiler, target and build flags. They assume valid Rust
+references and trust rustc's MIR semantics, this translator and Z3. The engine limits execution
+to 256 blocks, call depth to eight and each query to 200,000 bytes. Z3 queries have a five-second
+timeout and a six-second process limit. Reaching any limit fails verification as UNKNOWN.
+
+Arithmetic guards, byte indexing and local calls have positive and negative integration cases.
+An independent host replay exhausts all u8 input pairs for guarded addition, tests small slice
+inputs and reproduces the rejected off-by-one, overflow, invalid-call and stale-guard panics.
 
 ## Contracts
 

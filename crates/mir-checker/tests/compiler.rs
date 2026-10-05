@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mir_checker::{ContractKind, ContractStatus, Report, SiteKind, SiteStatus};
+use mir_checker::{ContractKind, ContractStatus, ProofStatus, Report, SiteKind, SiteStatus};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -323,6 +323,198 @@ fn find_contract_library(directory: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn verify_entry(name: &str, rustc_args: &[&str]) -> (Output, Report) {
+    let directory = Directory::new();
+    let output = analyze_from(
+        &fixture("proofs.rs"),
+        &directory,
+        &["--verify", "--entry", name],
+        rustc_args,
+    );
+    let report = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("{error}: {}", String::from_utf8_lossy(&output.stderr)));
+    (output, report)
+}
+
+#[test]
+fn guards_and_valid_local_calls_discharge_all_panic_obligations() {
+    for name in [
+        "guarded",
+        "array_guarded",
+        "next_byte",
+        "guarded_sum",
+        "guarded_division",
+        "valid_call",
+        "truncated_index",
+    ] {
+        let (output, report) = verify_entry(name, &["-Cpanic=abort", "-Coverflow-checks=yes"]);
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Proved, "{name}");
+        assert!(
+            !proof.obligations.is_empty(),
+            "{name} must exercise a real check"
+        );
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .all(|o| o.status == ProofStatus::Proved)
+        );
+        assert!(mir_checker::render(&report).contains("verification: PROVED"));
+    }
+}
+
+#[test]
+fn broken_guards_arithmetic_and_call_arguments_fail_with_solver_models() {
+    for name in [
+        "off_by_one",
+        "overflowing_sum",
+        "unguarded_division",
+        "invalid_call",
+        "stale_guard",
+        "false_assertion",
+    ] {
+        let (output, report) = verify_entry(name, &["-Coverflow-checks=yes"]);
+        assert!(!output.status.success(), "accepted {name}");
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted, "{name}");
+        assert!(
+            proof.obligations.iter().any(|o| o.model.is_some()),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn reachable_loops_and_missing_solvers_fail_as_unknown() {
+    let (output, report) = verify_entry("loop_unknown", &[]);
+    assert!(!output.status.success());
+    assert_eq!(
+        report
+            .functions
+            .iter()
+            .find(|f| f.name == "loop_unknown")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap()
+            .status,
+        ProofStatus::Unknown
+    );
+    let directory = Directory::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-checker"))
+        .args([
+            "--verify",
+            "--json",
+            "--entry",
+            "guarded",
+            "--",
+            "--crate-type=lib",
+            "--edition=2024",
+        ])
+        .arg(fixture("proofs.rs"))
+        .env("MIR_CHECKER_Z3", directory.0.join("missing_solver"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "guarded")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Unknown);
+    assert!(
+        proof
+            .obligations
+            .iter()
+            .any(|o| o.detail.contains("cannot start Z3"))
+    );
+}
+
+#[test]
+fn mir_lint_errors_prevent_emission_of_a_proof_report() {
+    let directory = Directory::new();
+    let path = directory.0.join("invalid.rs");
+    std::fs::write(&path, "pub fn invalid() -> u8 { let a = [0_u8; 1]; a[2] }").unwrap();
+    let output = analyze_from(&path, &directory, &["--verify"], &[]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("will panic at runtime"));
+}
+
+#[test]
+fn the_proved_subset_agrees_with_exhaustive_host_checks_and_negative_replays() {
+    let directory = Directory::new();
+    let source = std::fs::read_to_string(fixture("proofs.rs")).unwrap();
+    let source = source
+        .replace("#![no_std]\n", "")
+        .replace("#![forbid(unsafe_code)]\n", "");
+    let harness = format!(
+        "#![forbid(unsafe_code)]\nmod sample {{ {source} }}\n{}",
+        r#"
+fn main() {
+    std::panic::set_hook(Box::new(|_| {}));
+    for left in 0..=u8::MAX {
+        for right in 0..=u8::MAX {
+            sample::guarded_sum(left, right);
+        }
+    }
+    let bytes = [1, 2, 3, 4];
+    for length in 0..=bytes.len() {
+        for index in 0..=8 {
+            sample::guarded(&bytes[..length], index);
+            sample::next_byte(&bytes[..length], index);
+        }
+    }
+    assert!(std::panic::catch_unwind(|| sample::off_by_one(&bytes, 4)).is_err());
+    assert!(std::panic::catch_unwind(|| sample::invalid_call(&bytes)).is_err());
+    assert!(std::panic::catch_unwind(|| sample::overflowing_sum(255, 1)).is_err());
+    assert!(std::panic::catch_unwind(|| sample::unguarded_division(i32::MIN, -1)).is_err());
+    assert!(std::panic::catch_unwind(|| sample::stale_guard(&bytes, 0)).is_err());
+}
+"#
+    );
+    let path = directory.0.join("replay.rs");
+    std::fs::write(&path, harness).unwrap();
+    let executable = directory.0.join("replay");
+    let output = Command::new(Path::new(env!("MIR_CHECKER_SYSROOT")).join("bin/rustc"))
+        .args(["--edition=2024", "-Coverflow-checks=yes"])
+        .arg(path)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(Command::new(executable).status().unwrap().success());
 }
 
 #[test]

@@ -15,11 +15,18 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .is_some_and(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage: cargo mir-checker [cargo check arguments]\n\
+            "Usage: cargo mir-checker [--verify] [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
-            Each run uses a fresh target directory. No properties are proved yet."
+            --verify requires all local bodies to pass the restricted proof engine."
         );
         return Ok(ExitCode::SUCCESS);
+    }
+    let verify = args.first().is_some_and(|arg| arg == "--verify");
+    if verify {
+        args.remove(0);
+    }
+    if args.first().is_some_and(|arg| arg == "--") {
+        args.remove(0);
     }
     if args
         .iter()
@@ -36,7 +43,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         return Err("mir-checker must be installed beside cargo-mir-checker".into());
     }
     let sysroot = PathBuf::from(env!("MIR_CHECKER_SYSROOT"));
-    let status = Command::new(sysroot.join("bin/cargo"))
+    let mut command = Command::new(sysroot.join("bin/cargo"));
+    command
         .arg("check")
         .args(args)
         .arg("--target-dir")
@@ -45,9 +53,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env("RUSTC_WORKSPACE_WRAPPER", driver)
         .env_remove("RUSTC_WRAPPER")
         .env("MIR_CHECKER_REPORT_DIR", &reports)
-        .env("CARGO_INCREMENTAL", "0")
-        .status()?;
+        .env("CARGO_INCREMENTAL", "0");
+    if verify {
+        command.env("MIR_CHECKER_VERIFY", "1");
+    } else {
+        command.env_remove("MIR_CHECKER_VERIFY");
+    }
+    let status = command.status()?;
     if !status.success() {
+        eprintln!("JSON reports: {}", reports.display());
         return Ok(ExitCode::FAILURE);
     }
     let mut paths = std::fs::read_dir(&reports)?

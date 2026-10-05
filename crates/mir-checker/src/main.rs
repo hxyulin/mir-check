@@ -8,7 +8,7 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use mir_checker::{Contract, ContractKind, ContractStatus, Function, Report, Source};
+use mir_checker::{Contract, ContractKind, ContractStatus, Function, ProofStatus, Report, Source};
 use rustc_attr_ir::HasAttrs;
 use rustc_driver::{Callbacks, Compilation};
 use rustc_hir::def::DefKind;
@@ -19,6 +19,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod inventory;
+mod proof;
+mod solver;
+mod symbolic;
 
 struct Checker {
     json: bool,
@@ -26,6 +29,7 @@ struct Checker {
     error: Option<String>,
     entries: Vec<String>,
     rustc_arguments: Vec<String>,
+    verify: bool,
 }
 
 impl Callbacks for Checker {
@@ -40,10 +44,34 @@ impl Callbacks for Checker {
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
+        tcx.dcx().abort_if_errors();
         match mir_checker::build_traces(&mut report, &self.entries) {
             Ok(()) => {
+                if self.verify {
+                    for function in &mut report.functions {
+                        if !self.entries.is_empty() && !self.entries.contains(&function.name) {
+                            continue;
+                        }
+                        let id = tcx
+                            .mir_keys(())
+                            .iter()
+                            .find(|id| tcx.def_path_str(id.to_def_id()) == function.name)
+                            .expect("inventoried functions have local MIR bodies");
+                        function.proof = Some(proof::verify(tcx, id.to_def_id()));
+                    }
+                }
+                tcx.dcx().abort_if_errors();
                 if let Err(error) = self.emit(&report) {
                     self.error = Some(error.to_string());
+                } else if report.functions.iter().any(|function| {
+                    function
+                        .proof
+                        .as_ref()
+                        .is_some_and(|proof| proof.status != ProofStatus::Proved)
+                }) {
+                    self.error = Some(
+                        "verification failed; inspect REFUTED and UNKNOWN obligations".to_owned(),
+                    );
                 }
             }
             Err(error) => self.error = Some(error),
@@ -96,11 +124,12 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
             contracts,
             sites,
             local_calls,
+            proof: None,
         });
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 2,
+        schema_version: 3,
         compiler: env!("MIR_CHECKER_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),
@@ -154,6 +183,7 @@ fn main() -> ExitCode {
         error: None,
         entries: Vec::new(),
         rustc_arguments: Vec::new(),
+        verify: std::env::var_os("MIR_CHECKER_VERIFY").is_some(),
     };
     if checker.report_dir.is_some() {
         if args.len() > 1 {
@@ -166,8 +196,8 @@ fn main() -> ExitCode {
             || args.len() == 1
         {
             println!(
-                "Usage: mir-checker [--json] [--entry FUNCTION] -- <rustc arguments>\n\
-                Inventory typed MIR using nightly-2026-09-22. No properties are proved yet."
+                "Usage: mir-checker [--json] [--verify] [--entry FUNCTION] -- <rustc arguments>\n\
+                --verify proves panic safety for a restricted MIR subset; unknown proofs fail."
             );
             return ExitCode::SUCCESS;
         }
@@ -175,6 +205,10 @@ fn main() -> ExitCode {
             match args.get(1).map(String::as_str) {
                 Some("--json") => {
                     checker.json = true;
+                    args.remove(1);
+                }
+                Some("--verify") => {
+                    checker.verify = true;
                     args.remove(1);
                 }
                 Some("--entry") => {

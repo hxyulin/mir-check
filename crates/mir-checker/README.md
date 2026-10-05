@@ -17,4 +17,10 @@ unknown entries and report-write failures produce a nonzero exit status. Success
 only that the inventory was collected.
 
 The report model uses std and serde. No compiler types escape the adapter, so JSON consumers
-do not need rustc internals. No proof engine or dependency analysis exists in stages 1 and 2.
+do not need rustc internals. Inventory remains separate from the opt-in proof engine.
+
+Proof mode interprets a restricted subset of typed MIR, uses exact SMT bit-vectors for integer
+semantics and follows actual arguments and return values through local calls. Z3 runs as a
+subprocess. Every reachable panic condition must be unsatisfiable; unsupported behavior, loops,
+recursion and resource limits remain unknown and cause verification failure. No dependency
+analysis or contract verification is present in the initial stage 3 engine.

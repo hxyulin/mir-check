@@ -27,6 +27,52 @@ pub struct Function {
     pub contracts: Vec<Contract>,
     pub sites: Vec<Site>,
     pub local_calls: Vec<LocalCall>,
+    pub proof: Option<Proof>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Proof {
+    pub status: ProofStatus,
+    pub assumptions: Vec<String>,
+    pub obligations: Vec<Obligation>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProofStatus {
+    Proved,
+    Refuted,
+    Unknown,
+}
+
+impl ProofStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Proved => "PROVED",
+            Self::Refuted => "REFUTED",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Obligation {
+    pub function: String,
+    pub source: Source,
+    pub kind: ObligationKind,
+    pub detail: String,
+    pub status: ProofStatus,
+    pub query: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObligationKind {
+    PanicSafety,
+    CallPrecondition,
+    Postcondition,
+    Unsupported,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -176,13 +222,23 @@ pub enum ContractStatus {
 }
 
 pub fn render(report: &Report) -> String {
+    let mode = if report
+        .functions
+        .iter()
+        .any(|function| function.proof.is_some())
+    {
+        "verification of selected bodies"
+    } else {
+        "inventory only; no proof"
+    };
     let mut output = format!(
         concat!(
-            "{}: {} MIR bodies (inventory only; no proof)\n  {}\n",
+            "{}: {} MIR bodies ({})\n  {}\n",
             "  target={} panic={} overflow-checks={}\n"
         ),
         report.crate_name,
         report.functions.len(),
+        mode,
         report.compiler,
         report.target,
         report.panic_strategy,
@@ -231,6 +287,27 @@ pub fn render(report: &Report) -> String {
         }
         for call in &function.local_calls {
             let _ = writeln!(output, "    bb{} local call -> {}", call.block, call.callee);
+        }
+        if let Some(proof) = &function.proof {
+            let _ = writeln!(output, "    verification: {}", proof.status.label());
+            for assumption in &proof.assumptions {
+                let _ = writeln!(output, "      assumes: {assumption}");
+            }
+            for obligation in &proof.obligations {
+                let _ = writeln!(
+                    output,
+                    "      {} {:?} in {} at {}:{}: {}",
+                    obligation.status.label(),
+                    obligation.kind,
+                    obligation.function,
+                    obligation.source.file,
+                    obligation.source.line,
+                    obligation.detail
+                );
+                if let Some(model) = &obligation.model {
+                    let _ = writeln!(output, "        model: {model}");
+                }
+            }
         }
     }
     for trace in &report.traces {
