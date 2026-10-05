@@ -4,6 +4,12 @@ use syn::{BinOp, Expr, Lit, UnOp};
 
 type IntegerType = (u32, bool);
 
+#[derive(Clone, Copy)]
+enum ScalarType {
+    Integer(u32, bool),
+    Float(u32),
+}
+
 pub fn predicate(
     text: &str,
     bindings: &BTreeMap<String, Value>,
@@ -17,7 +23,7 @@ fn evaluate(
     expression: &Expr,
     bindings: &BTreeMap<String, Value>,
     pointer_bits: u32,
-    expected: Option<IntegerType>,
+    expected: Option<ScalarType>,
 ) -> Result<Value, String> {
     match expression {
         Expr::Paren(expr) => evaluate(&expr.expr, bindings, pointer_bits, expected),
@@ -65,6 +71,12 @@ fn evaluate(
                 .get_ident()
                 .ok_or("qualified contract cast type")?
                 .to_string();
+            if matches!(name.as_str(), "f32" | "f64") {
+                return symbolic::float_cast(
+                    evaluate(&expr.expr, bindings, pointer_bits, None)?,
+                    if name == "f32" { 32 } else { 64 },
+                );
+            }
             let target = match name.as_str() {
                 "u8" => (8, false),
                 "u16" => (16, false),
@@ -87,47 +99,64 @@ fn evaluate(
             )
         }
         Expr::Match(expr) => {
+            let option = evaluate(&expr.expr, bindings, pointer_bits, None)?;
+            if let Value::Enum {
+                discriminant,
+                variants,
+                is_option: true,
+            } = &option
+            {
+                let (_, bits, signed) = discriminant.integer()?;
+                let mut seen = [false; 2];
+                let mut cases = Vec::new();
+                for arm in &expr.arms {
+                    let (tag, binding) = option_pattern(arm)?;
+                    if seen[tag] {
+                        return Err("duplicate Option contract arm".to_owned());
+                    }
+                    seen[tag] = true;
+                    let Value::Adt {
+                        fields,
+                        discriminant: number,
+                        ..
+                    } = variants.get(tag).ok_or("missing Option variant")?
+                    else {
+                        return Err("invalid Option variant".to_owned());
+                    };
+                    let mut inner = bindings.clone();
+                    if let Some(name) = binding {
+                        let [(_, value)] = fields.as_slice() else {
+                            return Err("invalid Some payload".to_owned());
+                        };
+                        inner.insert(name, value.clone());
+                    }
+                    let result = evaluate(&arm.body, &inner, pointer_bits, expected)?.boolean()?;
+                    let active = symbolic::binary(
+                        "eq",
+                        (**discriminant).clone(),
+                        symbolic::integer(*number, bits, signed),
+                    )?
+                    .boolean()?;
+                    cases.push(format!("(and {active} {result})"));
+                }
+                if !seen.iter().all(|arm| *arm) {
+                    return Err("nonexhaustive Option contract match".to_owned());
+                }
+                return Ok(Value::Bool(format!("(or {})", cases.join(" "))));
+            }
             let Value::Adt {
                 variant,
                 is_option: true,
                 fields,
                 ..
-            } = evaluate(&expr.expr, bindings, pointer_bits, None)?
+            } = option
             else {
-                return Err("contract match only models constructed Option values".to_owned());
+                return Err("contract match only models supported Option values".to_owned());
             };
             let mut selected = None;
             let mut seen = [false; 2];
             for arm in &expr.arms {
-                if arm.guard.is_some() {
-                    return Err("contract match guards are unsupported".to_owned());
-                }
-                let (tag, binding) = match &arm.pat {
-                    syn::Pat::Path(pattern) if pattern.path.is_ident("None") => (0, None),
-                    syn::Pat::Ident(pattern)
-                        if pattern.ident == "None"
-                            && pattern.subpat.is_none()
-                            && pattern.mutability.is_none()
-                            && pattern.by_ref.is_none() =>
-                    {
-                        (0, None)
-                    }
-                    syn::Pat::TupleStruct(pattern)
-                        if pattern.path.is_ident("Some") && pattern.elems.len() == 1 =>
-                    {
-                        let syn::Pat::Ident(name) = &pattern.elems[0] else {
-                            return Err("Some requires a named contract binding".to_owned());
-                        };
-                        if name.by_ref.is_some()
-                            || name.mutability.is_some()
-                            || name.subpat.is_some()
-                        {
-                            return Err("unsupported Option contract binding".to_owned());
-                        }
-                        (1, Some(name.ident.to_string()))
-                    }
-                    _ => return Err("contract match requires None and Some(name) arms".to_owned()),
-                };
+                let (tag, binding) = option_pattern(arm)?;
                 if seen[tag] {
                     return Err("duplicate Option contract arm".to_owned());
                 }
@@ -150,7 +179,8 @@ fn evaluate(
         }
         Expr::Lit(expr) => match &expr.lit {
             Lit::Bool(value) => Ok(Value::Bool(value.value.to_string())),
-            Lit::Int(value) => literal(value, false, pointer_bits, expected),
+            Lit::Int(value) => literal(value, false, pointer_bits, integer_expected(expected)?),
+            Lit::Float(value) => float_literal(value, false, expected),
             _ => Err("unsupported contract literal".to_owned()),
         },
         Expr::Unary(expr) => match expr.op {
@@ -161,12 +191,15 @@ fn evaluate(
             UnOp::Neg(_) => {
                 // Restrict negation to literals, with mathematical range checking before encoding.
                 let Expr::Lit(lit) = expr.expr.as_ref() else {
-                    return Err("contract negation only supports integer literals".to_owned());
+                    return Err("contract negation only supports numeric literals".to_owned());
                 };
-                let Lit::Int(value) = &lit.lit else {
-                    return Err("expected an integer literal".to_owned());
-                };
-                literal(value, true, pointer_bits, expected)
+                match &lit.lit {
+                    Lit::Int(value) => {
+                        literal(value, true, pointer_bits, integer_expected(expected)?)
+                    }
+                    Lit::Float(value) => float_literal(value, true, expected),
+                    _ => Err("expected a numeric literal".to_owned()),
+                }
             }
             _ => Err("unsupported contract unary expression".to_owned()),
         },
@@ -187,13 +220,13 @@ fn evaluate(
                 let right = evaluate(&expr.right, bindings, pointer_bits, None)?.boolean()?;
                 return symbolic::binary(operation, Value::Bool(left), Value::Bool(right));
             }
-            let (left, right) = if untyped_integer(&expr.left) && !untyped_integer(&expr.right) {
+            let (left, right) = if untyped_number(&expr.left) && !untyped_number(&expr.right) {
                 let right = evaluate(&expr.right, bindings, pointer_bits, None)?;
-                let left = evaluate(&expr.left, bindings, pointer_bits, integer_type(&right))?;
+                let left = evaluate(&expr.left, bindings, pointer_bits, scalar_type(&right))?;
                 (left, right)
             } else {
                 let left = evaluate(&expr.left, bindings, pointer_bits, None)?;
-                let right = evaluate(&expr.right, bindings, pointer_bits, integer_type(&left))?;
+                let right = evaluate(&expr.right, bindings, pointer_bits, scalar_type(&left))?;
                 (left, right)
             };
             symbolic::binary(operation, left, right)
@@ -215,19 +248,103 @@ fn evaluate(
     }
 }
 
-fn integer_type(value: &Value) -> Option<IntegerType> {
+fn option_pattern(arm: &syn::Arm) -> Result<(usize, Option<String>), String> {
+    if arm.guard.is_some() {
+        return Err("contract match guards are unsupported".to_owned());
+    }
+    match &arm.pat {
+        syn::Pat::Path(pattern) if pattern.path.is_ident("None") => Ok((0, None)),
+        syn::Pat::Ident(pattern)
+            if pattern.ident == "None"
+                && pattern.subpat.is_none()
+                && pattern.mutability.is_none()
+                && pattern.by_ref.is_none() =>
+        {
+            Ok((0, None))
+        }
+        syn::Pat::TupleStruct(pattern)
+            if pattern.path.is_ident("Some") && pattern.elems.len() == 1 =>
+        {
+            let syn::Pat::Ident(name) = &pattern.elems[0] else {
+                return Err("Some requires a named contract binding".to_owned());
+            };
+            if name.by_ref.is_some() || name.mutability.is_some() || name.subpat.is_some() {
+                return Err("unsupported Option contract binding".to_owned());
+            }
+            Ok((1, Some(name.ident.to_string())))
+        }
+        _ => Err("contract match requires None and Some(name) arms".to_owned()),
+    }
+}
+
+fn scalar_type(value: &Value) -> Option<ScalarType> {
     match value {
-        Value::Int { bits, signed, .. } => Some((*bits, *signed)),
+        Value::Int { bits, signed, .. } => Some(ScalarType::Integer(*bits, *signed)),
+        Value::Float { bits, .. } => Some(ScalarType::Float(*bits)),
         _ => None,
     }
 }
 
-fn untyped_integer(expression: &Expr) -> bool {
+fn integer_expected(expected: Option<ScalarType>) -> Result<Option<IntegerType>, String> {
+    match expected {
+        Some(ScalarType::Integer(bits, signed)) => Ok(Some((bits, signed))),
+        Some(ScalarType::Float(_)) => Err("integer literal compared with a float".to_owned()),
+        None => Ok(None),
+    }
+}
+
+fn float_literal(
+    literal: &syn::LitFloat,
+    negative: bool,
+    expected: Option<ScalarType>,
+) -> Result<Value, String> {
+    let explicit = match literal.suffix() {
+        "" => None,
+        "f32" => Some(32),
+        "f64" => Some(64),
+        _ => return Err("unsupported contract float suffix".to_owned()),
+    };
+    let expected = match expected {
+        Some(ScalarType::Float(bits)) => Some(bits),
+        Some(ScalarType::Integer(..)) => {
+            return Err("float literal compared with an integer".to_owned());
+        }
+        None => None,
+    };
+    if explicit.is_some() && expected.is_some() && explicit != expected {
+        return Err("contract float literal type mismatch".to_owned());
+    }
+    let bits = explicit.or(expected).unwrap_or(64);
+    let raw = if bits == 32 {
+        let value = literal
+            .base10_parse::<f32>()
+            .map_err(|error| error.to_string())?;
+        if !value.is_finite() {
+            return Err("contract float literal is out of range".to_owned());
+        }
+        u128::from(if negative { -value } else { value }.to_bits())
+    } else {
+        let value = literal
+            .base10_parse::<f64>()
+            .map_err(|error| error.to_string())?;
+        if !value.is_finite() {
+            return Err("contract float literal is out of range".to_owned());
+        }
+        u128::from(if negative { -value } else { value }.to_bits())
+    };
+    Ok(symbolic::float(raw, bits))
+}
+
+fn untyped_number(expression: &Expr) -> bool {
     match expression {
-        Expr::Paren(expr) => untyped_integer(&expr.expr),
-        Expr::Group(expr) => untyped_integer(&expr.expr),
-        Expr::Unary(expr) if matches!(expr.op, UnOp::Neg(_)) => untyped_integer(&expr.expr),
-        Expr::Lit(expr) => matches!(&expr.lit, Lit::Int(value) if value.suffix().is_empty()),
+        Expr::Paren(expr) => untyped_number(&expr.expr),
+        Expr::Group(expr) => untyped_number(&expr.expr),
+        Expr::Unary(expr) if matches!(expr.op, UnOp::Neg(_)) => untyped_number(&expr.expr),
+        Expr::Lit(expr) => match &expr.lit {
+            Lit::Int(value) => value.suffix().is_empty(),
+            Lit::Float(value) => value.suffix().is_empty(),
+            _ => false,
+        },
         _ => false,
     }
 }

@@ -40,6 +40,61 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
+        if signature.inputs().len() == 1
+            && signature.inputs()[0] == signature.output()
+            && self.float_type(signature.output()).is_some()
+            && self.tcx.is_intrinsic(callee, Symbol::intern("fabs"))
+        {
+            let [Value::Float { expression, bits }] = values else {
+                return Err("float absolute value requires a modeled float".to_owned());
+            };
+            self.record_model(callee, "IEEE floating-point absolute value");
+            return Ok(Some(Value::Float {
+                expression: format!("(fp.abs {expression})"),
+                bits: *bits,
+            }));
+        }
+        let float_min = ["minimum_number_nsz_f32", "minimum_number_nsz_f64"]
+            .iter()
+            .any(|name| self.tcx.is_intrinsic(callee, Symbol::intern(name)));
+        let float_max = ["maximum_number_nsz_f32", "maximum_number_nsz_f64"]
+            .iter()
+            .any(|name| self.tcx.is_intrinsic(callee, Symbol::intern(name)));
+        if signature.inputs().len() == 2
+            && signature
+                .inputs()
+                .iter()
+                .all(|ty| *ty == signature.output())
+            && self.float_type(signature.output()).is_some()
+            && (float_min || float_max)
+        {
+            let [
+                Value::Float {
+                    expression: left,
+                    bits,
+                },
+                Value::Float {
+                    expression: right, ..
+                },
+            ] = values
+            else {
+                return Err("float min/max requires modeled floats".to_owned());
+            };
+            let comparison = if float_min { "fp.lt" } else { "fp.gt" };
+            let tie = self.fresh("Bool");
+            self.record_model(
+                callee,
+                "IEEE min/max; numeric NaN fallback and either signed-zero tie",
+            );
+            return Ok(Some(Value::Float {
+                expression: format!(
+                    "(ite (fp.isNaN {left}) {right} (ite (fp.isNaN {right}) {left} \
+                     (ite (fp.eq {left} {right}) (ite {tie} {left} {right}) \
+                     (ite ({comparison} {left} {right}) {left} {right}))))"
+                ),
+                bits: *bits,
+            }));
+        }
         let parent = self.tcx.parent(callee);
         let trait_id = if self.tcx.def_kind(parent) == DefKind::Trait {
             Some(parent)

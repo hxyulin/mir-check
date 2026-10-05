@@ -117,11 +117,24 @@ impl<'tcx> Engine<'tcx> {
 
     fn input_binding(&mut self, name: &str, value: &Value) -> Result<(), String> {
         let description = match value {
-            Value::Int { expression, .. } | Value::Bool(expression) => expression.clone(),
+            Value::Int { expression, .. }
+            | Value::Float { expression, .. }
+            | Value::Bool(expression) => expression.clone(),
             Value::Bytes { length, data } => format!("len={}, data={data}", length.integer()?.0),
             Value::Adt { fields, .. } => {
                 for (field, value) in fields {
                     self.input_binding(&format!("{name}.{field}"), value)?;
+                }
+                return Ok(());
+            }
+            Value::Enum {
+                discriminant,
+                variants,
+                ..
+            } => {
+                self.input_binding(&format!("{name}.discriminant"), discriminant)?;
+                for (index, variant) in variants.iter().enumerate() {
+                    self.input_binding(&format!("{name}.variant{index}"), variant)?;
                 }
                 return Ok(());
             }
@@ -231,6 +244,12 @@ impl<'tcx> Engine<'tcx> {
                 signed,
             });
         }
+        if let Some(bits) = self.float_type(ty) {
+            return Ok(Value::Float {
+                expression: self.fresh(&symbolic::float_sort(bits)),
+                bits,
+            });
+        }
         match ty.kind() {
             ty::Bool => Ok(Value::Bool(self.fresh("Bool"))),
             ty::Tuple(fields) if fields.is_empty() => Ok(Value::Unit),
@@ -251,9 +270,8 @@ impl<'tcx> Engine<'tcx> {
                 self.byte_input(id, ty, conditions)
             }
             ty::Array(..) => self.element_input(id, ty, conditions),
-            ty::Adt(def, _) if def.is_struct() && def.did().is_local() => {
-                self.struct_input(id, ty, conditions)
-            }
+            ty::Adt(def, _) if def.is_struct() => self.struct_input(id, ty, conditions),
+            ty::Adt(def, _) if def.is_enum() => self.enum_input(id, ty, conditions),
             _ => Err(format!("unsupported argument type {ty:?}")),
         }
     }
@@ -305,9 +323,17 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
+    fn float_type(&self, ty: Ty<'tcx>) -> Option<u32> {
+        match ty.kind() {
+            ty::Float(ty::FloatTy::F32) => Some(32),
+            ty::Float(ty::FloatTy::F64) => Some(64),
+            _ => None,
+        }
+    }
+
     fn query(&self, conditions: &[String], failure: &str) -> Result<String, String> {
         let mut query = String::from(
-            "(set-logic QF_AUFBV)\n(set-option :timeout 5000)\n\
+            "(set-logic ALL)\n(set-option :timeout 5000)\n\
              (set-option :pp.bv-literals false)\n",
         );
         for declaration in &self.declarations {
@@ -760,11 +786,13 @@ impl<'tcx> Engine<'tcx> {
                     ProjectionElem::Deref,
                     value @ (Value::Bytes { .. }
                     | Value::Adt { .. }
+                    | Value::Enum { .. }
                     | Value::MutableBytes { .. }
                     | Value::Elements(_)
                     | Value::Tuple(_)
                     | Value::Unit
                     | Value::Int { .. }
+                    | Value::Float { .. }
                     | Value::Bool(_)),
                 ) => value,
                 (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
@@ -783,6 +811,37 @@ impl<'tcx> Engine<'tcx> {
                         return Err("enum downcast does not match the modeled variant".to_owned());
                     }
                     value
+                }
+                (
+                    ProjectionElem::Downcast(_, expected),
+                    Value::Enum {
+                        discriminant,
+                        variants,
+                        ..
+                    },
+                ) => {
+                    let value = variants
+                        .get(expected.as_usize())
+                        .ok_or("enum variant missing")?;
+                    let Value::Adt {
+                        discriminant: tag, ..
+                    } = value
+                    else {
+                        return Err("enum payload is not an ADT".to_owned());
+                    };
+                    let (_, bits, signed) = discriminant.integer()?;
+                    let equal = symbolic::binary(
+                        "eq",
+                        *discriminant,
+                        symbolic::integer(*tag, bits, signed),
+                    )?
+                    .boolean()?;
+                    let mut wrong = state.conditions.clone();
+                    wrong.push(symbolic::not(&equal));
+                    if self.feasible(&wrong)? {
+                        return Err("enum downcast lacks a proven variant check".to_owned());
+                    }
+                    value.clone()
                 }
                 (ProjectionElem::Index(index), Value::Bytes { data, length }) => {
                     let index = state.locals[index.as_usize()]
@@ -809,6 +868,14 @@ impl<'tcx> Engine<'tcx> {
                         .ok_or("index is unavailable")?;
                     self.fixed_element(&elements, index, &state.conditions)?
                 }
+                (
+                    ProjectionElem::ConstantIndex {
+                        offset,
+                        min_length,
+                        from_end,
+                    },
+                    value @ (Value::Bytes { .. } | Value::Elements(_)),
+                ) => self.constant_element(state, value, offset, min_length, from_end)?,
                 _ => return Err(format!("unsupported place projection {projection:?}")),
             };
         }
@@ -860,6 +927,9 @@ impl<'tcx> Engine<'tcx> {
                 if ty.is_bool() {
                     return Ok(Value::Bool((bits != 0).to_string()));
                 }
+                if let Some(width) = self.float_type(ty) {
+                    return Ok(symbolic::float(bits, width));
+                }
                 let (width, signed) = self.integer_type(ty).ok_or("unsupported constant type")?;
                 Ok(symbolic::integer(bits, width, signed))
             }
@@ -882,10 +952,12 @@ impl<'tcx> Engine<'tcx> {
                     value,
                     Value::Bytes { .. }
                         | Value::Adt { .. }
+                        | Value::Enum { .. }
                         | Value::Elements(_)
                         | Value::Tuple(_)
                         | Value::Unit
                         | Value::Int { .. }
+                        | Value::Float { .. }
                         | Value::Bool(_)
                 ) {
                     Ok(value)
@@ -906,13 +978,23 @@ impl<'tcx> Engine<'tcx> {
                 self.repeated_bytes(id, body, state, operand, *length)
             }
             Rvalue::Discriminant(place) => {
-                let Value::Adt { discriminant, .. } = self.place(state, *place)? else {
-                    return Err("unmodeled discriminant".to_owned());
-                };
+                let modeled = self.place(state, *place)?;
                 let (bits, signed) = self
                     .integer_type(value.ty(&body.local_decls, self.tcx))
                     .ok_or("unsupported discriminant type")?;
-                Ok(symbolic::integer(discriminant, bits, signed))
+                match modeled {
+                    Value::Adt { discriminant, .. } => {
+                        Ok(symbolic::integer(discriminant, bits, signed))
+                    }
+                    Value::Enum { discriminant, .. } => {
+                        let (_, width, sign) = discriminant.integer()?;
+                        if (width, sign) != (bits, signed) {
+                            return Err("enum discriminant type mismatch".to_owned());
+                        }
+                        Ok(*discriminant)
+                    }
+                    _ => Err("unmodeled discriminant".to_owned()),
+                }
             }
             Rvalue::BinaryOp(operation, operands) => {
                 let left = self.operand(id, body, state, &operands.0)?;
@@ -944,6 +1026,10 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::UnaryOp(operation, operand) => {
                 let value = self.operand(id, body, state, operand)?;
                 match (operation, value) {
+                    (UnOp::Neg, Value::Float { expression, bits }) => Ok(Value::Float {
+                        expression: format!("(fp.neg {expression})"),
+                        bits,
+                    }),
                     (UnOp::Not, Value::Bool(expression)) => {
                         Ok(Value::Bool(symbolic::not(&expression)))
                     }
@@ -986,6 +1072,19 @@ impl<'tcx> Engine<'tcx> {
                     .integer_type(*target)
                     .ok_or("unsupported cast target")?;
                 symbolic::cast(value, bits, signed)
+            }
+            Rvalue::Cast(CastKind::IntToFloat | CastKind::FloatToFloat, operand, target) => {
+                symbolic::float_cast(
+                    self.operand(id, body, state, operand)?,
+                    self.float_type(*target)
+                        .ok_or("unsupported float cast target")?,
+                )
+            }
+            Rvalue::Cast(CastKind::FloatToInt, operand, target) => {
+                let (bits, signed) = self
+                    .integer_type(*target)
+                    .ok_or("unsupported cast target")?;
+                symbolic::cast(self.operand(id, body, state, operand)?, bits, signed)
             }
             Rvalue::Cast(CastKind::PointerCoercion(..), operand, target) => {
                 let ty::Ref(_, element, mutability) = target.kind() else {

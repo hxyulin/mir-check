@@ -20,3 +20,9 @@ syntax and do not expand the checker's supported predicate language.
 
 Versioned HTML comments in doc attributes carry the declarations through macro expansion to
 the compiler adapter. This format is experimental and is not a trusted proof certificate.
+
+Predicates support comparisons, boolean operations, modeled fields and tuple projections,
+array/slice lengths, constant non-byte array indices, integer/float casts and restricted
+exhaustive Option matches. Float literals infer their type from the compared value; mismatched
+or out-of-range literals are rejected. Symbolic Option matches require boolean arms.
+Unsupported predicates and inconsistent entry domains return UNKNOWN.

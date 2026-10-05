@@ -8,15 +8,24 @@ calls; rustc does not supply the proof itself.
 ## Inputs and paths
 
 Each selected root gets symbolic inputs. Integers are bit-vectors with the target's exact widths
-and signedness. Booleans are SMT booleans. Byte contents are SMT arrays; slice lengths satisfy
+and signedness. f32/f64 use SMT floating-point sorts with nearest-even arithmetic and numeric
+NaN/infinity/signed-zero semantics. Float-to-integer casts truncate and saturate as Rust does,
+including NaN-to-zero. Float remainder and raw bit observation remain unknown.
+Booleans are SMT booleans. Byte contents are SMT arrays; slice lengths satisfy
 valid-reference bounds. Struct fields are independent inputs, including private fields. No
 constructor invariant is inferred for an arbitrary struct parameter.
 
-Tuples and nested local structs recursively carry modeled fields, including shared references
-to supported values. Input bindings retain names such as packet.header.index and value.1.0.
-Reference snapshots do not track pointer identity or alias relationships; general mutation and
-mutable fields remain unsupported. Input construction is limited to eight levels and 128 values
-across arguments, so recursive reference shapes and large aggregate trees fail as unknown.
+Tuples and nested local/dependency structs and enums recursively carry modeled fields and shared
+references to supported values. Input bindings retain names such as packet.header.index and
+value.1.0. Reference snapshots do not track pointer identity or alias relationships; general
+mutation and mutable fields remain unsupported. Input construction is limited to eight levels and
+128 values across arguments, so recursive reference shapes and large aggregate trees fail as
+unknown.
+
+Input enums have a symbolic discriminant restricted to actual compiler tags and separate modeled
+payloads for each variant. The engine proves the tag before reading a downcast payload. At most
+16 variants are supported; every variant payload must fit the input model. In reports,
+`value.variantN.field` bindings describe a payload only when that variant is active.
 
 The root's requires predicates restrict the input domain. The engine first checks that the domain
 is satisfiable, refusing inconsistent preconditions as unknown. It then interprets each MIR block,
@@ -70,13 +79,16 @@ so branches and loop iterations can make it expensive.
 ## What is trusted and missing
 
 The result trusts rustc's lowering and types, this MIR interpreter and predicate evaluator, the
-explicit core models, and Z3. Bit-vector and array semantics preserve the supported integer and
-byte operations, but the translator has not been formally verified. Mutation tests and runtime
-replays check representative semantics; they do not establish correctness of the analyzer.
+explicit core models, and Z3. Bit-vector, array and floating-point semantics preserve supported
+integer, byte and numeric float operations, but the translator has not been formally verified.
+Mutation tests and runtime replays check representative semantics; they do not establish correctness
+of the analyzer.
 
 Trusted models implement slice length, byte prefix ranges, lossless integer conversions, endian
 decoding, shared byte-slice-to-array conversion, fixed-array map, exact copies into owned byte
-arrays, and opaque formatting arguments from evaluated static strings. Array map executes each
+arrays, opaque formatting arguments from evaluated static strings, and float abs/min/max.
+Min/max ignores one NaN and permits either operand on equal numeric inputs, including signed-zero
+ties. Raw NaN payload/sign observation is unsupported. Array map executes each
 actual callable body; the model supplies array traversal and storage. Compiler identities and
 instantiated types select models. Dependencies and dynamic formatters are not assumed safe.
 A solver model is not automatically replayed as a Rust test;
@@ -89,13 +101,14 @@ as unknown. Reports identify interpreted instances separately from trusted model
 assume intrinsics become validity obligations, so their predicates must be established on the
 current path.
 
-Coverage remains limited by arbitrary input enums or enum/struct slices, general mutation and
-aliasing, mutable captures, floats, trait objects, function pointers, general iterator machinery,
-destructors and several MIR operations/constants, including some promoted constants. Non-byte
-arrays are limited to 16 elements; symbolic bounded indices work for integers and booleans, while
-enum/struct elements need a uniquely determined index. Generic roots with unresolved type
-parameters remain unsupported. There are no inductive loop invariants, automatic type invariants,
-dedicated termination checks or general effect contracts.
+Coverage remains limited by enum/struct slices, general mutation and aliasing, mutable captures,
+unresolved generic inputs, float remainder/bit observation, trait objects, function pointers and
+general iterator machinery, destructors and several MIR operations/constants, including some
+promoted constants. Non-byte arrays are limited to 16 elements; symbolic bounded indices work for
+integers, floats and booleans; enum/struct elements need a uniquely determined index. Array/slice
+patterns prove their minimum length and index bounds before applying constant start/end offsets.
+Generic roots with unresolved type parameters remain unsupported. There are no inductive loop
+invariants, automatic type invariants, dedicated termination checks or general effect contracts.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
 propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and

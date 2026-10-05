@@ -153,23 +153,25 @@ containing a shared byte slice.
 
 | Area | Supported subset |
 | --- | --- |
-| Inputs | Integers, bool, unit, byte slices/arrays, tuples, nested local structs, shared references and small arrays of modeled values |
-| Arithmetic | Exact integer widths, casts, comparisons, bit operations, shifts and checked/wrapping arithmetic |
+| Inputs | Integers, f32/f64, bool, unit, byte slices/arrays, tuples, nested local/dependency structs and enums, shared references and small arrays |
+| Arithmetic | Exact integer operations; IEEE f32/f64 arithmetic, comparisons and saturating casts |
 | Calls | Concrete generics, static traits, available dependency MIR, function items and read-only closures |
-| Control flow | Feasible branches, constructed local/core enums, Option/Result question-mark propagation and completely unrolled finite loops |
-| Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map and static formatting arguments |
+| Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |
+| Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map, float abs/min/max and static formatting arguments |
 | Contracts | Caller bounds, entry preconditions and postconditions on actual returns |
 
-Integer/bool arrays support symbolic bounded indices. Tuple/struct/enum array elements require a
-uniquely determined index on the current path. Root struct fields are independent inputs;
-privacy and constructors do not supply an implicit type invariant. Nested input construction is
-limited to eight levels and 128 values; non-byte arrays have at most 16 elements.
+Integer/bool/float arrays support symbolic bounded indices and array/slice pattern projections.
+Tuple/struct/enum array elements require a uniquely determined index on the current path. Root
+struct fields are independent inputs; privacy and constructors do not supply an implicit type
+invariant. Nested input construction is limited to eight levels and 128 values; non-byte arrays have
+at most 16 elements and input enums have at most 16 variants. All variant payloads must have
+supported shapes.
 
-General mutation and aliasing, mutable captures, arbitrary enum inputs or enum/struct slices,
-floats, dynamic dispatch, function pointers, destructor execution, some promoted constants and
-broader iterator machinery remain gaps. Limits and unsupported operations produce UNKNOWN.
-A selected-root proof also does not establish absence of undefined behavior, allocation failure,
-stack exhaustion, interrupt races or hardware timing failures.
+General mutation and aliasing, mutable captures, enum/struct slices, unresolved generic inputs,
+float remainder and bit observation, dynamic dispatch, function pointers, destructor execution, some
+aggregate/promoted constants and broader iterator machinery remain gaps. Limits and unsupported
+operations produce UNKNOWN. A selected-root proof also does not establish absence of undefined
+behavior, allocation failure, stack exhaustion, interrupt races or hardware timing failures.
 
 See [the coverage matrix](docs/coverage.md) for evidence and limits, and
 [proof execution](docs/proofs.md) for how obligations are generated and what the result trusts.

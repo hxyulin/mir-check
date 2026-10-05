@@ -133,8 +133,8 @@ Start with an inventory or a small root, then inspect the summary's gap reasons.
 root input requires new input modeling; selecting a smaller concrete caller may let it construct
 supported values. Missing dependency MIR cannot be solved by an annotation that merely claims
 the call is safe. Larger loops may need invariants rather than more unrolling. Read-only nested
-structs and tuples are supported, but recursive reference shapes, mutable fields and arbitrary
-enum inputs remain unsupported.
+structs, tuples and enums are supported when every field/payload fits the model. Recursive
+reference shapes, mutable fields, unresolved generics and enum/struct slices remain unsupported.
 
 The checker stops a root at its first unsupported operation, so its reported reason need not
 enumerate every gap in that function. A solver assignment is a counterexample to the translated

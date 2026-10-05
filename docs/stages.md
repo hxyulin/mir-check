@@ -226,3 +226,22 @@ Validation includes the Rust formatting/lint/test/release/dependency checks, man
 the documentation production build and browser checks of page links, search and desktop/mobile
 themes. No firmware source or dependency was changed. See [development](development.md) for the
 documentation build and publication procedure.
+
+## Stage 11: floating point, enum domains and dependency-defined inputs
+
+The engine models f32/f64 with SMT floating-point sorts, nearest-even arithmetic and Rust's
+saturating integer casts. Comparisons preserve NaN and signed-zero behavior. Compiler-identified
+absolute value and min/max models preserve numeric NaN fallback and allow either equal operand.
+Float remainder and raw bit observation stay unknown. Contracts accept typed finite float
+literals, float casts and float-dependent call bounds.
+
+Root enums receive legal symbolic discriminants and per-variant payloads; downcasts must prove
+the active tag. Explicit signed discriminants are preserved. Local and dependency-defined
+structs/enums use the same recursive shape limits. Symbolic Option contract matches have boolean
+arms, and postconditions preserve entry snapshots. Unsupported payloads never become successes.
+Array/slice pattern projections check minimum lengths and start/end offsets.
+
+Four new compiler integration tests cover positive, refuted and unknown cases on host and ARM,
+including foreign no_std inputs, NaN/zero/rounding/cast edge cases and off-by-one call guards.
+There are 53 compiler integration tests and one metadata test. The fleet survey reruns the same
+32 ARM units to measure newly supported paths without modifying firmware.

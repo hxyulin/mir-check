@@ -3,22 +3,6 @@ use rustc_abi::VariantIdx;
 use rustc_span::Symbol;
 
 impl<'tcx> Engine<'tcx> {
-    pub(super) fn standard_enum(&self, id: DefId) -> bool {
-        [
-            LangItem::ResultOk,
-            LangItem::ResultErr,
-            LangItem::ControlFlowContinue,
-            LangItem::ControlFlowBreak,
-        ]
-        .iter()
-        .any(|item| {
-            self.tcx
-                .lang_items()
-                .get(*item)
-                .is_some_and(|variant| self.tcx.parent(variant) == id)
-        })
-    }
-
     pub(super) fn constructed(
         &self,
         ty: Ty<'tcx>,

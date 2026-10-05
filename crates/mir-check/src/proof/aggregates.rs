@@ -3,8 +3,69 @@ use rustc_index::IndexVec;
 
 const MAX_ARRAY_BYTES: u64 = 128;
 const MAX_ARRAY_ELEMENTS: usize = 16;
+const MAX_ENUM_VARIANTS: usize = 16;
 
 impl<'tcx> Engine<'tcx> {
+    pub(super) fn enum_input(
+        &mut self,
+        id: DefId,
+        ty: Ty<'tcx>,
+        conditions: &mut Vec<String>,
+    ) -> Result<Value, String> {
+        let ty::Adt(def, args) = ty.kind() else {
+            return Err("expected an enum type".to_owned());
+        };
+        if def.variants().is_empty() || def.variants().len() > MAX_ENUM_VARIANTS {
+            return Err("enum inputs need between 1 and 16 variants".to_owned());
+        }
+        let (bits, signed) = self
+            .integer_type(ty.discriminant_ty(self.tcx))
+            .ok_or("unsupported enum discriminant type")?;
+        let discriminant = Value::Int {
+            expression: self.fresh(&format!("(_ BitVec {bits})")),
+            bits,
+            signed,
+        };
+        let mut variants = Vec::new();
+        let mut valid = Vec::new();
+        for (index, variant) in def.variants().iter_enumerated() {
+            if self.input_values >= MAX_INPUT_VALUES {
+                return Err("input shape exceeds the 128-value budget".to_owned());
+            }
+            self.input_values += 1;
+            let tag = def.discriminant_for_variant(self.tcx, index).val;
+            valid.push(
+                symbolic::binary(
+                    "eq",
+                    discriminant.clone(),
+                    symbolic::integer(tag, bits, signed),
+                )?
+                .boolean()?,
+            );
+            let fields = variant
+                .fields
+                .iter()
+                .map(|field| {
+                    let ty = self
+                        .tcx
+                        .try_normalize_erasing_regions(
+                            ty::TypingEnv::fully_monomorphized(),
+                            field.ty(self.tcx, args),
+                        )
+                        .map_err(|error| format!("input field normalization failed: {error:?}"))?;
+                    self.argument(id, ty, conditions)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            variants.push(self.constructed(ty, index.as_usize(), fields)?);
+        }
+        conditions.push(format!("(or {})", valid.join(" ")));
+        Ok(Value::Enum {
+            discriminant: Box::new(discriminant),
+            variants,
+            is_option: self.tcx.lang_items().get(LangItem::Option) == Some(def.did()),
+        })
+    }
+
     pub(super) fn struct_input(
         &mut self,
         id: DefId,
@@ -117,15 +178,8 @@ impl<'tcx> Engine<'tcx> {
             }
             AggregateKind::Adt(id, variant, _, _, active) if active.is_none() => {
                 let def = self.tcx.adt_def(*id);
-                if !def.is_struct()
-                    && !(def.is_enum() && id.is_local())
-                    && self.tcx.lang_items().get(LangItem::Option) != Some(*id)
-                    && !self.standard_enum(*id)
-                {
-                    return Err(
-                        "only structs, constructed local enums and Option variants are modeled"
-                            .to_owned(),
-                    );
+                if !def.is_struct() && !def.is_enum() {
+                    return Err("only struct and enum aggregates are modeled".to_owned());
                 }
                 let layout = def.variant(*variant);
                 if layout.fields.len() != values.len() {
@@ -191,6 +245,62 @@ impl<'tcx> Engine<'tcx> {
         })
     }
 
+    pub(super) fn constant_element(
+        &self,
+        state: &State,
+        value: Value,
+        offset: u64,
+        min_length: u64,
+        from_end: bool,
+    ) -> Result<Value, String> {
+        let bits = u32::from(self.tcx.sess.target.pointer_width);
+        let length = match &value {
+            Value::Bytes { length, .. } => length.as_ref().clone(),
+            Value::Elements(elements) => symbolic::integer(elements.len() as u128, bits, false),
+            _ => return Err("constant indexing needs a modeled array or slice".to_owned()),
+        };
+        let required = if from_end {
+            min_length.max(offset)
+        } else {
+            min_length
+        };
+        let long_enough = symbolic::binary(
+            "ge",
+            length.clone(),
+            symbolic::integer(u128::from(required), bits, false),
+        )?
+        .boolean()?;
+        let mut too_short = state.conditions.clone();
+        too_short.push(symbolic::not(&long_enough));
+        if self.feasible(&too_short)? {
+            return Err("constant index lacks a proven minimum length".to_owned());
+        }
+        let offset = symbolic::integer(u128::from(offset), bits, false);
+        let index = if from_end {
+            symbolic::binary("sub", length.clone(), offset)?
+        } else {
+            offset
+        };
+        match value {
+            Value::Elements(elements) => self.fixed_element(&elements, &index, &state.conditions),
+            Value::Bytes { data, .. } => {
+                let inside = symbolic::binary("lt", index.clone(), length)?.boolean()?;
+                let mut outside = state.conditions.clone();
+                outside.push(symbolic::not(&inside));
+                if self.feasible(&outside)? {
+                    return Err("constant byte index lacks a proven bounds check".to_owned());
+                }
+                let (expression, _, _) = index.integer()?;
+                Ok(Value::Int {
+                    expression: format!("(select {data} {expression})"),
+                    bits: 8,
+                    signed: false,
+                })
+            }
+            _ => Err("constant indexing needs a modeled array or slice".to_owned()),
+        }
+    }
+
     pub(super) fn repeated_bytes(
         &self,
         id: DefId,
@@ -215,7 +325,10 @@ impl<'tcx> Engine<'tcx> {
             }
         ) {
             if count > MAX_ARRAY_ELEMENTS as u64
-                || !matches!(value, Value::Int { .. } | Value::Bool(_))
+                || !matches!(
+                    value,
+                    Value::Int { .. } | Value::Float { .. } | Value::Bool(_)
+                )
             {
                 return Err("only small scalar repeats are modeled".to_owned());
             }

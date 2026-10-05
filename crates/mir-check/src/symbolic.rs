@@ -1,3 +1,6 @@
+mod floating;
+pub use floating::{float, float_cast, float_sort};
+
 #[derive(Clone, Debug)]
 pub enum Value {
     Bool(String),
@@ -5,6 +8,10 @@ pub enum Value {
         expression: String,
         bits: u32,
         signed: bool,
+    },
+    Float {
+        expression: String,
+        bits: u32,
     },
     Bytes {
         length: Box<Value>,
@@ -16,6 +23,11 @@ pub enum Value {
         is_option: bool,
         discriminant: u128,
         fields: Vec<(String, Value)>,
+    },
+    Enum {
+        discriminant: Box<Value>,
+        variants: Vec<Value>,
+        is_option: bool,
     },
     MutableBytes {
         owner: usize,
@@ -34,11 +46,13 @@ impl Value {
         match self {
             Self::MutableBytes { .. } => true,
             Self::Adt { fields, .. } => fields.iter().any(|(_, value)| value.contains_mutable()),
+            Self::Enum { variants, .. } => variants.iter().any(Self::contains_mutable),
             Self::Tuple(fields) | Self::Elements(fields) => {
                 fields.iter().any(Self::contains_mutable)
             }
             Self::Bool(_)
             | Self::Int { .. }
+            | Self::Float { .. }
             | Self::Bytes { .. }
             | Self::StaticText
             | Self::FormatArguments
@@ -101,6 +115,9 @@ pub fn not(expression: &str) -> String {
 }
 
 pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, String> {
+    if let (Value::Float { .. }, Value::Float { .. }) = (&left, &right) {
+        return floating::binary(operation, left, right);
+    }
     if let (Value::Bool(left), Value::Bool(right)) = (&left, &right) {
         let expression = match operation {
             "eq" => format!("(= {left} {right})"),
@@ -183,6 +200,9 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
 }
 
 pub fn cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
+    if matches!(value, Value::Float { .. }) {
+        return floating::integer_cast(value, bits, signed);
+    }
     if let Value::Bool(expression) = value {
         return Ok(Value::Int {
             expression: format!("(ite {expression} (_ bv1 {bits}) (_ bv0 {bits}))"),
@@ -253,6 +273,16 @@ pub fn select_element(elements: &[Value], index: &Value) -> Result<Value, String
             (Value::Bool(expression), Value::Bool(otherwise)) => {
                 Value::Bool(format!("(ite {condition} {expression} {otherwise})"))
             }
+            (
+                Value::Float { expression, bits },
+                Value::Float {
+                    expression: otherwise,
+                    bits: other_bits,
+                },
+            ) if *bits == other_bits => Value::Float {
+                expression: format!("(ite {condition} {expression} {otherwise})"),
+                bits: *bits,
+            },
             _ => return Err("array choice only models compatible scalar values".to_owned()),
         };
     }

@@ -1895,7 +1895,7 @@ fn cargo_entries_select_workspace_roots_and_missing_or_failed_roots_cannot_pass(
                 "#![no_std]\npub fn read(value: u8) -> u8 { value }\n\
                  pub fn bad(value: u8) -> u8 { value + 1 }\n"
             } else {
-                "#![no_std]\npub fn read(value: f32) -> f32 { value }\n"
+                "#![no_std]\npub fn read(value: char) -> char { value }\n"
             },
         )
         .unwrap();
@@ -1947,7 +1947,7 @@ fn cargo_entries_select_workspace_roots_and_missing_or_failed_roots_cannot_pass(
         assert_eq!(actual, counts, "{entries:?}: {stdout}");
         assert!(stdout.contains("counts describe roots, not runtime coverage"));
         if entries.contains(&"read") {
-            assert!(stdout.contains("gap: unsupported argument type f32"));
+            assert!(stdout.contains("gap: unsupported argument type char"));
         }
         if entries.contains(&"absent") {
             assert!(stderr.contains("entry \"absent\" has no inventoried MIR body"));
@@ -2186,6 +2186,240 @@ fn cargo_selected_real_parser_and_nested_packet_prove_on_host_and_arm() {
             } else {
                 assert!(report.target.contains(std::env::consts::ARCH));
             }
+        }
+    }
+}
+
+#[test]
+fn floating_paths_preserve_nan_zero_rounding_saturation_and_call_bounds_on_host_and_arm() {
+    let path = fixture("floating.rs");
+    let entries = [
+        ("arithmetic", ProofStatus::Proved),
+        ("float_methods", ProofStatus::Proved),
+        ("bad_min_zero", ProofStatus::Refuted),
+        ("guarded_index", ProofStatus::Proved),
+        ("bad_index", ProofStatus::Refuted),
+        ("bad_nan", ProofStatus::Refuted),
+        ("bad_zero", ProofStatus::Refuted),
+        ("cast_edges", ProofStatus::Proved),
+        ("casts_and_rounding", ProofStatus::Proved),
+        ("bounded", ProofStatus::Proved),
+        ("guarded_call", ProofStatus::Proved),
+        ("bad_call", ProofStatus::Refuted),
+        ("unsupported_remainder", ProofStatus::Unknown),
+        ("unsupported_bits", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&path, &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+    }
+    let nan = f64::NAN;
+    let equal = |left: f64, right: f64| left == right;
+    assert!(!equal(nan, nan));
+    assert_eq!(1.0_f32 / -0.0, f32::NEG_INFINITY);
+    assert_eq!(nan as i32, 0);
+    assert_eq!(f64::INFINITY as i32, i32::MAX);
+    assert_eq!(f64::NEG_INFINITY as i32, i32::MIN);
+    assert_eq!((16_777_217_u32 as f32) as u32, 16_777_216);
+    assert_eq!(f32::MAX as u128, u128::MAX - ((1_u128 << 104) - 1));
+}
+
+#[test]
+fn enum_inputs_preserve_tags_payloads_and_option_contracts_on_host_and_arm() {
+    let entries = [
+        ("discriminants", ProofStatus::Proved),
+        ("bad_variant", ProofStatus::Refuted),
+        ("guarded", ProofStatus::Proved),
+        ("bad_payload", ProofStatus::Refuted),
+        ("bounded_option", ProofStatus::Proved),
+        ("guarded_option", ProofStatus::Proved),
+        ("bad_option", ProofStatus::Refuted),
+        ("snapshot", ProofStatus::Proved),
+        ("result_payload", ProofStatus::Proved),
+        ("generic_enum", ProofStatus::Unknown),
+        ("mutable_enum", ProofStatus::Unknown),
+        ("enum_slice", ProofStatus::Unknown),
+        ("large", ProofStatus::Unknown),
+        ("empty", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("enum_inputs.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+        assert!(
+            report
+                .functions
+                .iter()
+                .find(|f| f.name == "bounded_option")
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap()
+                .inputs
+                .contains_key("index.discriminant")
+        );
+    }
+}
+
+#[test]
+fn dependency_defined_inputs_preserve_nested_fields_and_enum_payloads_on_host_and_arm() {
+    let directory = Directory::new();
+    let dependency = directory.0.join("dependency.rs");
+    std::fs::write(
+        &dependency,
+        r#"
+#![no_std]
+pub struct Packet { pub index: Option<usize>, pub bytes: [u8; 4], pub gain: f32 }
+pub enum Message { Missing, Sample(Packet) }
+"#,
+    )
+    .unwrap();
+    let source = directory.0.join("consumer.rs");
+    std::fs::write(&source, r#"
+#![no_std]
+pub fn read(packet: &dependency::Packet) -> u8 {
+    match packet.index {
+        Some(index) if packet.gain > 0.0 && index < packet.bytes.len() => packet.bytes[index],
+        _ => 0,
+    }
+}
+
+pub fn bad(packet: &dependency::Packet) -> u8 {
+    match packet.index {
+        Some(index) if packet.gain > 0.0 && index <= packet.bytes.len() => packet.bytes[index],
+        _ => 0,
+    }
+}
+pub fn message(value: &dependency::Message) -> u8 {
+    match value { dependency::Message::Missing => 0, dependency::Message::Sample(packet) => read(packet) }
+}
+"#).unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let library = directory.0.join(if target.is_some() {
+            "libarm.rlib"
+        } else {
+            "libhost.rlib"
+        });
+        let mut build = Command::new("rustup");
+        build.args([
+            "run",
+            "nightly-2026-09-22",
+            "rustc",
+            "--crate-type=rlib",
+            "--edition=2024",
+            "--crate-name=dependency",
+            "-Cpanic=abort",
+        ]);
+        if let Some(target) = target {
+            build.args(["--target", target]);
+        }
+        let output = build
+            .arg(&dependency)
+            .arg("-o")
+            .arg(&library)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let external = format!("dependency={}", library.display());
+        let mut args = vec!["--extern", &external];
+        if let Some(target) = target {
+            args.extend(["--target", target]);
+        }
+        let (output, report) = verify_vendored(&source, &["read", "bad", "message"], &args);
+        assert!(!output.status.success());
+        for name in ["read", "bad", "message"] {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status,
+                if name == "bad" {
+                    ProofStatus::Refuted
+                } else {
+                    ProofStatus::Proved
+                },
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+    }
+}
+
+#[test]
+fn array_patterns_preserve_minimum_lengths_and_start_and_end_offsets_on_host_and_arm() {
+    let entries = [
+        ("array", ProofStatus::Proved),
+        ("slice", ProofStatus::Proved),
+        ("bad_slice", ProofStatus::Refuted),
+        ("unsupported_slice", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("array_patterns.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
         }
     }
 }
