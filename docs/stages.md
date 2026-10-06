@@ -374,3 +374,22 @@ Ordinary ARM Cargo analysis proves the unchanged fleet controller::Pid::reset an
 final-state postcondition without annotations or a new dependency. The selected check takes
 0.25 seconds on the development machine, including compilation. This is selected-root evidence;
 the published whole-workspace survey has not been rerun for these memory stages.
+
+## Stage 20: progress, readable results and JSONL
+
+The default CLI view prioritizes failed/incomplete/conditional roots, caps compact rows and long
+details, groups the largest gaps, and ends with aggregate outcomes and elapsed time. --verbose
+retains the complete inventory/obligations view; --summary remains a compact-view alias. Terminal
+colors distinguish all four outcomes without replacing their labels. Auto color honors NO_COLOR;
+explicit always/never modes and --quiet support terminals and captured logs.
+
+Builds, active crate/root positions and report processing announce progress on stderr. Five-second
+heartbeats keep long solver checks visible without redrawing over compiler diagnostics. JSONL
+exports preserve one full raw report per line. Stdout exports redirect all human/Cargo messages
+to stderr, including Cargo JSON messages. A report subcommand reads saved schema-7/8 JSON or JSONL,
+recomputes cached counts and preserves strict exits; it explicitly states that analysis was not
+rerun. Malformed/empty/unsupported inputs and output failures fail the command.
+
+Compiler regressions cover clean machine streams, captured/forced colors, distinct trusted labels,
+saved-report exits, legacy input, malformed input, Cargo message forwarding and a deliberately
+slow solver that must show active-root progress. There are 67 compiler tests and one metadata test.

@@ -11,6 +11,7 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
 
+use mir_check::cli::{Color, Progress};
 use mir_check::{
     Contract, ContractConfig, ContractKind, ContractStatus, Function, ProofStatus, Report, Source,
 };
@@ -36,7 +37,11 @@ struct Checker {
     entries: Vec<String>,
     rustc_arguments: Vec<String>,
     verify: bool,
-    summary: bool,
+    verbose: bool,
+    color: Color,
+    quiet: bool,
+    jsonl: Option<PathBuf>,
+    started: std::time::Instant,
     contracts_path: Option<PathBuf>,
     contract_config: Option<ContractConfig>,
     allow_assumptions: bool,
@@ -55,6 +60,11 @@ impl Callbacks for Checker {
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
         tcx.dcx().abort_if_errors();
+        let progress = Progress::new(
+            !self.quiet,
+            self.color,
+            format!("Analyzing {} [{}]", report.crate_name, report.target),
+        );
         report.contract_config = self.contract_config.clone();
         if let Some(config) = &self.contract_config {
             for function in &mut report.functions {
@@ -107,16 +117,32 @@ impl Callbacks for Checker {
             Ok(()) => {
                 let config = self.contract_config.clone().unwrap_or_default();
                 if self.verify {
+                    let selected = report
+                        .functions
+                        .iter()
+                        .filter(|function| {
+                            self.entries.is_empty() || entries.contains(&function.name)
+                        })
+                        .count();
+                    let mut completed = 0;
                     for function in &mut report.functions {
                         if !self.entries.is_empty() && !entries.contains(&function.name) {
                             continue;
                         }
+                        progress.update(format!(
+                            "{}: checking [{}/{}] {}",
+                            report.crate_name,
+                            completed + 1,
+                            selected,
+                            function.name
+                        ));
                         let id = tcx
                             .mir_keys(())
                             .iter()
                             .find(|id| tcx.def_path_str(id.to_def_id()) == function.name)
                             .expect("inventoried functions have local MIR bodies");
                         function.proof = Some(proof::verify(tcx, id.to_def_id(), &config));
+                        completed += 1;
                         if function.proof.as_ref().is_some_and(|proof| {
                             matches!(
                                 proof.status,
@@ -146,15 +172,8 @@ impl Callbacks for Checker {
                 report.matched_contracts.sort();
                 report.matched_contracts.dedup();
                 report.coverage = mir_check::coverage(&report);
-                if let Err(error) = self.emit(&report) {
-                    self.error = Some(error.to_string());
-                } else if report.functions.iter().any(|function| {
-                    function.proof.as_ref().is_some_and(|proof| {
-                        proof.status != ProofStatus::Proved
-                            && !(self.allow_assumptions
-                                && proof.status == ProofStatus::ProvedWithAssumptions)
-                    })
-                }) {
+                progress.update(format!("Writing report for {}", report.crate_name));
+                if !mir_check::cli::accepted(&report, self.allow_assumptions) {
                     self.error = Some(
                         "verification failed; inspect failed obligations and trusted assumptions"
                             .to_owned(),
@@ -176,8 +195,19 @@ impl Callbacks for Checker {
                         ));
                     }
                 }
+                if let Err(error) = self.emit(&report) {
+                    self.error = Some(error.to_string());
+                }
             }
             Err(error) => self.error = Some(error),
+        }
+        let elapsed_s = progress.elapsed();
+        drop(progress);
+        if !self.quiet {
+            eprintln!(
+                "mir-check: Analyzed {} in {elapsed_s:.1}s",
+                report.crate_name
+            );
         }
         if self.report_dir.is_some() {
             Compilation::Continue
@@ -195,10 +225,16 @@ impl Checker {
             std::fs::write(path, serde_json::to_vec_pretty(report)?)?;
         } else if self.json {
             println!("{}", serde_json::to_string_pretty(report)?);
-        } else if self.summary {
-            print!("{}", mir_check::render_coverage(report));
         } else {
-            print!("{}", mir_check::render(report));
+            mir_check::cli::present(
+                std::slice::from_ref(report),
+                self.verbose,
+                self.color,
+                self.jsonl.as_deref(),
+                self.error.is_none(),
+                self.started.elapsed().as_secs_f64(),
+                false,
+            )?;
         }
         Ok(())
     }
@@ -284,6 +320,23 @@ fn parse_contract(doc: &str) -> Option<Contract> {
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|arg| arg == "report") {
+        return match mir_check::cli::report_command(&args[2..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("mir-check: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let color = match Color::parse(&std::env::var("MIR_CHECK_COLOR").unwrap_or("auto".to_owned())) {
+        Ok(color) => color,
+        Err(error) => {
+            eprintln!("mir-check: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let report_dir = std::env::var_os("MIR_CHECK_REPORT_DIR").map(PathBuf::from);
     let entries = if report_dir.is_some() {
         match std::env::var("MIR_CHECK_ENTRIES") {
@@ -310,7 +363,11 @@ fn main() -> ExitCode {
         entries,
         rustc_arguments: Vec::new(),
         verify: std::env::var_os("MIR_CHECK_VERIFY").is_some(),
-        summary: false,
+        verbose: false,
+        color,
+        quiet: std::env::var_os("MIR_CHECK_QUIET").is_some(),
+        jsonl: None,
+        started: std::time::Instant::now(),
         contracts_path: std::env::var_os("MIR_CHECK_CONTRACTS").map(PathBuf::from),
         contract_config: None,
         allow_assumptions: std::env::var_os("MIR_CHECK_ALLOW_ASSUMPTIONS").is_some(),
@@ -327,9 +384,11 @@ fn main() -> ExitCode {
         {
             println!(
                 "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] \
-                [--contracts FILE] [--allow-assumptions] -- \
+                [--contracts FILE] [--allow-assumptions] [--verbose] [--quiet] \
+                [--color auto|always|never] [--jsonl FILE|-] -- \
                 <rustc arguments>\n\
-                --verify proves panic safety for a restricted MIR subset; unknown proofs fail."
+                --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
+                mir-check report <file or directory> reads saved JSON/JSONL reports."
             );
             return ExitCode::SUCCESS;
         }
@@ -344,7 +403,55 @@ fn main() -> ExitCode {
                     args.remove(1);
                 }
                 Some("--summary") => {
-                    checker.summary = true;
+                    checker.verbose = false;
+                    args.remove(1);
+                }
+                Some("--verbose") => {
+                    checker.verbose = true;
+                    args.remove(1);
+                }
+                Some("--quiet") => {
+                    checker.quiet = true;
+                    args.remove(1);
+                }
+                Some("--color") => {
+                    args.remove(1);
+                    let Some(value) = args.get(1) else {
+                        eprintln!("mir-check: --color needs a value");
+                        return ExitCode::FAILURE;
+                    };
+                    checker.color = match Color::parse(value) {
+                        Ok(color) => color,
+                        Err(error) => {
+                            eprintln!("mir-check: {error}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    args.remove(1);
+                }
+                Some(value) if value.starts_with("--color=") => {
+                    checker.color = match Color::parse(&value[8..]) {
+                        Ok(color) => color,
+                        Err(error) => {
+                            eprintln!("mir-check: {error}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
+                    args.remove(1);
+                }
+                Some("--jsonl") => {
+                    args.remove(1);
+                    let Some(path) = args.get(1) else {
+                        eprintln!("mir-check: --jsonl needs a path");
+                        return ExitCode::FAILURE;
+                    };
+                    checker.jsonl = match mir_check::cli::output_path(path) {
+                        Ok(path) => Some(path),
+                        Err(error) => {
+                            eprintln!("mir-check: {error}");
+                            return ExitCode::FAILURE;
+                        }
+                    };
                     args.remove(1);
                 }
                 Some("--allow-assumptions") => {
@@ -373,6 +480,10 @@ fn main() -> ExitCode {
         if args.get(1).is_some_and(|arg| arg == "--") {
             args.remove(1);
         }
+    }
+    if checker.json && checker.jsonl.is_some() {
+        eprintln!("mir-check: choose --json or --jsonl");
+        return ExitCode::FAILURE;
     }
     if let Some(path) = &checker.contracts_path {
         match ContractConfig::read(path) {

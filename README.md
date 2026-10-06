@@ -66,10 +66,27 @@ The unchanged DR16 parser proves without entry preconditions: it cannot panic fo
 byte slice, accepts exactly 18 bytes, and establishes the decoded switch and channel bounds.
 Repeat the command with `--target thumbv7em-none-eabihf` to analyze the ARM build.
 
-`--summary` shows root outcomes, unselected bodies, interpreted instances and grouped reasons for
-UNKNOWN. Omit it for the full inventory, obligations, assumptions and solver models. Per-crate
+Default output shows root outcomes, unselected bodies, interpreted instances and the main reasons
+for UNKNOWN. `--summary` remains an alias for this compact view; use `--verbose` for the full
+inventory, obligations, assumptions and solver models. Per-crate
 JSON reports are written under `target/mir-check/<run>/reports`, including failed verification.
 These counts describe analysis roots, not runtime test coverage or the safety of unselected code.
+
+The CLI reports build/analysis/report-reading phases and prints the active root with elapsed time
+every five seconds during slow checks. Terminal results use green for PROVED, red for REFUTED,
+amber for UNKNOWN and magenta for PROVED_WITH_ASSUMPTIONS. Color never carries meaning alone.
+Piped output is plain by default; `--color auto|always|never`, NO_COLOR and `--quiet` control
+display.
+
+```sh
+cargo mir-check --verify --entry my_crate::function --jsonl results.jsonl --lib
+cargo mir-check report results.jsonl
+cargo mir-check report target/mir-check/<run>/reports --verbose --color never
+```
+
+JSONL contains one complete crate report per line, preserving queries, models and trusted
+assumptions. `--jsonl -` writes clean JSONL to stdout and moves human output to stderr. The report
+command reads saved JSON files, report directories or JSONL without running the compiler or solver.
 
 | Result | What it tells you |
 | --- | --- |

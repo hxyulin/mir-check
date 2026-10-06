@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use mir_check::cli::{Color, Progress};
 use mir_check::{ContractConfig, Report};
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -11,6 +12,17 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     if args.first().is_some_and(|arg| arg == "mir-check") {
         args.remove(0);
     }
+    if args.first().is_some_and(|arg| arg == "report") {
+        let args = args[1..]
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        return Ok(if mir_check::cli::report_command(&args)? {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        });
+    }
     if args
         .first()
         .is_some_and(|arg| arg == "--help" || arg == "-h")
@@ -18,16 +30,22 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
             [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] \
+            [--verbose] [--color auto|always|never] [--quiet] [--jsonl FILE|-] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
             Repeat --entry to select exact or crate-qualified roots; missing roots fail.\n\
             Dependency MIR is retained by default; --no-dependency-mir disables retention.\n\
-            Without --entry, --verify requires all local bodies to pass."
+            Without --entry, --verify requires all local bodies to pass.\n\
+            Default output is compact; --verbose shows the full inventory and obligations.\n\
+            cargo mir-check report <file or directory> reads saved JSON/JSONL reports."
         );
         return Ok(ExitCode::SUCCESS);
     }
     let mut verify = false;
-    let mut summary = false;
+    let mut verbose = false;
+    let mut color = Color::Auto;
+    let mut quiet = false;
+    let mut jsonl = None;
     let mut dependency_mir = true;
     let mut entries = Vec::new();
     let mut contracts_path = None;
@@ -37,7 +55,26 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--verify") => verify = true,
-            Some("--summary") => summary = true,
+            Some("--summary") => verbose = false,
+            Some("--verbose") => verbose = true,
+            Some("--quiet") => {
+                quiet = true;
+                cargo_args.push(arg);
+            }
+            Some("--color") => {
+                color = Color::parse(
+                    &args
+                        .next()
+                        .ok_or("--color needs a value")?
+                        .to_string_lossy(),
+                )?
+            }
+            Some(value) if value.starts_with("--color=") => color = Color::parse(&value[8..])?,
+            Some("--jsonl") => {
+                jsonl = Some(mir_check::cli::output_path(
+                    &args.next().ok_or("--jsonl needs a path")?.to_string_lossy(),
+                )?)
+            }
             Some("--no-dependency-mir") => dependency_mir = false,
             Some("--allow-assumptions") => allow_assumptions = true,
             Some("--contracts") => {
@@ -84,6 +121,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut command = Command::new(sysroot.join("bin/cargo"));
     command
         .arg("check")
+        .args(["--color", color.argument()])
         .args(cargo_args)
         .arg("--target-dir")
         .arg(root.join("build"))
@@ -93,6 +131,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env("MIR_CHECK_REPORT_DIR", &reports)
         .env("MIR_CHECK_ENTRIES", serde_json::to_string(&entries)?)
         .env("CARGO_INCREMENTAL", "0");
+    command.env("MIR_CHECK_COLOR", color.argument());
+    if quiet {
+        command.env("MIR_CHECK_QUIET", "1");
+    } else {
+        command.env_remove("MIR_CHECK_QUIET");
+    }
     command
         .env_remove("MIR_CHECK_CONTRACTS")
         .env_remove("MIR_CHECK_ALLOW_ASSUMPTIONS");
@@ -110,29 +154,47 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     } else {
         command.env_remove("MIR_CHECK_VERIFY");
     }
+    if jsonl.as_deref() == Some(std::path::Path::new("-")) {
+        command.stdout(std::process::Stdio::from(std::io::stderr()));
+    }
+    let build_progress = Progress::new(
+        !quiet,
+        color,
+        "Building workspace and analyzing selected roots".to_owned(),
+    );
     let status = command.status()?;
+    let build_elapsed_s = build_progress.elapsed();
+    drop(build_progress);
     let mut paths = std::fs::read_dir(&reports)?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<Result<Vec<_>, _>>()?;
     paths.sort();
     if paths.is_empty() {
         if !status.success() {
+            eprintln!("mir-check: Build failed before any crate reports were produced.");
             eprintln!("JSON reports: {}", reports.display());
             return Ok(ExitCode::FAILURE);
         }
         return Err("Cargo produced no inventories; check the selected targets".into());
     }
     let mut collected = Vec::new();
-    for path in paths {
+    let report_progress = Progress::new(
+        !quiet,
+        color,
+        format!("Reading {} crate reports", paths.len()),
+    );
+    for (index, path) in paths.iter().enumerate() {
+        report_progress.update(format!(
+            "Reading [{}/{}] {}",
+            index + 1,
+            paths.len(),
+            path.display()
+        ));
         let report: Report = serde_json::from_slice(&std::fs::read(path)?)?;
-        let rendered = if summary {
-            mir_check::render_coverage(&report)
-        } else {
-            mir_check::render(&report)
-        };
-        print!("{rendered}");
         collected.push(report);
     }
+    let elapsed_s = build_elapsed_s + report_progress.elapsed();
+    drop(report_progress);
     let mut missing = false;
     for entry in entries {
         if !collected.iter().any(|report| {
@@ -158,8 +220,26 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             }
         }
     }
-    if status.success() && !missing {
-        println!("JSON reports: {}", reports.display());
+    let success = status.success()
+        && !missing
+        && collected
+            .iter()
+            .all(|report| mir_check::cli::accepted(report, allow_assumptions));
+    mir_check::cli::present(
+        &collected,
+        verbose,
+        color,
+        jsonl.as_deref(),
+        success,
+        elapsed_s,
+        false,
+    )?;
+    if success {
+        if jsonl.as_deref() == Some(std::path::Path::new("-")) {
+            eprintln!("JSON reports: {}", reports.display());
+        } else {
+            println!("JSON reports: {}", reports.display());
+        }
         Ok(ExitCode::SUCCESS)
     } else {
         eprintln!("JSON reports: {}", reports.display());

@@ -25,7 +25,8 @@ success establishes only that the inventory was collected.
 
 Cargo accepts repeated exact or crate-qualified --entry selectors. Crates without a matching root
 retain inventories; the Cargo wrapper rejects any requested root absent from all selected targets.
---summary prints outcomes and grouped unknown reasons. Available reports are rendered even after
+Default compact output prints outcomes, prioritized roots and grouped unknown reasons; --summary
+is an alias and --verbose shows the full inventory. Available reports are rendered even after
 verification failure. Schema version 8 includes root coverage counts separately from distinct
 interpreted body instances; neither count claims runtime or whole-crate coverage.
 
@@ -133,3 +134,12 @@ Generic summaries require an exact compiler instance. Unsupported return/effect 
 unknown. Roots using summaries are PROVED_WITH_ASSUMPTIONS, recorded separately from PROVED and
 rejected without --allow-assumptions. Selecting a trusted function still checks its actual body.
 Reports retain configuration, matched selectors and used summary provenance. See docs/contracts.md.
+
+Progress runs on stderr, with a five-second heartbeat naming the active crate/root or report file.
+Final output shows per-crate and aggregate results. Terminal colors distinguish proved, refuted,
+unknown and assumed outcomes; --color auto|always|never and NO_COLOR control ANSI output. --quiet
+suppresses progress without hiding final results/errors. Compact rows/details are limited for
+readability; raw data is complete. --jsonl FILE exports one complete report per line; --jsonl -
+reserves stdout for machine data and sends human/Cargo output to stderr. Both binaries provide
+a report subcommand for saved schema-7/8 JSON, JSONL or report directories. It recomputes counts
+and applies the usual exit policy without claiming a new proof or rerunning the compiler/solver.

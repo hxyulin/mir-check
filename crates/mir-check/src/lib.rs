@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod cli;
 mod config;
 pub use config::{ContractConfig, FunctionContract};
 

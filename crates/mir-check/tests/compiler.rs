@@ -543,7 +543,14 @@ fn cargo_analysis_revisits_a_crate_and_forwards_feature_selection() {
     let mut report_directories = Vec::new();
     for _ in 0..2 {
         let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"))
-            .args(["mir-check", "--lib", "--features", "extra", "--offline"])
+            .args([
+                "mir-check",
+                "--verbose",
+                "--lib",
+                "--features",
+                "extra",
+                "--offline",
+            ])
             .current_dir(&directory.0)
             .output()
             .unwrap();
@@ -1945,9 +1952,9 @@ fn cargo_entries_select_workspace_roots_and_missing_or_failed_roots_cannot_pass(
             )
         });
         assert_eq!(actual, counts, "{entries:?}: {stdout}");
-        assert!(stdout.contains("counts describe roots, not runtime coverage"));
+        assert!(stdout.contains("not line coverage or whole-crate safety"));
         if entries.contains(&"read") {
-            assert!(stdout.contains("gap: unsupported argument type char"));
+            assert!(stdout.contains("unsupported argument type char"));
         }
         if entries.contains(&"absent") {
             assert!(stderr.contains("entry \"absent\" has no inventoried MIR body"));
@@ -3352,4 +3359,235 @@ fn cargo_forwards_trusted_contracts_without_dependency_mir_and_stays_strict_by_d
         assert_eq!(report.coverage.proved, 0);
         assert_eq!(report.coverage.proved_with_assumptions, 1);
     }
+}
+
+#[test]
+fn jsonl_and_saved_report_commands_keep_machine_output_clean_and_preserve_full_proofs() {
+    let directory = Directory::new();
+    let raw = directory.0.join("results.jsonl");
+    let output = analyze_from(
+        &fixture("proofs.rs"),
+        &directory,
+        &[
+            "--verify",
+            "--jsonl",
+            raw.to_str().unwrap(),
+            "--entry",
+            "off_by_one",
+        ],
+        &[],
+    );
+    // analyze_from supplies --json; incompatible output modes must fail before compiling.
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args([
+            "--verify",
+            "--jsonl",
+            "-",
+            "--color",
+            "always",
+            "--entry",
+            "guarded",
+            "--entry",
+            "off_by_one",
+            "--",
+            "--crate-type=lib",
+            "--edition=2024",
+        ])
+        .arg(fixture("proofs.rs"))
+        .arg("--out-dir")
+        .arg(&directory.0)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!output.stdout.contains(&27));
+    let lines = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(lines.lines().count(), 1);
+    let report: Report = serde_json::from_str(lines.trim()).unwrap();
+    assert_eq!(report.coverage.proved, 1);
+    assert_eq!(report.coverage.refuted, 1);
+    assert!(
+        report
+            .functions
+            .iter()
+            .filter_map(|f| f.proof.as_ref())
+            .flat_map(|p| &p.obligations)
+            .any(|o| o.model.is_some())
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Run failed"));
+    std::fs::write(&raw, lines).unwrap();
+    for binary in [
+        env!("CARGO_BIN_EXE_mir-check"),
+        env!("CARGO_BIN_EXE_cargo-mir-check"),
+    ] {
+        let output = Command::new(binary)
+            .args(["report", "--color", "never", "--quiet"])
+            .arg(&raw)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("Saved report results"));
+        assert!(text.contains("REFUTED off_by_one"));
+        assert!(text.find("REFUTED off_by_one").unwrap() < text.find("PROVED guarded").unwrap());
+        assert!(!text.contains('\u{1b}'));
+        assert!(output.stderr.is_empty());
+    }
+    let malformed = directory.0.join("malformed.jsonl");
+    std::fs::write(&malformed, "{not a report}\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .arg("report")
+        .arg(&malformed)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("malformed.jsonl:1"));
+}
+
+#[test]
+fn saved_reports_accept_old_schema_and_keep_trusted_results_distinct_in_color_and_exit_status() {
+    let directory = Directory::new();
+    let config = directory.0.join("contracts.json");
+    let spec = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"external_contracts::assumed","arguments":["value"],"trusted":true,
+        "no_panic":true,"modifies":[],"reason":"Explicit test summary"
+    }]});
+    std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let output = analyze_from(
+        &fixture("external_contracts.rs"),
+        &directory,
+        &[
+            "--verify",
+            "--contracts",
+            config.to_str().unwrap(),
+            "--entry",
+            "assumed_caller",
+        ],
+        &[],
+    );
+    let file = directory.0.join("assumed.json");
+    std::fs::write(&file, output.stdout).unwrap();
+    for allow in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mir-check"));
+        command
+            .args(["report", "--verbose", "--color", "always", "--quiet"])
+            .arg(&file);
+        if allow {
+            command.arg("--allow-assumptions");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(output.status.success(), allow);
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("\u{1b}[35mPROVED_WITH_ASSUMPTIONS\u{1b}[0m"));
+        assert!(!text.contains("\u{1b}[32mPROVED_WITH_ASSUMPTIONS"));
+        assert!(text.contains("Explicit test summary"));
+    }
+    let report = report(analyze_from(
+        &fixture("bodies.rs"),
+        &directory,
+        &["--verify", "--entry", "identity"],
+        &[],
+    ));
+    let mut legacy = serde_json::to_value(report).unwrap();
+    legacy["schema_version"] = serde_json::json!(7);
+    legacy.as_object_mut().unwrap().remove("contract_config");
+    legacy.as_object_mut().unwrap().remove("matched_contracts");
+    legacy["coverage"]["proved"] = serde_json::json!(999); // Recompute untrusted cached counts.
+    std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args(["report", "--quiet"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 selected root: 1 proved"));
+    legacy["schema_version"] = serde_json::json!(999);
+    std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args(["report", "--quiet"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn cargo_jsonl_stdout_excludes_compiler_messages_and_quiet_suppresses_progress() {
+    let directory = Directory::new();
+    std::fs::write(
+        directory.0.join("Cargo.toml"),
+        "[package]\nname='jsonl_fixture'\nversion='0.1.0'\nedition='2024'\n\
+         [lib]\npath='lib.rs'\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.0.join("lib.rs"),
+        "#![no_std]\npub fn identity(value: u8) -> u8 { value }",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"))
+        .args([
+            "--verify",
+            "--entry",
+            "identity",
+            "--jsonl",
+            "-",
+            "--quiet",
+            "--color",
+            "always",
+            "--message-format=json",
+            "--lib",
+            "--offline",
+        ])
+        .current_dir(&directory.0)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let raw = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(raw.lines().count(), 1);
+    assert!(!raw.contains('\u{1b}'));
+    let report: Report = serde_json::from_str(raw.trim()).unwrap();
+    assert_eq!(report.coverage.proved, 1);
+    let human = String::from_utf8(output.stderr).unwrap();
+    assert!(human.contains("Verification passed"));
+    assert!(!human.contains("mir-check: Analyzing"));
+    assert!(!human.contains("mir-check: Reading"));
+}
+
+#[test]
+fn long_solver_queries_show_the_active_root_and_elapsed_time_before_finishing() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = Directory::new();
+    let solver = directory.0.join("slow-solver");
+    std::fs::write(&solver, "#!/bin/sh\nsleep 7\n").unwrap();
+    std::fs::set_permissions(&solver, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args([
+            "--verify",
+            "--entry",
+            "identity",
+            "--",
+            "--crate-type=lib",
+            "--edition=2024",
+        ])
+        .arg(fixture("bodies.rs"))
+        .arg("--out-dir")
+        .arg(&directory.0)
+        .env("MIR_CHECK_Z3", &solver)
+        .env_remove("MIR_CHECK_QUIET")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let progress = String::from_utf8(output.stderr).unwrap();
+    assert!(progress.contains("checking [1/1] identity"), "{progress}");
+    assert!(progress.contains("elapsed"), "{progress}");
+    assert!(progress.contains("Analyzed bodies"), "{progress}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("UNKNOWN identity"));
 }
