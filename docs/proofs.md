@@ -108,13 +108,13 @@ returns unknown. Infinite loops and larger finite loops can therefore remain unk
 do not panic. Calls, including recursion, can use at most 16 active frames. Finite recursion can
 complete within those bounds; an unfinished recursive path returns unknown.
 
-The opt-in `--induction` mode translates cyclic root bodies into constrained Horn clauses for
-Z3's Spacer engine. Each reachable MIR block has a relation over the function's modeled locals.
-The entry clause contains the actual initialized arguments and checked entry preconditions;
-other locals start unconstrained. Assignments, branches and backedges become transition clauses.
-Assertions, panic calls and byte-array bounds failures become clauses excluding those paths.
-Storage markers do not restrict values: safe Rust assigns locals before reading them, and dead
-scalar values remain unconstrained in the entry state.
+The opt-in `--induction` mode translates cyclic concrete call graphs into constrained Horn
+clauses for Z3's Spacer engine. Each reachable MIR block has a relation over the function's
+modeled locals. The entry clause contains the actual initialized arguments and checked entry
+preconditions; other locals start unconstrained. Assignments, branches and backedges become
+transition clauses. Assertions, panic calls and byte-array bounds failures become clauses
+excluding those paths. Storage markers do not restrict values: safe Rust assigns locals before
+reading them, and dead scalar values remain unconstrained in the entry state.
 
 A satisfiable HORN system supplies an inductive model containing all initial states, closed under
 every encoded transition and excluding every encoded failure. This proves panic freedom for any
@@ -131,13 +131,33 @@ clause before a successful access. The translation is limited to 256 blocks and 
 state parameters. The 200,000-byte script limit and five-second Z3/six-second host request limits
 still apply. There is no iteration limit inside an inductive proof.
 
-Only selected root bodies receive this encoding. Ordinary calls, recursion, references, interior
-mutation, coroutines, float/enum state and function postconditions still need inductive models;
-a cyclic root containing one returns UNKNOWN rather than silently omitting it. Entry requires
-are restricted input domains, as in ordinary proof mode; ensures are rejected in induction mode.
-Acyclic roots retain ordinary interpretation. Without `--induction`, all roots retain the existing
-bounded interpreter. The Cargo command forwards the option explicitly and clears an inherited
-induction setting when the option is absent.
+Cycle discovery follows concrete callee MIR as well as root backedges. An acyclic main or entry
+can therefore delegate to a helper containing an endless loop. Discovery scans at most 128 concrete
+bodies; missing bodies or an incomplete scan retain bounded interpretation and cannot license a
+proof. Without a discovered cycle, roots use ordinary interpretation. Without `--induction`, all
+roots retain the existing bounded interpreter. Cargo forwards the option explicitly and clears an
+inherited induction setting when the option is absent.
+
+Each call site receives its own callee block relations. They carry immutable copies of the caller's
+state as additional parameters, initialize the callee with the actual argument values, and return
+actual results to the caller's destination. Nested callees preserve every ancestor's state. Callee
+loops use the same transition encoding as root loops. Available local, concrete generic and retained
+dependency MIR is translated; a callee contract never replaces its body with a summary.
+
+Root requires restrict the initial domain. Callee requires add both a failure clause at the call
+site and a success constraint on entry. Ensures add a failure clause on each actual return. Entry
+arguments have independent snapshot parameters when ensures are present; original and mutated
+arguments therefore remain distinguishable. final_ names refer to the current argument values.
+Declared predicates are checked for supported syntax even when a function never returns.
+Unsupported predicates and invalid aliases remain UNKNOWN. Recursive call contexts, references,
+interior mutation, iterator storage, coroutines, float/enum state and trusted boundaries still need
+inductive models. Unsupported behavior is never omitted.
+
+The 256-block budget now includes every translated call context, and each relation's 512-parameter
+budget includes captured caller state and contract snapshots. The call depth remains 16 frames.
+Some supported relational bit-vector queries crash or time out in Z3, which produces UNKNOWN. An
+experimental bit-level preprocessing strategy returned a false safety answer for the native-replayed
+12,000-iteration panic mutation. It was rejected; no such retry is enabled.
 
 The original unbounded-loops fixture includes a wrapping counter, tuple state, a register parser
 with persistent byte history, and a loop with an exit. Positive cases prove on host and ARM

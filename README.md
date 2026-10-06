@@ -239,8 +239,10 @@ budget and a 200,000-byte query limit. Incremental solver scopes, exact constant
 root-local instantiated MIR cache reduce repeated work without assuming function summaries.
 
 Experimental `--induction` uses Z3 Spacer to prove supported cyclic root bodies without unrolling
-an iteration bound. It supports integer/Boolean state, tuples and fixed byte arrays; calls,
-references, coroutines and function postconditions remain UNKNOWN in this mode. Raw reports retain
+an iteration bound. It supports integer/Boolean state, tuples, fixed byte arrays, available concrete
+callee MIR and checked preconditions/postconditions. Caller state and entry snapshots are carried
+through actual callee transitions. References, iterator storage, coroutines and recursion remain
+UNKNOWN in this mode. Raw reports retain
 inferred models separately in `invariants`. A positive Horn result proves panic freedom rather
 than termination. Solver failures and detected Horn failures remain UNKNOWN until counterexample
 replay is available. See [loop proof details](docs/proofs.md#loops-and-limits).

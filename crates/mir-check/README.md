@@ -335,18 +335,37 @@ Experimental `--induction` translates cyclic root MIR into typed Horn clauses fo
 Integer/Boolean locals, tuples and fixed byte arrays have per-block state relations; initialization,
 branches, assignments and backedges establish inductive panic freedom for any number of iterations.
 Byte-array bounds are explicit safety clauses, including writes to persistent local arrays. Loop
-exits are checked too. Acyclic roots still use ordinary interpretation.
+exits are checked too. Cycle discovery follows concrete callees, so an acyclic entry can delegate
+to a looping helper. Call graphs without a discovered cycle retain ordinary interpretation.
 
 Inductive SAT is a safety model, not a counterexample. Raw JSON/JSONL reports retain those models
 in the additive `invariants` field; old reports without it deserialize. UNSAT, malformed output and
 solver timeouts remain UNKNOWN pending counterexample replay. Source assertions retain their actual
-MIR meaning. Contracts do not inject runtime code; requires restrict the initial domain and ensures
-remain unsupported in cyclic induction roots. Ordinary calls, recursion, references, enums, floats,
-interior mutable storage and coroutines also remain UNKNOWN in this mode.
+MIR meaning. Contracts do not inject runtime code. Root requires restrict the initial domain;
+callee requires are checked at call sites and ensures are checked at actual returns, including root
+returns. Independent entry snapshots preserve original arguments when a callee mutates its owned
+values. Caller state is carried through callee block relations and actual return values resume the
+caller. A contract never replaces execution of the body.
 
-The encoding has 256-block, 512-state-parameter and 200,000-byte script limits, with five-second Z3
+Concrete local, generic and retained dependency calls can contain loops. Recursion, references,
+iterator storage, enums, floats, trusted call boundaries, interior mutable storage and coroutines
+remain UNKNOWN in this mode. Unavailable bodies and unsupported predicates remain UNKNOWN too.
+
+The encoding has 256 total call-context blocks, 512 parameters per relation, 16 call frames and
+200,000-byte script limits, with five-second Z3
 and six-second host request deadlines. It proves panic freedom, not termination. Host/ARM original
 fixtures include endless scalar/tuple loops, a register parser with byte history, exits and mutated
 masks/cursors; native replay exposes mutated panics beyond the old execution budget. A host binary
 main is also covered. The Cargo frontend forwards the option without inheriting a previous run's
 setting. The default bounded interpreter and its budgets remain unchanged.
+
+
+Host/ARM call fixtures cover nested generic instances, delegated entries, loops in callees, entry
+snapshots of owned bytes, call domains and root/callee postconditions. Changed wraps, violated call
+domains, false contracts, recursive calls and unsupported predicates never pass. Existing 256- and
+1,024-iteration scalar fixtures also prove through induction. Iterator/reference loops still need
+their storage models; a fully supported loop can still exhaust the solver's inference budget.
+
+A solver preprocessing experiment was rejected after a native-replayed late-panic mutation received
+a false safety answer. The checker retains the ordinary Spacer encoding, and scalar relational
+queries that crash or time out in Z3 remain UNKNOWN. No bit-level retry strategy is enabled.

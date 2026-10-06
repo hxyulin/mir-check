@@ -48,7 +48,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Feature | Current support | Boundary |
 | --- | --- | --- |
 | Branches | Path-sensitive states; discard a branch only after an exact constant UNSAT decision or an unsat solver response | Ordinary mode does not merge states; induction forms per-block relations |
-| Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction excludes calls, references, coroutines, float/enum state and postconditions; incomplete or undecided proofs are UNKNOWN |
+| Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction includes available concrete callee MIR and checked contracts; references, iterator storage, recursion and coroutines remain gaps; incomplete or undecided proofs are UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Function pointers and unsupported call shapes remain UNKNOWN |
@@ -312,8 +312,18 @@ persistent byte history and a loop with an exit on host and ARM no_std. A host b
 without running it. These are actual typed MIR translations, following the earlier handwritten Horn
 spike. The packet is an arbitrary fixed root input; renewing hardware reads requires call models.
 Changed masks, cursors and a failure after 12,000 iterations never pass. Native tests replay the
-mutated panics. Entry requires can restrict the initial domain; an inconsistent domain and a cyclic
-root with a postcondition remain UNKNOWN.
+mutated panics. Entry requires restrict the initial domain, callee requires are checked at call
+sites, and root/callee ensures are checked at actual returns. Inconsistent entry domains and
+unsupported predicates remain UNKNOWN.
+
+Host/ARM call tests cover concrete generic instances, retained dependency bodies, an entry
+delegating to an endless helper, callee loops, restored caller state and original/final
+owned-byte snapshots. Changed wraps, violated call domains, false postconditions, recursion and
+unsupported inputs never pass. Existing 256- and 1,024-iteration scalar loops prove inductively.
+Iterator/reference storage still blocks its own induction cases, so finite unrolling retains
+broader coverage for those shapes. A relational decrement/count query remains UNKNOWN after a Z3
+crash. A preprocessing experiment that claimed a native-replayed late panic was safe was
+rejected and is not enabled.
 
 Typed Horn tests check relation arity/sorts/context, exact printer budgets and a transition
 mutation. Solver tests distinguish SAT inductive models from SAT counterexamples and check

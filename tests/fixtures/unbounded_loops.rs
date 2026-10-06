@@ -51,7 +51,7 @@ fn adjust(value: u8) -> u8 {
     value & 7
 }
 
-pub fn a_loop_with_an_unmodeled_call(value: u8) -> ! {
+pub fn a_loop_with_a_scalar_helper(value: u8) -> ! {
     loop {
         assert!(adjust(value) < 8);
     }

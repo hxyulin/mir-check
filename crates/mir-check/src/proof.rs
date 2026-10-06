@@ -195,7 +195,7 @@ impl<'tcx> Engine<'tcx> {
                 "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
             );
         }
-        if self.induction && self.has_cycle(body) {
+        if self.induction && self.needs_induction(instance) {
             return self.inductive_root(instance, arguments, conditions, memory);
         }
         self.execute(instance, arguments, conditions, memory, &[])?;

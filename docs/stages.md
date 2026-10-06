@@ -872,3 +872,31 @@ an exiting loop. A plain host main proves too. Mask/cursor mutations and a late 
 native tests replay the failures. Typed Horn tests check SAT/UNSAT polarity, malformed types,
 foreign contexts, arity and exact output budgets. Solver tests check mode changes and reject errors.
 Inductive UNSAT/timeouts remain UNKNOWN until a real Rust counterexample can be reconstructed.
+
+
+## Stage 51: concrete callee transitions and inductive contract checks
+
+Induction follows concrete calls using per-call-site MIR block relations. Captured caller parameters
+preserve state throughout each callee; actual return values resume the original destination and
+continuation. Concrete generic instances and retained dependency bodies have separate contexts.
+Acyclic entries can delegate to looping helpers, and callees can contain their own loops. Recursive
+contexts, unavailable bodies, references and unsupported types remain UNKNOWN. The aggregate block,
+per-relation state and call-depth budgets bound translation rather than iteration counts.
+
+Callee requires are checked at calls, root requires restrict inputs, and ensures are checked at
+every actual root/callee return. Independent entry parameters retain snapshots when owned
+arguments change; final_ bindings expose current values. False predicates and invalid aliases
+cannot inject facts that hide a failure. Bodies are always translated; no verified-contract
+summary replaces a callee.
+
+Host/ARM positive cases cover delegation, nested generic and dependency calls, callee loops,
+call domains, caller restoration and owned-byte snapshots. Mutated wraps, false contracts,
+violated domains, recursive calls and unsupported predicates never pass. Native replay checks
+counter mutations and false claims, and existing 256- and 1,024-iteration scalar fixtures prove
+through induction.
+
+A supported relational counter query can crash the pinned Z3. A bit-level preprocessing experiment
+avoided that crash but returned a false safety answer on the native-replayed late-panic mutation.
+That strategy was rejected. Ordinary Spacer inference remains enabled, and crashes/timeouts remain
+UNKNOWN. Iterator storage, mutable/shared memory, trusted hardware boundaries and coroutines remain
+next coverage requirements rather than assumed effects.

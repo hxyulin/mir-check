@@ -54,7 +54,7 @@ fn inductive_models_cover_endless_loops_arrays_and_exits_without_hiding_mutation
         ("a_late_bad_wrap", ProofStatus::Unknown),
         ("an_unresolved_loop", ProofStatus::Unknown),
         ("an_inconsistent_loop_domain", ProofStatus::Unknown),
-        ("a_loop_with_an_unmodeled_call", ProofStatus::Unknown),
+        ("a_loop_with_a_scalar_helper", ProofStatus::Proved),
         ("a_loop_with_a_postcondition", ProofStatus::Unknown),
     ];
     let entries = expected.iter().map(|(name, _)| *name).collect::<Vec<_>>();
