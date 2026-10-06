@@ -322,3 +322,17 @@ indices under unconstrained root domains. Original and intermediate measurements
 the new JSON records transitions and remaining gaps. Verification reuses dependency-retaining
 metadata and takes 81.3 seconds on the development machine. No firmware source, configuration or
 dependencies changed.
+
+## Stage 17: typed storage and mutable writes
+
+References to supported mutable storage carry allocation identities and projections. Per-path
+storage crosses calls and preserves writes through reborrows. Entry snapshots remain available in
+postconditions, with final_<parameter> exposing updated arguments. Root analysis accepts one
+mutable reference whose pointee contains no references. General aliases, mutable returns/captures,
+partially initialized aggregates and ambiguous non-byte writes remain unknown.
+
+Host/ARM tests cover scalar/aggregate/byte writes, callee updates, branch isolation and post-state
+contracts. The vendored PID bodies prove reset and a concrete configured update; invalid limits
+and a reset-write mutation refute. Arbitrary floating-point update paths remain expensive.
+A root budget of 30 seconds is checked before queries, and storage has at most 512 allocations
+per path. There are 57 compiler integration tests and one metadata test.

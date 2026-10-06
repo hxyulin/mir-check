@@ -10,12 +10,13 @@ completed a soundness audit. Every result is tied to its compiler, target, flags
 | --- | --- | --- |
 | Integers and bool | Symbolic target-width values, signed comparisons and exact bit-vector operations | Char and raw pointers are unsupported inputs |
 | Floating point | f32/f64 inputs/constants, IEEE arithmetic/comparisons, abs/min/max and integer/float casts | Remainder, raw bits and wider float formats are unsupported |
-| Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | General mutable slice inputs are unsupported |
+| Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | One mutable byte-slice root supports guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
-| Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, mutable fields and unresolved generics remain unsupported |
+| Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
 | Fixed non-byte arrays | At most 16 modeled elements, including structs and tuples | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
+| Mutable storage | One mutable root reference, field/byte writes, reborrows and call state propagation | Root pointees with reference fields, general aliasing, mutable returns/captures and partially initialized aggregates remain UNKNOWN |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
@@ -95,3 +96,9 @@ and grouped unknown reasons. An empty inventory or zero selected roots establish
 Mutation regressions change source guards, indices, masks and copies to ensure the corresponding
 proof tests reject them. Separate runtime tests cover confirmed failures and formulas. These
 checks provide practical evidence, not a formal verification of the translator or whole firmware.
+
+Mutable-storage tests cover host/ARM writes through callees, branch isolation, byte-slice updates,
+entry/final-state postconditions and rejected aliases/returns. A vendored PID excerpt preserves
+its original bodies: reset proves with a final-state assertion, a configured update with concrete
+inputs proves, invalid limits refute, and a reset-write mutation refutes. Universal symbolic PID
+update exploration remains expensive; the root execution budget bounds that work.

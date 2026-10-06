@@ -40,12 +40,14 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         values: Vec<Value>,
         mut conditions: Vec<String>,
+        memory: Vec<Option<Value>>,
         stack: &[DefId],
         site: (DefId, Span),
     ) -> Result<Vec<Return>, String> {
         let callee = instance.def_id();
         let body = self.instantiated_body(instance)?;
-        let bindings = self.bindings(&body, &values)?;
+        let snapshots = self.snapshots(&values, &memory, &conditions)?;
+        let bindings = self.bindings(&body, &snapshots)?;
         for contract in self.contracts(callee) {
             if matches!(contract.kind, ContractKind::Requires) {
                 let text = contract
@@ -64,7 +66,7 @@ impl<'tcx> Engine<'tcx> {
                 conditions.push(safe);
             }
         }
-        self.execute(instance, values, conditions, stack)
+        self.execute(instance, values, conditions, memory, stack)
     }
 
     pub(super) fn library_call(
@@ -193,6 +195,7 @@ impl<'tcx> Engine<'tcx> {
                         }],
                     )?,
                     conditions: success,
+                    memory: state.memory.clone(),
                 },
                 Return {
                     value: self.constructed(
@@ -201,6 +204,7 @@ impl<'tcx> Engine<'tcx> {
                         vec![self.constructed(error_ty, 0, error_fields)?],
                     )?,
                     conditions: failure,
+                    memory: state.memory.clone(),
                 },
             ]));
         }
@@ -222,10 +226,10 @@ impl<'tcx> Engine<'tcx> {
                 callee,
                 "fixed array map; callable bodies executed in index order",
             );
-            let mut pending = vec![(Vec::new(), state.conditions.clone())];
+            let mut pending = vec![(Vec::new(), state.conditions.clone(), state.memory.clone())];
             for element in elements {
                 let mut next = Vec::new();
-                for (collected, conditions) in pending {
+                for (collected, conditions, memory) in pending {
                     if !self.feasible(&conditions)? {
                         continue;
                     }
@@ -235,17 +239,17 @@ impl<'tcx> Engine<'tcx> {
                         vec![element.clone()]
                     };
                     let results =
-                        self.call_instance(callable, arguments, conditions, stack, site)?;
+                        self.call_instance(callable, arguments, conditions, memory, stack, site)?;
                     for result in results {
                         let mut collected = collected.clone();
                         collected.push(result.value);
-                        next.push((collected, result.conditions));
+                        next.push((collected, result.conditions, result.memory));
                     }
                 }
                 pending = next;
             }
             let mut results = Vec::new();
-            for (elements, conditions) in pending {
+            for (elements, conditions, memory) in pending {
                 let value = if matches!(signature.output().kind(), ty::Array(element, _)
                     if *element == self.tcx.types.u8)
                 {
@@ -267,7 +271,11 @@ impl<'tcx> Engine<'tcx> {
                 } else {
                     Value::Elements(elements)
                 };
-                results.push(Return { value, conditions });
+                results.push(Return {
+                    value,
+                    conditions,
+                    memory,
+                });
             }
             return Ok(Some(results));
         }

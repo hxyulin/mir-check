@@ -18,21 +18,26 @@ const MAX_CALL_DEPTH: usize = 8;
 const MAX_QUERY_BYTES: usize = 200_000;
 const MAX_INPUT_DEPTH: usize = 8;
 const MAX_INPUT_VALUES: usize = 128;
+const MAX_ROOT_SECONDS: u64 = 30;
 
 mod aggregates;
 mod builtins;
 mod constants;
 mod library;
+mod memory;
 
 #[derive(Clone)]
 struct State {
     locals: Vec<Option<Value>>,
     conditions: Vec<String>,
+    addresses: Vec<Option<usize>>,
+    memory: Vec<Option<Value>>,
 }
 
 struct Return {
     value: Value,
     conditions: Vec<String>,
+    memory: Vec<Option<Value>>,
 }
 
 struct Engine<'tcx> {
@@ -41,6 +46,8 @@ struct Engine<'tcx> {
     steps: usize,
     input_depth: usize,
     input_values: usize,
+    building_mutable_input: bool,
+    started: std::time::Instant,
     proof: Proof,
 }
 
@@ -51,6 +58,8 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
         steps: 0,
         input_depth: 0,
         input_values: 0,
+        building_mutable_input: false,
+        started: std::time::Instant::now(),
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
@@ -89,10 +98,34 @@ impl<'tcx> Engine<'tcx> {
         let body = self.tcx.optimized_mir(id);
         let mut conditions = Vec::new();
         let mut arguments = Vec::new();
+        let mut memory = Vec::new();
         for local in body.args_iter() {
-            arguments.push(self.argument(id, body.local_decls[local].ty, &mut conditions)?);
+            let ty = body.local_decls[local].ty;
+            if let ty::Ref(_, element, mutability) = ty.kind()
+                && mutability.is_mut()
+            {
+                if !memory.is_empty() {
+                    return Err("only one mutable root reference is supported".to_owned());
+                }
+                self.building_mutable_input = true;
+                let value = if matches!(element.kind(), ty::Slice(_)) {
+                    self.byte_input(id, *element, &mut conditions)?
+                } else {
+                    self.argument(id, *element, &mut conditions)?
+                };
+                self.building_mutable_input = false;
+                memory.push(Some(value));
+                arguments.push(Value::Reference {
+                    allocation: 0,
+                    projection: Vec::new(),
+                    mutable: true,
+                });
+            } else {
+                arguments.push(self.argument(id, ty, &mut conditions)?);
+            }
         }
-        let bindings = self.bindings(body, &arguments)?;
+        let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
+        let bindings = self.bindings(body, &snapshots)?;
         for (name, value) in &bindings {
             self.input_binding(name, value)?;
         }
@@ -112,7 +145,7 @@ impl<'tcx> Engine<'tcx> {
             );
         }
         let instance = ty::Instance::new_raw(id, ty::GenericArgs::identity_for_item(self.tcx, id));
-        self.execute(instance, arguments, conditions, &[])?;
+        self.execute(instance, arguments, conditions, memory, &[])?;
         Ok(())
     }
 
@@ -152,7 +185,9 @@ impl<'tcx> Engine<'tcx> {
                 }
                 return Ok(());
             }
-            Value::MutableBytes { .. }
+            Value::Reference { .. }
+            | Value::MutableBytes { .. }
+            | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
             | Value::Function => {
@@ -261,6 +296,9 @@ impl<'tcx> Engine<'tcx> {
                     .collect::<Result<_, _>>()?,
             )),
             ty::Ref(_, element, mutability) if !mutability.is_mut() => {
+                if self.building_mutable_input {
+                    return Err("mutable root pointees cannot contain reference fields".to_owned());
+                }
                 if matches!(element.kind(), ty::Slice(_)) {
                     self.byte_input(id, *element, conditions)
                 } else {
@@ -333,6 +371,9 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn query(&self, conditions: &[String], failure: &str) -> Result<String, String> {
+        if self.started.elapsed().as_secs() >= MAX_ROOT_SECONDS {
+            return Err("symbolic root exceeded the 30-second execution budget".to_owned());
+        }
         let mut query = String::from(
             "(set-logic ALL)\n(set-option :timeout 5000)\n\
              (set-option :pp.bv-literals false)\n",
@@ -429,6 +470,7 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
         conditions: Vec<String>,
+        memory: Vec<Option<Value>>,
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
         let id = instance.def_id();
@@ -446,11 +488,22 @@ impl<'tcx> Engine<'tcx> {
         if arguments.len() != body.arg_count {
             return Err("call arguments do not match the MIR body".to_owned());
         }
-        if arguments.iter().any(Value::contains_mutable) {
+        if arguments
+            .iter()
+            .any(|value| matches!(value, Value::MutableBytes { .. }))
+        {
             return Err("mutable local borrows cannot cross an unmodeled call boundary".to_owned());
         }
-        let bindings = self.bindings(body, &arguments)?;
+        let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
+        let bindings = self.bindings(body, &snapshots)?;
         let contracts = self.contracts(id);
+        if bindings.keys().any(|name| name.starts_with("final_"))
+            && contracts
+                .iter()
+                .any(|contract| matches!(contract.kind, ContractKind::Ensures))
+        {
+            return Err("final_ argument names are reserved for post-state bindings".to_owned());
+        }
         if bindings.contains_key("result")
             && contracts
                 .iter()
@@ -461,7 +514,10 @@ impl<'tcx> Engine<'tcx> {
         let mut state = State {
             locals: vec![None; body.local_decls.len()],
             conditions,
+            addresses: vec![None; body.local_decls.len()],
+            memory,
         };
+        let incoming_allocations = state.memory.len();
         for (local, argument) in body.args_iter().zip(arguments) {
             state.locals[local.as_usize()] = Some(argument);
         }
@@ -541,14 +597,24 @@ impl<'tcx> Engine<'tcx> {
                     queue.push_back((*target, state));
                 }
                 TerminatorKind::Return => {
-                    let value = state.locals[0]
-                        .clone()
-                        .ok_or("return value is not modeled")?;
+                    let value = self.local(&state, 0)?;
                     if value.contains_mutable() {
                         return Err("mutable local borrows cannot escape their frame".to_owned());
                     }
                     let mut post_bindings = bindings.clone();
-                    post_bindings.insert("result".to_owned(), value.clone());
+                    let final_arguments = body
+                        .args_iter()
+                        .map(|local| self.local(&state, local.as_usize()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let final_snapshots =
+                        self.snapshots(&final_arguments, &state.memory, &state.conditions)?;
+                    for (name, value) in self.bindings(body, &final_snapshots)? {
+                        post_bindings.insert(format!("final_{name}"), value);
+                    }
+                    post_bindings.insert(
+                        "result".to_owned(),
+                        self.snapshot(&value, &state.memory, &state.conditions, 0)?,
+                    );
                     for contract in &contracts {
                         if matches!(contract.kind, ContractKind::Ensures) {
                             let text = contract
@@ -566,9 +632,14 @@ impl<'tcx> Engine<'tcx> {
                             )?;
                         }
                     }
+                    let value = self.return_value(value, &state, incoming_allocations)?;
+                    for allocation in state.addresses.iter().flatten() {
+                        state.memory[*allocation] = None;
+                    }
                     returns.push(Return {
                         value,
                         conditions: state.conditions,
+                        memory: state.memory,
                     });
                 }
                 TerminatorKind::Call {
@@ -650,9 +721,11 @@ impl<'tcx> Engine<'tcx> {
                         instance
                     };
                     let callee = instance.def_id();
+                    let modeled_values =
+                        self.snapshots(&values, &state.memory, &state.conditions)?;
                     if let Some(results) = self.library_call(
                         instance,
-                        &values,
+                        &modeled_values,
                         &state,
                         &stack,
                         (id, terminator.source_info.span),
@@ -661,6 +734,7 @@ impl<'tcx> Engine<'tcx> {
                         for result in results {
                             let mut continuation = state.clone();
                             continuation.conditions = result.conditions;
+                            continuation.memory = result.memory;
                             self.write(&mut continuation, *destination, result.value)?;
                             queue.push_back((target, continuation));
                         }
@@ -670,7 +744,7 @@ impl<'tcx> Engine<'tcx> {
                         body,
                         callee,
                         instance.args,
-                        &values,
+                        &modeled_values,
                         &mut state,
                         terminator.source_info.span,
                     )? {
@@ -695,6 +769,7 @@ impl<'tcx> Engine<'tcx> {
                         instance,
                         values,
                         state.conditions.clone(),
+                        state.memory.clone(),
                         &stack,
                         (id, terminator.source_info.span),
                     )?;
@@ -702,6 +777,7 @@ impl<'tcx> Engine<'tcx> {
                     for result in results {
                         let mut continuation = state.clone();
                         continuation.conditions = result.conditions;
+                        continuation.memory = result.memory;
                         self.write(&mut continuation, *destination, result.value)?;
                         queue.push_back((target, continuation));
                     }
@@ -757,6 +833,9 @@ impl<'tcx> Engine<'tcx> {
                 self.write(state, *place, value)
             }
             StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
+                if let Some(allocation) = state.addresses[local.as_usize()].take() {
+                    state.memory[allocation] = None;
+                }
                 state.locals[local.as_usize()] = None;
                 Ok(())
             }
@@ -769,20 +848,13 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
-    fn write(&self, state: &mut State, place: Place<'tcx>, value: Value) -> Result<(), String> {
-        if place.projection.is_empty() {
-            state.locals[place.local.as_usize()] = Some(value);
-            return Ok(());
-        }
-        Err("writes through references or projected places are unmodeled".to_owned())
-    }
-
     fn place(&self, state: &State, place: Place<'tcx>) -> Result<Value, String> {
-        let mut value = state.locals[place.local.as_usize()]
-            .clone()
-            .ok_or_else(|| format!("uninitialized or unsupported local {:?}", place.local))?;
+        let mut value = self.local(state, place.local.as_usize())?;
         for projection in place.projection {
             value = match (projection, value) {
+                (ProjectionElem::Deref, value @ Value::Reference { .. }) => {
+                    self.reference_value(&value, &state.memory, &state.conditions)?
+                }
                 (
                     ProjectionElem::Deref,
                     value @ (Value::Bytes { .. }
@@ -845,9 +917,7 @@ impl<'tcx> Engine<'tcx> {
                     value.clone()
                 }
                 (ProjectionElem::Index(index), Value::Bytes { data, length }) => {
-                    let index = state.locals[index.as_usize()]
-                        .as_ref()
-                        .ok_or("index is unavailable")?;
+                    let index = self.local(state, index.as_usize())?;
                     let (expression, bits, signed) = index.integer()?;
                     let (length_expression, length_bits, _) = length.integer()?;
                     if signed || bits != length_bits {
@@ -864,10 +934,8 @@ impl<'tcx> Engine<'tcx> {
                     }
                 }
                 (ProjectionElem::Index(index), Value::Elements(elements)) => {
-                    let index = state.locals[index.as_usize()]
-                        .as_ref()
-                        .ok_or("index is unavailable")?;
-                    self.fixed_element(&elements, index, &state.conditions)?
+                    let index = self.local(state, index.as_usize())?;
+                    self.fixed_element(&elements, &index, &state.conditions)?
                 }
                 (
                     ProjectionElem::ConstantIndex {
@@ -922,30 +990,12 @@ impl<'tcx> Engine<'tcx> {
         &self,
         id: DefId,
         body: &Body<'tcx>,
-        state: &State,
+        state: &mut State,
         value: &Rvalue<'tcx>,
     ) -> Result<Value, String> {
         match value {
             Rvalue::Use(operand, _) => self.operand(id, body, state, operand),
-            Rvalue::Ref(_, BorrowKind::Shared, place) => {
-                let value = self.place(state, *place)?;
-                if matches!(
-                    value,
-                    Value::Bytes { .. }
-                        | Value::Adt { .. }
-                        | Value::Enum { .. }
-                        | Value::Elements(_)
-                        | Value::Tuple(_)
-                        | Value::Unit
-                        | Value::Int { .. }
-                        | Value::Float { .. }
-                        | Value::Bool(_)
-                ) {
-                    Ok(value)
-                } else {
-                    Err("only byte-array and slice reborrows are modeled".to_owned())
-                }
-            }
+            Rvalue::Ref(_, BorrowKind::Shared, place) => self.borrow(state, *place, false),
             Rvalue::Ref(_, BorrowKind::Mut { .. }, place)
                 if matches!(
                     place.ty(&body.local_decls, self.tcx).ty.kind(),
@@ -954,7 +1004,31 @@ impl<'tcx> Engine<'tcx> {
             {
                 self.place(state, *place)
             }
-            Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => self.mutable_bytes(state, *place),
+            Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => {
+                if matches!(self.place(state, *place)?, Value::MutableBytes { .. })
+                    || (place.projection.is_empty()
+                        && matches!(self.place(state, *place)?, Value::Bytes { .. }))
+                {
+                    self.mutable_bytes(state, *place)
+                } else {
+                    self.borrow(state, *place, true)
+                }
+            }
+            Rvalue::RawPtr(rustc_middle::mir::RawPtrKind::FakeForPtrMetadata, place) => {
+                let value = self.place(state, *place)?;
+                let length = match value {
+                    Value::Bytes { length, .. } => *length,
+                    Value::Elements(elements) => symbolic::integer(
+                        elements.len() as u128,
+                        u32::from(self.tcx.sess.target.pointer_width),
+                        false,
+                    ),
+                    _ => {
+                        return Err("metadata-only pointer needs array or slice storage".to_owned());
+                    }
+                };
+                Ok(Value::MetadataPointer(Box::new(length)))
+            }
             Rvalue::Repeat(operand, length) => {
                 self.repeated_bytes(id, body, state, operand, *length)
             }
@@ -1006,6 +1080,11 @@ impl<'tcx> Engine<'tcx> {
             }
             Rvalue::UnaryOp(operation, operand) => {
                 let value = self.operand(id, body, state, operand)?;
+                let value = if matches!(operation, UnOp::PtrMetadata) {
+                    self.snapshot(&value, &state.memory, &state.conditions, 0)?
+                } else {
+                    value
+                };
                 match (operation, value) {
                     (UnOp::Neg, Value::Float { expression, bits }) => Ok(Value::Float {
                         expression: format!("(fp.neg {expression})"),
@@ -1038,6 +1117,7 @@ impl<'tcx> Engine<'tcx> {
                         bits,
                         signed: true,
                     }),
+                    (UnOp::PtrMetadata, Value::MetadataPointer(length)) => Ok(*length),
                     (UnOp::PtrMetadata, Value::Bytes { length, .. }) => Ok(*length),
                     (UnOp::PtrMetadata, Value::Elements(elements)) => Ok(symbolic::integer(
                         elements.len() as u128,
@@ -1075,6 +1155,23 @@ impl<'tcx> Engine<'tcx> {
                     return Err("only slice coercions are modeled".to_owned());
                 };
                 let value = self.operand(id, body, state, operand)?;
+                if let Value::Reference {
+                    allocation,
+                    projection,
+                    mutable,
+                } = &value
+                {
+                    let inner = self.reference_value(&value, &state.memory, &state.conditions)?;
+                    if matches!(inner, Value::Bytes { .. } | Value::Elements(_))
+                        && (!mutability.is_mut() || *mutable)
+                    {
+                        return Ok(Value::Reference {
+                            allocation: *allocation,
+                            projection: projection.clone(),
+                            mutable: mutability.is_mut(),
+                        });
+                    }
+                }
                 if !mutability.is_mut() && matches!(value, Value::Elements(_)) {
                     return Ok(value);
                 }

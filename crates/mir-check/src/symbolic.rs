@@ -2,6 +2,13 @@ mod floating;
 pub use floating::{float, float_cast, float_sort};
 
 #[derive(Clone, Debug)]
+pub enum MemoryProjection {
+    Field(usize),
+    Variant(usize),
+    Index(Box<Value>),
+}
+
+#[derive(Clone, Debug)]
 pub enum Value {
     Bool(String),
     Int {
@@ -29,12 +36,18 @@ pub enum Value {
         variants: Vec<Value>,
         is_option: bool,
     },
+    Reference {
+        allocation: usize,
+        projection: Vec<MemoryProjection>,
+        mutable: bool,
+    },
     MutableBytes {
         owner: usize,
         length: Box<Value>,
     },
     Tuple(Vec<Value>),
     Elements(Vec<Value>),
+    MetadataPointer(Box<Value>),
     StaticText,
     FormatArguments,
     Function,
@@ -44,7 +57,8 @@ pub enum Value {
 impl Value {
     pub fn contains_mutable(&self) -> bool {
         match self {
-            Self::MutableBytes { .. } => true,
+            Self::MutableBytes { .. } | Self::Reference { mutable: true, .. } => true,
+            Self::Reference { mutable: false, .. } => false,
             Self::Adt { fields, .. } => fields.iter().any(|(_, value)| value.contains_mutable()),
             Self::Enum { variants, .. } => variants.iter().any(Self::contains_mutable),
             Self::Tuple(fields) | Self::Elements(fields) => {
@@ -54,6 +68,7 @@ impl Value {
             | Self::Int { .. }
             | Self::Float { .. }
             | Self::Bytes { .. }
+            | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
             | Self::Function

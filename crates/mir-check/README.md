@@ -44,7 +44,9 @@ slice lengths/ranges, lossless integer conversion, integer endian decoding, shar
 byte-slice-to-array conversion, fixed-array map, owned byte-array copies, floating-point absolute
 value/min/max and static formatting arguments. Array map executes actual callable bodies in order.
 Reports list interpreted bodies and trusted models separately. MIR assume becomes a checked validity
-obligation. General mutation and writes through captured references remain unsupported. Structs,
+obligation. Typed allocations support one mutable root receiver, projected writes, reborrows and
+call state
+propagation. General aliasing and writes through captured references remain unsupported. Structs,
 symbolic input enums and constructed variants preserve tags, fields and return facts. Small
 integer/bool/float arrays support symbolic bounded indices and pattern projections; other elements
 require uniquely determined indices. Struct inputs do not acquire implicit invariants.
@@ -105,3 +107,11 @@ pattern tests check start/end offsets and minimum lengths, including a refuted p
 Constant tests cover Option::as_ref, niche layouts, explicit signed tags, nested fields and
 immutable storage on host/ARM. Wrong payload assertions, off-by-one guards and a mutated constant
 index refute; unions, interior mutation, unsupported transmutes and shape limits remain unknown.
+
+Mutable roots reject reference-containing pointees and multiple mutable root arguments. Each path
+carries independent typed storage through calls; dead/uninitialized reads and unsupported writes
+fail. Postconditions preserve entry names and expose final_<parameter> for updated arguments.
+Storage has a 512-allocation limit and each root has a 30-second budget checked before queries.
+The PID fixture preserves the fleet bodies and verifies reset, concrete configured updates,
+invalid caller limits and a rejected reset-write mutation on host/ARM. Arbitrary symbolic update
+paths can still exceed the budget.

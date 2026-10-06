@@ -2361,7 +2361,7 @@ fn enum_inputs_preserve_tags_payloads_and_option_contracts_on_host_and_arm() {
         ("snapshot", ProofStatus::Proved),
         ("result_payload", ProofStatus::Proved),
         ("generic_enum", ProofStatus::Unknown),
-        ("mutable_enum", ProofStatus::Unknown),
+        ("mutable_enum", ProofStatus::Proved),
         ("enum_slice", ProofStatus::Unknown),
         ("large", ProofStatus::Unknown),
         ("empty", ProofStatus::Unknown),
@@ -2737,4 +2737,127 @@ pub fn unsupported(value: f32) -> u32 { dependency::bits(value) }
             }
         }
     }
+}
+
+#[test]
+fn mutable_storage_preserves_call_writes_branch_states_and_entry_snapshots_on_host_and_arm() {
+    let entries = [
+        ("increment", ProofStatus::Proved),
+        ("bad_increment", ProofStatus::Refuted),
+        ("calls", ProofStatus::Proved),
+        ("bad_calls", ProofStatus::Refuted),
+        ("branches", ProofStatus::Proved),
+        ("local_reborrows", ProofStatus::Proved),
+        ("read_after_write", ProofStatus::Proved),
+        ("arrays", ProofStatus::Proved),
+        ("bytes", ProofStatus::Proved),
+        ("bad_bytes", ProofStatus::Refuted),
+        ("two_mutable", ProofStatus::Unknown),
+        ("nested_reference", ProofStatus::Unknown),
+        ("escaping_reference", ProofStatus::Unknown),
+        ("ambiguous_array", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("memory.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+    }
+}
+
+#[test]
+fn the_vendored_pid_updates_and_resets_preserve_writes_and_require_valid_limits_on_host_and_arm() {
+    let fixture_text = std::fs::read_to_string(fixture("pid_memory.rs")).unwrap();
+    let excerpt = fixture_text
+        .split("pub struct Pid {")
+        .nth(1)
+        .unwrap()
+        .split("pub fn configured")
+        .next()
+        .unwrap()
+        .replace(
+            "    #[requires(self.integral_max >= 0.0 && self.output_max >= 0.0)]\n",
+            "",
+        )
+        .replace("    #[ensures(final_self.integral == 0.0)]\n", "");
+    let source = include_str!("../../../tests/vendor/controller-pid.rs");
+    assert_eq!(
+        excerpt.trim(),
+        source
+            .split("pub struct Pid {")
+            .nth(1)
+            .unwrap()
+            .split("/// A scalar loop:")
+            .next()
+            .unwrap()
+            .trim()
+    );
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let (_, report) = verify_vendored(
+            &fixture("pid_memory.rs"),
+            &["Pid::reset", "configured", "bad_limits"],
+            &args,
+        );
+        for (name, expected) in [
+            ("Pid::reset", ProofStatus::Proved),
+            ("configured", ProofStatus::Proved),
+            ("bad_limits", ProofStatus::Refuted),
+        ] {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+    }
+    let directory = Directory::new();
+    let mutated = directory.0.join("mutated.rs");
+    std::fs::write(
+        &mutated,
+        std::fs::read_to_string(fixture("pid_memory.rs"))
+            .unwrap()
+            .replace("self.integral = 0.0;", "self.integral = 1.0;"),
+    )
+    .unwrap();
+    let (_, report) = verify_vendored(&mutated, &["Pid::reset"], &[]);
+    assert_eq!(
+        report
+            .functions
+            .iter()
+            .find(|f| f.name == "Pid::reset")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap()
+            .status,
+        ProofStatus::Refuted
+    );
 }

@@ -18,7 +18,8 @@ constructor invariant is inferred for an arbitrary struct parameter.
 Tuples and nested local/dependency structs and enums recursively carry modeled fields and shared
 references to supported values. Input bindings retain names such as packet.header.index and
 value.1.0. Reference snapshots do not track pointer identity or alias relationships; general
-mutation and mutable fields remain unsupported. Input construction is limited to eight levels and
+mutable roots support one reference to a pointee without reference fields. Input construction is
+limited to eight levels and
 128 values across arguments, so recursive reference shapes and large aggregate trees fail as
 unknown.
 
@@ -113,7 +114,8 @@ does not need decoding. Constant shape limits are eight levels and 256 values, w
 128 bytes or 16 non-byte elements per array/slice. This adds compiler constant inspection to the
 trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
 
-Coverage remains limited by enum/struct slices, general mutation and aliasing, mutable captures,
+Coverage remains limited by enum/struct slices, general aliasing, multiple mutable root references,
+mutable captures,
 unresolved generic inputs, float remainder/bit observation, trait objects, function pointers and
 general iterator machinery, destructors and several MIR operations/constants, including some
 constant shapes. Non-byte arrays are limited to 16 elements; symbolic bounded indices work for
@@ -137,3 +139,24 @@ Background references:
 
 - [Rust MIR guide](https://rustc-dev-guide.rust-lang.org/mir/index.html)
 - [Z3 bit-vectors](https://microsoft.github.io/z3guide/docs/theories/Bitvectors/)
+
+## Typed storage and mutable receivers
+
+Supported mutable references identify an allocation and field/index projection. Each path has its
+own storage; calls receive it and return the updated storage with their result. Writes through
+reborrows update the original object. Dead or uninitialized storage cannot be read. Projected
+writes currently require initialized aggregates; non-byte array writes require a uniquely
+established index. Byte writes support symbolic indices with proven bounds.
+
+Root construction accepts one mutable reference and rejects reference fields inside its pointee.
+This avoids assuming distinct locations for unresolved root aliases. Multiple references created
+from known local storage can cross supported calls. General mutable-reference returns and
+captures remain unknown. Shared immutable byte views retain the earlier snapshot models.
+
+Postcondition parameter names refer to entry snapshots. The final_<parameter> binding refers to
+the argument's state at return, for example final_state.count or final_self.integral. Parameter
+names beginning final_ are reserved when a function declares postconditions. Compiler-generated
+metadata-only raw pointers support length extraction; they cannot be dereferenced as data pointers.
+Storage is limited to 512 allocations per path. A 30-second root budget is checked before solver
+queries; an in-flight query remains subject to the existing five/six-second solver/process limits.
+Exhaustion returns UNKNOWN, so expensive floating-point path exploration cannot run indefinitely.
