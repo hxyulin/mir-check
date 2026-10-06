@@ -756,3 +756,15 @@ Byte region copies and integer endian conversion bind their source expression on
 lets instead of repeating it for each byte. This preserves source snapshots, disjoint writes and
 byte order while avoiding expression growth. Resource caps remain enforced. Original numerical
 byte-buffer regressions and native cases exercise compact views and subsequent parent reads.
+
+## Stage 44: larger completed paths and leaner loop conditions
+
+The default execution budget increases to 8,192 steps. Call depth remains 16, roots retain a
+30-second deadline and queries retain their 200,000-byte bound. Unfinished paths remain UNKNOWN; the
+checker never infers completion from budget exhaustion. Literal true path conditions are discarded
+before block feasibility checks, avoiding repeated copies and scans on long loops.
+
+Host/ARM regressions complete 1,024-iteration loops and refute a failure after the final iteration.
+A longer unfinished loop remains UNKNOWN. Existing bounded-recursion and call-depth failures retain
+their outcomes. This increases exploration capacity without adding loop invariants or termination
+proofs.

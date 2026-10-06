@@ -11,6 +11,8 @@ fn larger_budgets_finish_bounded_work_and_never_hide_late_failures_or_unfinished
     let expected = [
         ("completed_batches", ProofStatus::Proved),
         ("wrong_final_batch", ProofStatus::Refuted),
+        ("larger_completed_batches", ProofStatus::Proved),
+        ("larger_late_failure", ProofStatus::Refuted),
         ("unfinished_batches", ProofStatus::Unknown),
         ("bounded_recursion", ProofStatus::Proved),
         ("wrong_recursive_result", ProofStatus::Refuted),

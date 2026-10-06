@@ -13,7 +13,7 @@ use rustc_span::Span;
 use rustc_span::def_id::DefId;
 use std::collections::{BTreeMap, VecDeque};
 
-const MAX_STEPS: usize = 2048;
+const MAX_STEPS: usize = 8192;
 const MAX_CALL_DEPTH: usize = 16;
 const MAX_QUERY_BYTES: usize = 200_000;
 const MAX_INPUT_DEPTH: usize = 16;
@@ -587,6 +587,7 @@ impl<'tcx> Engine<'tcx> {
             if self.steps > MAX_STEPS {
                 return Err("symbolic execution step limit reached".to_owned());
             }
+            state.conditions.retain(|condition| condition != "true");
             if !self.feasible(&state.conditions)? {
                 continue;
             }

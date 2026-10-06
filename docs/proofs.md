@@ -35,15 +35,14 @@ constructor invariant is inferred for an arbitrary struct parameter.
 
 Tuples and nested local/dependency structs and enums recursively carry modeled fields and shared
 references to supported values. Input bindings retain names such as packet.header.index and
-value.1.0. Reference snapshots do not track pointer identity or alias relationships; general
-mutable roots support one reference to a pointee without reference fields. Input construction is
-limited to eight levels and
-128 values across arguments, so recursive reference shapes and large aggregate trees fail as
-unknown.
+value.1.0. Reference snapshots do not track pointer identity or alias relationships; general mutable
+roots support one reference to a pointee without reference fields. Input construction is limited to
+16 levels and 512 values across arguments, so recursive reference shapes and large aggregate trees
+fail as unknown.
 
 Input enums have a symbolic discriminant restricted to actual compiler tags and separate modeled
-payloads for each variant. The engine proves the tag before reading a downcast payload. At most
-16 variants are supported; every variant payload must fit the input model. In reports,
+payloads for each variant. The engine proves the tag before reading a downcast payload. At most 64
+variants are supported; every variant payload must fit the input model. In reports,
 `value.variantN.field` bindings describe a payload only when that variant is active.
 
 The root's requires predicates restrict the input domain. The engine first checks that the domain
@@ -83,24 +82,23 @@ counts, not runtime coverage or whole-crate safety percentages.
 
 ## Loops and limits
 
-Loops repeat the interpreter over successive states. This can prove small finite domains, such
-as the fixed three-device CAN configurations, without a loop invariant. Every feasible iteration
-must finish. The execution budget is 2,048 steps per root, including dequeued blocks, local calls
-and infeasible queued branches. Truncating unfinished paths would be unsound; reaching the budget
-returns unknown. Infinite loops and larger finite loops can therefore remain unknown even when
-they do not panic. Calls, including recursion, can use at most 16 active frames. Finite recursion
-can complete within those bounds; an unfinished recursive path returns unknown.
+Loops repeat the interpreter over successive states. This can prove small finite domains, such as
+the fixed three-device CAN configurations, without a loop invariant. Every feasible iteration must
+finish. The execution budget is 8,192 steps per root, including dequeued blocks, local calls and
+infeasible queued branches. Truncating unfinished paths would be unsound; reaching the budget
+returns unknown. Infinite loops and larger finite loops can therefore remain unknown even when they
+do not panic. Calls, including recursion, can use at most 16 active frames. Finite recursion can
+complete within those bounds; an unfinished recursive path returns unknown.
 
-Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a six-second
-host deadline per solver request. Reaching these limits is a verification failure. A root lazily
-starts one Z3 process. Structured queries retain common assertion prefixes, pop the old branch
-suffix and push new assertions. Declarations are installed outside assertion scopes. A changed
-or incompatible declaration namespace resets the session; extending it rebuilds assertion scopes
-around the new declarations. Feasibility checks request a decision; a refuted obligation requests
-its model from the same query context. Reports still contain full standalone SMT scripts.
-Malformed output, missing response markers, closed pipes and timeouts discard the session and
-return UNKNOWN. The host deadline covers writes as well as reads; responses above 256 KiB also
-return UNKNOWN.
+Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a six-second host
+deadline per solver request. Reaching these limits is a verification failure. A root lazily starts
+one Z3 process. Structured queries retain common assertion prefixes, pop the old branch suffix and
+push new assertions. Live declarations are global, so extending the namespace retains shared
+assertion scopes. An incompatible or shrinking declaration namespace resets the session. Feasibility
+checks request a decision; a refuted obligation requests its model from the same query context.
+Reports still contain full standalone SMT scripts. Malformed output, missing response markers,
+closed pipes and timeouts discard the session and return UNKNOWN. The host deadline covers writes as
+well as reads; responses above 256 KiB also return UNKNOWN.
 
 An exact-query decision cache is local to the root and holds at most 1,024 entries or two MiB of
 query text. Undecided responses are never cached. A cached satisfiable decision can answer a
@@ -165,14 +163,13 @@ does not need decoding. Constant shape limits are eight levels and 256 values, w
 trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
 
 Coverage remains limited by enum/struct slices, general aliasing, multiple mutable root references,
-legacy mutable byte captures, unresolved generic inputs, float remainder, trait objects, function
-pointers and
-general iterator machinery, destructors and several MIR operations/constants, including some
-constant shapes. Non-byte input arrays are limited to 16 elements; symbolic bounded indices work for
-integers, floats and booleans; enum/struct elements need a uniquely determined index. Array/slice
-patterns prove their minimum length and index bounds before applying constant start/end offsets.
-Generic roots with unresolved type parameters remain unsupported. There are no inductive loop
-invariants, automatic type invariants, dedicated termination checks or verified general effects.
+unresolved generic inputs, float remainder, trait objects, function pointers and general iterator
+machinery, destructors and several MIR operations/constants, including some constant shapes.
+Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work for integers,
+floats and booleans; enum/struct elements need a uniquely determined index. Array/slice patterns
+prove their minimum length and index bounds before applying constant start/end offsets. Generic
+roots with unresolved type parameters remain unsupported. There are no inductive loop invariants,
+automatic type invariants, dedicated termination checks or verified general effects.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
 propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and
@@ -207,9 +204,9 @@ returning frame or dead allocations. A local mutable borrow cannot escape by bei
 
 FnMut calls borrow the actual closure environment. Models for map/from_fn, predicates and folds
 allocate one environment per invocation and propagate owned field updates and captured writes
-between callbacks. The temporary environment is retired after traversal. Legacy mutable byte
-views cannot acquire an allocation merely by being nested. Shared immutable byte views retain
-the earlier snapshot models.
+between callbacks. The temporary environment is retired after traversal. Local byte borrows use
+tracked allocations across ordinary calls. Shared immutable byte values retain their snapshot
+semantics; mutable byte regions keep allocation identities and offsets.
 
 Postcondition parameter names refer to entry snapshots. The `final_<parameter>` binding refers to
 the argument's state at return, for example final_state.count or final_self.integral. Parameter

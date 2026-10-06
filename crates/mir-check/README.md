@@ -3,12 +3,20 @@
 Host compiler adapter and report model. mir-check drives rustc directly; cargo-mir-check
 uses it as a Cargo workspace wrapper and collects per-crate reports in an isolated build directory.
 
-Cargo sets mir-check-rustc as the outer compiler wrapper and mir-check as the workspace wrapper.
-The outer wrapper appends -Zalways-encode-mir=yes and -Zmir-opt-level=0 without rewriting flags.
-It forwards to the workspace analyzer or the pinned compiler, so direct and transitive Cargo
-library dependencies retain ordinary non-inline bodies. Only workspace members emit inventories.
-Use --no-dependency-mir to disable retention. Prebuilt sysroot bodies, foreign declarations and
-unsupported operations remain unknown; retained code is interpreted rather than trusted.
+Cargo sets mir-check-rustc as the outer compiler wrapper and mir-check as the workspace wrapper. The
+outer wrapper appends -Zalways-encode-mir=yes and -Zmir-opt-level=0 without rewriting flags. It
+forwards to the workspace analyzer or the pinned compiler, so direct and transitive Cargo library
+dependencies retain ordinary non-inline bodies. Only workspace members emit inventories. Use
+--no-dependency-mir to disable retention. Prebuilt sysroot libraries are unchanged by default. For a
+target with rust-src installed, cargo-mir-check accepts -Zbuild-std=core to rebuild core with
+retained MIR. Captured reports can replay against those artifacts while the build directory remains
+available. Exposing a body does not add models for its operations; pointer-based library internals
+can still fail as unknown. Foreign declarations have no Rust MIR body to retain. Diagnostics
+separate these boundaries; retained code is interpreted rather than trusted.
+
+Function-item callbacks resolve static trait dispatch before requesting MIR. Fixed-array map,
+from_fn, iterator predicates and folds execute the concrete implementation, including its panic
+paths, rather than requesting the bodyless trait method declaration.
 
 The adapter reads local typed runtime MIR using the pinned compiler and disables MIR
 optimization. It collects function locations, block counts, pending contracts, MIR checks, panic
@@ -40,25 +48,23 @@ condition must be unsatisfiable; unsupported behavior and exhausted resource lim
 and cause verification failure. Finite loops are unrolled until every feasible path completes;
 unfinished paths never become a passing result. Concrete generics, static trait implementations,
 function items and supported mutable closures resolve to instantiated MIR bodies. Available
-dependency MIR
-is interpreted; unavailable bodies and unsupported shims remain unknown. Explicit core models cover
-slice lengths/ranges, lossless integer conversion, integer endian decoding, shared
-byte-slice-to-array conversion, fixed-array map, owned byte-array copies, exact integer population
-counts, floating-point absolute value/min/max/clamp and static formatting arguments. Array map
-executes actual callable bodies in order.
-Reports list interpreted bodies and trusted models separately. MIR assume becomes a checked validity
-obligation. Typed allocations support one mutable root receiver, projected writes, reborrows and
-call state
-propagation. Tracked references in aggregates and captures preserve writes to their allocations.
-General aliasing and multiple mutable root references remain unsupported. Structs,
-symbolic input enums and constructed variants preserve tags, fields and return facts. Small
-integer/bool/float arrays support symbolic bounded indices and pattern projections; other elements
-require uniquely determined indices. Struct inputs do not acquire implicit invariants.
+dependency MIR is interpreted; unavailable bodies and unsupported shims remain unknown. Explicit
+core models cover slice lengths/ranges, lossless integer conversion, integer endian
+encoding/decoding, shared byte-slice-to-array conversion, fixed-array map, owned byte-array copies,
+exact integer population counts, floating-point absolute value/min/max/clamp and static formatting
+arguments. Array map executes actual callable bodies in order. Reports list interpreted bodies and
+trusted models separately. MIR assume becomes a checked validity obligation. Typed allocations
+support one mutable root receiver, projected writes, reborrows and call state propagation. Tracked
+references in aggregates and captures preserve writes to their allocations. General aliasing and
+multiple mutable root references remain unsupported. Structs, symbolic input enums and constructed
+variants preserve tags, fields and return facts. Small integer/bool/float arrays support symbolic
+bounded indices and pattern projections; other elements require uniquely determined indices. Struct
+inputs do not acquire implicit invariants.
 
 Root inputs include tuples, nested local/dependency structs and enums, concrete generic fields,
-supported shared references and small arrays of modeled aggregates. Input enums have at most 16
+supported shared references and small arrays of modeled aggregates. Input enums have at most 64
 variants; every payload must be modeled, and downcasts require a proven tag check. Input
-construction has an eight-level depth limit and a 128-value budget across arguments; recursive
+construction has a 16-level depth limit and a 512-value budget across arguments; recursive
 references and larger shapes remain unknown. General mutable-reference fields still fail before
 execution. Input bindings retain nested names such as packet.header.index and value.1.0.
 
@@ -71,7 +77,8 @@ recursive levels, 256 values and 128 elements per evaluated array/slice. The dec
 inspects constants; it does not replace symbolic MIR execution or model arbitrary memory.
 
 The contract evaluator accepts pure comparisons and boolean predicates,
-with modeled array/slice lengths, constant non-byte array indices, named/numeric fields, integer
+with modeled array/slice lengths, literal fixed-array and known-length byte indices,
+named/numeric fields, integer
 and float casts and restricted Option matches. Symbolic Option arms must return booleans.
 It checks caller preconditions and every feasible return, using
 entry values for parameter names in postconditions. It never assumes a callee summary from
@@ -169,12 +176,11 @@ regressions reject bad bounds, same-named user methods and mutated guards/count 
 
 Repeated arrays support small owned tuples, structs, enums and nested arrays, preserving each copy's
 fields and independent writes. Generated repeats have at most 128 elements and 256 modeled values.
-Non-byte root inputs retain their 16-element limit; evaluated constants permit 128 elements.
-Byte arrays retain their 128-byte limit. Storage identities (Cell, atomics, tracked references and
-mutable byte views) are not cloned by the repeat model. Accessing repeated inline-constant interior
-mutable storage remains unknown.
-Composite indices still require a unique value on each path; this stage does not extend alias or
-iterator semantics.
+Non-byte root arrays allow 256 elements within the 512-value input budget; evaluated constants
+permit 128 elements. Byte arrays retain their 128-byte limit. Storage identities (Cell, atomics,
+tracked references and mutable byte views) are not cloned by the repeat model. Accessing repeated
+inline-constant interior mutable storage remains unknown. Composite indices still require a unique
+value on each path; this stage does not extend alias or iterator semantics.
 
 Compiler-identified shared slice iterators retain a source and front/back cursors. Models cover
 construction, next/next_back, nth/nth_back, len/count/size_hint, clone and all/any. Advancing
@@ -189,7 +195,8 @@ uninhabited residual optimized by core's question-mark implementation.
 Mutable slice iterators yield projected references into typed source storage, including local
 byte arrays, bounded byte-slice roots and composite array elements. Mutable enumeration preserves
 that storage and checks the counter under the active overflow policy. Known Some payloads retain
-tracked mutable references when unwrapped. Legacy byte-copy views read and update addressed
+tracked mutable references when unwrapped. Allocation-backed byte-copy views read and update
+addressed
 storage, so iteration followed by copy_from_slice preserves the latest data. Mutable references
 into incoming storage can return inside aggregates and iterators; reference graphs reject local
 or dead storage escaping. Ambiguous composite writes remain unsupported.
@@ -199,15 +206,14 @@ Primitive core f32/f64 finiteness uses exact NaN/infinity classification, reduci
 needed by numeric iterator predicates without weakening their conditions.
 
 The default solver keeps one lazily started Z3 process per root. Structured queries retain common
-assertion prefixes and use push/pop to replace branch suffixes. New declarations are installed
-outside assertion scopes; incompatible declaration namespaces reset the session. Full standalone
-SMT scripts remain in reports. Feasibility checks omit unused counterexample models. Refutations
-obtain their model in the same query context. Exact-query decisions are cached within a root,
-with at most 1,024 entries
-or two MiB of query text; unknown responses are never cached. A six-second host deadline covers
-pipe writes and reads, and failures discard the session. MIR_CHECK_Z3 keeps the existing custom
-one-shot protocol, which relies on the executable's -T:6 timeout option. No proofs are reused
-across compiler invocations.
+assertion prefixes and use push/pop to replace branch suffixes. Live sessions keep declarations
+global, so adding symbols retains shared scopes; incompatible namespaces reset the session. Full
+standalone SMT scripts remain in reports. Feasibility checks omit unused counterexample models.
+Refutations obtain their model in the same query context. Exact-query decisions are cached within a
+root, with at most 1,024 entries or two MiB of query text; unknown responses are never cached. A
+six-second host deadline covers pipe writes and reads, and failures discard the session.
+MIR_CHECK_Z3 keeps the existing custom one-shot protocol, which relies on the executable's -T:6
+timeout option. No proofs are reused across compiler invocations.
 
 A bounded in-process evaluator decides fully constant Boolean/bit-vector queries and validates
 the whole script before returning an answer. It supports exact wrapping arithmetic, bitwise
@@ -258,12 +264,12 @@ between calls. Callback environments are retired after traversal. Ordinary mutab
 also borrow their actual environment. Typed aggregate references allow supported Zip/Flatten MIR
 and user structs/tuples to preserve reference identity without new assumed summaries.
 
-Execution defaults are 2,048 steps and 16 active call frames, including bounded recursive calls.
+Execution defaults are 8,192 steps and 16 active call frames, including bounded recursive calls.
 Incomplete loops/recursion return UNKNOWN; the 30-second root and 200,000-byte query limits remain.
-Exact Boolean/bit-vector folding simplifies closed MIR expressions before building longer terms.
-A root-local cache stores up to 128 normalized instantiated bodies, keyed by the full compiler
-Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes
-or cross-invocation compiler objects.
+Exact Boolean/bit-vector folding simplifies closed MIR expressions before building longer terms. A
+root-local cache stores up to 128 normalized instantiated bodies, keyed by the full compiler
+Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes or
+cross-invocation compiler objects.
 
 Optimized dependency MIR may return unit without assigning the return local; unit returns preserve
 tracked effects without requiring that assignment. Core Option unwrap/expect panic helpers use the
@@ -283,20 +289,15 @@ returns as opaque immutable values. This reaches Option expect panic boundaries 
 string contents, lengths, equality or pointer identity. Mutable string-reference storage remains
 UNKNOWN.
 
-Local byte borrows and finite as_chunks_mut views retain tracked allocation identities across
-calls. Prefix copies and literal byte-index contracts preserve parent storage. Unsupported
-lengths and unresolved aliases remain UNKNOWN.
+Local mutable byte borrows cross ordinary calls using allocation-backed references. Byte prefixes,
+copy_from_slice and finite as_chunks_mut views preserve parent storage and disjoint offsets.
+Zero-width chunks and mismatched copies produce panic obligations; symbolic lengths or views beyond
+128 bytes remain UNKNOWN. Contracts can index fixed byte arrays at checked literal indices.
 
-Function-item callbacks resolve concrete trait implementations before requesting MIR. Exact core
-integer endian encoding is modeled, and missing-body diagnostics distinguish foreign declarations
-from omitted prebuilt core bodies. Cargo -Zbuild-std=core can capture rebuilt core MIR.
+Root construction supports bounded integer pattern ranges and alternatives, valid Unicode char
+scalars, and the compiler-identified NonZero getter. It does not infer constructor invariants for
+other structs. Non-null pointer patterns and unresolved generics remain UNKNOWN.
 
-Live solver declarations survive scope pops, retaining common assertion prefixes as symbols grow.
-Incompatible namespaces still reset. Query construction skips unused deferred-encoding scans.
-
-Root input budgets are 512 values, 16 nested levels, 256 non-byte array elements and 64 enum
-variants. Unicode char and integer pattern domains preserve compiler validity constraints;
-the exact core NonZero getter exposes the modeled scalar. Unsupported domains remain UNKNOWN.
-
-Nested byte views compose region offsets, and byte copies/endian conversions share source
-expressions through scoped SMT bindings. Query-size limits remain enforced.
+Query construction skips encoding dependency scans when there are no deferred encodings and borrows
+condition strings rather than cloning an intermediate list. Byte views and endian conversion use
+scoped SMT bindings to share source expressions, with the usual size budgets still enforced.

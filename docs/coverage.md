@@ -14,20 +14,20 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 
 | Feature | Current support | Boundary |
 | --- | --- | --- |
-| Integers and bool | Symbolic target-width values, signed comparisons, exact bit-vector operations and population counts | Char and raw pointers are unsupported inputs |
+| Integers and bool | Symbolic target-width values, signed comparisons, exact bit-vector operations and population counts | Raw pointers remain unsupported; Unicode char and integer pattern domains are modeled |
 | Floating point | f32/f64 numeric operations, casts and tracked IEEE storage bits | Remainder/wider formats remain unsupported; arithmetic NaN encodings are conservative |
 | Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | One mutable byte-slice root supports guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
-| Fixed non-byte arrays | At most 16 input elements; evaluated constants and generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
+| Fixed non-byte arrays | At most 256 input elements within the 512-value budget; evaluated constants and generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
-| Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
-| Mutable storage | One mutable root reference, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing, legacy byte captures and partial initialization remain UNKNOWN |
+| Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
+| Mutable storage | One mutable root reference, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
 | Interior mutation | Scalar Cell aliases/calls and integer atomic load/store/add/sub/swap with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
-Root input construction has at most eight recursive levels and 128 values across all arguments.
+Root input construction has at most 16 recursive levels and 512 values across all arguments.
 References, aggregate containers and their children consume the budget. A symbolic byte array or
 slice is one modeled value rather than one value per byte. Recursive reference shapes and budget
 exhaustion return UNKNOWN before execution. Zero-length arrays do not require modeling an element
@@ -51,7 +51,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Loops | Complete finite unrolling through every feasible path | No inductive loop invariants; incomplete exploration is UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
-| Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Legacy mutable byte captures, function pointers and unsupported call shapes remain UNKNOWN |
+| Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Function pointers and unsupported call shapes remain UNKNOWN |
 | Array map | Actual callback bodies in order, retaining capture state and reference-valued elements | At most 16 elements; callback destructors remain UNKNOWN |
 | Array from_fn | Actual callbacks in ascending index order, retaining capture state and effects | At most 128 owned elements and 256 values; drops and identity-bearing results remain UNKNOWN |
 | Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; identities, user destructors, clone and views remain UNKNOWN |
@@ -62,14 +62,14 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Drop | No-drop values and harmless owned-iterator wrapper glue | User destructors and broader drop execution remain UNKNOWN |
 | MIR assume | Prove its predicate as a validity obligation | Never turn it into an unchecked assumption |
 
-The execution budget is 2,048 steps per root, including callees, iterator model steps and infeasible
+The execution budget is 8,192 steps per root, including callees, iterator model steps and infeasible
 queued branches. Call depth is 16 active frames; recursion can finish within the same limits.
-Queries have at most 200,000 bytes, a
-five-second solver timeout and a six-second host deadline per default solver request. Exceeding a
-limit returns UNKNOWN. The root budget remains 30 seconds. Root-local solver sessions retain
-common assertions with push/pop and reset incompatible declaration namespaces. Exact-query caching,
-closed Boolean/bit-vector folding and a full-Instance MIR cache reduce repeated work. None reuses
-function proofs or unchecked summaries; full standalone queries remain in reports.
+Queries have at most 200,000 bytes, a five-second solver timeout and a six-second host deadline per
+default solver request. Exceeding a limit returns UNKNOWN. The root budget remains 30 seconds.
+Root-local solver sessions retain common assertions with push/pop and reset incompatible declaration
+namespaces. Exact-query caching, closed Boolean/bit-vector folding and a full-Instance MIR cache
+reduce repeated work. None reuses function proofs or unchecked summaries; full standalone queries
+remain in reports.
 
 Explicit core models implement byte lengths/ranges/copies, shared slice-to-array conversion,
 lossless integer conversion, endian decoding, fixed-array map and opaque formatting arguments from
@@ -101,7 +101,7 @@ and grouped unknown reasons. An empty inventory or zero selected roots establish
 | Bus validator | Two symbolic three-device families through 44-block nested-loop MIR on host/ARM | Five invalid families are refuted/replayed; arbitrary input slices remain UNKNOWN |
 | DR16 parser | Unchanged 42-block body, exact length and decoded bounds on host/ARM without entry assumptions | Bad index and channel mask are refuted; 4,608 sample frames use independent formulas |
 | Generic/dependency calls | Concrete bodies/static traits; non-inline transitive dependencies on host/ARM, with configuration and encoded flags preserved | Dependency precondition violations and overflow refute; opt-out calls and unsupported retained operations stay UNKNOWN |
-| Callbacks and aggregate borrows | Struct/tuple/Option references, returned captures, owned FnMut state, Zip/Flatten and ordered callback effects on host/ARM | Wrong field/state assertions and swapped-field mutations refute; legacy byte captures and unresolved root aliases remain UNKNOWN |
+| Callbacks and aggregate borrows | Struct/tuple/Option references, returned captures, owned FnMut state, Zip/Flatten and ordered callback effects on host/ARM | Wrong field/state assertions and swapped-field mutations refute; unresolved root aliases remain UNKNOWN |
 | Generated arrays | Synthetic ticket/parcel/label cases, function items, zero length, 18/128-element arrays and exact value-budget boundary on host/ARM | Bad callback assertions, overflows, call bounds and label mutations refute; drops, storage identities and larger shapes remain UNKNOWN |
 | Iterator audit regressions | Mixed forward/reverse skips, usize::MAX exhaustion, zero-sized elements, skipped byte storage and shared Cell aliases on host/ARM; 1,792 native cases | Wrong alias, false reset-state claims and exhaustion mutations refute; unsupported views remain UNKNOWN |
 | Aggregate inputs | Nested/generic structs, tuples, shared byte fields and fixed struct arrays on host/ARM | An off-by-one nested call guard is refuted; mutable/recursive/oversized shapes are UNKNOWN |
@@ -154,10 +154,9 @@ intrinsic declaration and primitive clamp implementation; they do not trust appl
 Small repeated tuples, structs, enum values and nested arrays preserve their contents and variant
 tags. Each copy owns its data: changing a field or byte in one copy does not change another copy.
 Generated repeats have at most 128 elements and 256 modeled values, counting aggregate containers
-and their children. Non-byte root inputs retain their 16-element limit; evaluated constants permit
-128 elements.
-Byte arrays retain their 128-byte limit.
-Tracked references, Cell/atomic identities and mutable views are excluded from repeat cloning.
+and their children. Non-byte root arrays allow 256 elements within the 512-value input budget;
+evaluated constants permit 128 elements. Byte arrays retain their 128-byte limit. Tracked
+references, Cell/atomic identities and mutable views are excluded from repeat cloning.
 
 Host/ARM tests prove six-by-six float matrix initialization, tuple/struct/enum copies, 18-element
 scalar/enum arrays, 128-element generated arrays and byte writes inside nested tuples. An incorrect
@@ -232,11 +231,11 @@ One tracked environment per modeled callback invocation preserves owned FnMut fi
 through captures. Array map retains reference-valued input elements. Completed temporary callback
 environments are retired; unsupported destructors do not become harmless by entering a model.
 
-The synthetic aggregate fixture checks 19 roots on host/ARM: 13 prove, three refute and three remain
+The synthetic aggregate fixture checks 19 roots on host/ARM: 14 prove, three refute and two remain
 unknown. Native execution checks 700 bounded calls plus stateful callback examples and negative
-panic catches. Swapping the mutable struct fields refutes the unchanged assertion. Four memory
-regressions reject dead references, a callee borrow hidden in caller storage and legacy byte views,
-while preserving nested incoming references. These checks do not cover every alias/lifetime rule.
+panic catches. Swapping the mutable struct fields refutes the unchanged assertion. Three memory
+regressions reject dead references and a callee borrow hidden in caller storage, while preserving
+nested incoming references. These checks do not cover every alias/lifetime rule.
 
 ## Floating-point storage
 
@@ -269,3 +268,27 @@ remains unchanged.
 Opaque static string transport now supports guarded Option expect and nested shared arguments.
 Unguarded expect calls refute; changed guards also refute. String length/content operations and
 mutable string-reference storage remain UNKNOWN.
+
+## Mutable byte regions and valid bounded roots
+
+Local mutable byte arrays retain allocation identities through helpers, returned borrows and
+closure captures. Prefixes and finite `as_chunks_mut` views share the original allocation; chunk
+and remainder writes preserve disjoint regions. The exact core model checks nonzero chunk width
+and a fixed length within 128 bytes. Symbolic chunk lengths, larger views and unresolved root
+aliasing remain UNKNOWN. Literal byte indices in contracts require a fixed modeled length.
+
+Function-item callbacks resolve concrete trait implementations before requesting their MIR.
+Missing-body diagnostics distinguish foreign declarations from omitted prebuilt core bodies.
+The existing Cargo `-Zbuild-std=core` path captures rebuilt core MIR, but unsupported operations
+inside those bodies still remain UNKNOWN. Primitive integer endian encoding and decoding use
+exact compiler identities, signatures and byte order.
+
+Root arrays allow 256 non-byte elements within the shared 512-value and 16-level budgets, and
+enums allow 64 variants. Integer compiler patterns and Unicode char validity constrain the
+input domain. The exact core NonZero getter reads the modeled scalar; other struct invariants
+are not inferred. Exhausted budgets and unresolved input types remain UNKNOWN.
+
+Original host/ARM cases check mutable region writes, returned views, caller bounds, callback
+dispatch, endian boundaries and valid scalar domains. Native tests and failing mutations check
+these effects independently. Byte-source sharing bounds expression growth without increasing
+the query-size cap, and standalone SMT scripts remain available in reports.

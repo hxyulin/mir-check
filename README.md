@@ -198,13 +198,12 @@ containing a shared byte slice.
 
 Integer/bool/float arrays support symbolic bounded indices and array/slice pattern projections.
 Owned aggregate repeats preserve independent copies, with at most 128 elements and 256 modeled
-values per repeat. Non-byte input arrays retain their 16-element limit; evaluated constants allow
-128 elements.
-Tuple/struct/enum array elements require a uniquely determined index on the current path. Root
-struct fields are independent inputs; privacy and constructors do not supply an implicit type
-invariant. Nested input construction is limited to eight levels and 128 values; non-byte arrays have
-at most 16 elements and input enums have at most 16 variants. All variant payloads must have
-supported shapes.
+values per repeat. Non-byte input arrays allow 256 elements within the root shape budget; evaluated
+constants allow 128 elements. Tuple/struct/enum array elements require a uniquely determined index
+on the current path. Root struct fields are independent inputs; privacy and constructors do not
+supply an implicit type invariant. Nested input construction is limited to 16 levels and 512 values;
+non-byte arrays have at most 256 elements and input enums have at most 64 variants. All variant
+payloads must have supported shapes.
 
 Constant decoding uses rustc's constant interpreter for layouts, discriminants and initialized
 scalar reads. It follows only immutable references to storage without interior mutation and
@@ -212,12 +211,12 @@ decodes only the active variant. Constants have an eight-level depth limit and a
 evaluated arrays/slices have at most 128 elements. Unions,
 including MaybeUninit, and mutable or raw-pointer storage remain unknown.
 
-Tracked mutable references can be stored in tuples, structs, enums and closure environments.
-They keep allocation identity through calls and returns when their storage belongs to the caller;
-dead references and references into the returning frame fail verification. FnMut callbacks retain
-both owned capture state and writes through captured references between invocations. Legacy mutable
-byte views, multiple mutable root references, general aliasing and ambiguous non-byte writes remain
-gaps.
+Tracked mutable references can be stored in tuples, structs, enums and closure environments. They
+keep allocation identity through calls and returns when their storage belongs to the caller; dead
+references and references into the returning frame fail verification. FnMut callbacks retain both
+owned capture state and writes through captured references between invocations. Local byte borrows
+and bounded chunk/remainder views retain their original allocation. Multiple mutable root
+references, general aliasing and ambiguous non-byte writes remain gaps.
 
 Float storage bits are tracked through inputs, constants, from_bits/to_bits, moves, negation, abs
 and clamp. Arithmetic has exact numeric IEEE semantics; NaN output bits conservatively allow all
@@ -230,7 +229,7 @@ unsupported
 operations produce UNKNOWN. A selected-root proof also does not establish absence of undefined
 behavior, allocation failure, stack exhaustion, interrupt races or hardware timing failures.
 
-The default execution limits are 2,048 steps and 16 active call frames per root. Finite recursion
+The default execution limits are 8,192 steps and 16 active call frames per root. Finite recursion
 can complete within those limits; unfinished paths remain UNKNOWN. Each root retains a 30-second
 budget and a 200,000-byte query limit. Incremental solver scopes, exact constant folding and a
 root-local instantiated MIR cache reduce repeated work without assuming function summaries.
