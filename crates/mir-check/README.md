@@ -347,8 +347,11 @@ returns. Independent entry snapshots preserve original arguments when a callee m
 values. Caller state is carried through callee block relations and actual return values resume the
 caller. A contract never replaces execution of the body.
 
-Concrete local, generic and retained dependency calls can contain loops. Recursion, references,
-iterator storage, enums, floats, trusted call boundaries, interior mutable storage and coroutines
+Concrete local, generic and retained dependency calls can contain loops. Typed allocations support
+structs, scalar/byte-array borrows and stable field references. Callee writes update caller storage;
+contract entry snapshots remain independent from those writes. Changing reference targets, dynamic
+indexed borrows, recursion, iterator storage, enums, floats, trusted boundaries and interior mutation
+and coroutines
 remain UNKNOWN in this mode. Unavailable bodies and unsupported predicates remain UNKNOWN too.
 
 The encoding has 256 total call-context blocks, 512 parameters per relation, 16 call frames and
@@ -363,8 +366,10 @@ setting. The default bounded interpreter and its budgets remain unchanged.
 Host/ARM call fixtures cover nested generic instances, delegated entries, loops in callees, entry
 snapshots of owned bytes, call domains and root/callee postconditions. Changed wraps, violated call
 domains, false contracts, recursive calls and unsupported predicates never pass. Existing 256- and
-1,024-iteration scalar fixtures also prove through induction. Iterator/reference loops still need
-their storage models; a fully supported loop can still exhaust the solver's inference budget.
+1,024-iteration scalar fixtures also prove through induction. Host/ARM storage fixtures cover
+persistent structs, shared array reads, borrowed byte writes and mutable callee snapshots. Mutated
+writes and false snapshot claims never pass. Iterator loops still need their state models; a fully
+supported loop can still exhaust the solver's inference budget.
 
 A solver preprocessing experiment was rejected after a native-replayed late-panic mutation received
 a false safety answer. The checker retains the ordinary Spacer encoding, and scalar relational

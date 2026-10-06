@@ -900,3 +900,16 @@ avoided that crash but returned a false safety answer on the native-replayed lat
 That strategy was rejected. Ordinary Spacer inference remains enabled, and crashes/timeouts remain
 UNKNOWN. Iterator storage, mutable/shared memory, trusted hardware boundaries and coroutines remain
 next coverage requirements rather than assumed effects.
+
+
+## Stage 52: typed inductive storage and stable references
+
+Frames have fixed typed allocation layouts. Addressed locals and root borrows carry their values in
+relation memory parameters; static field aliases retain allocation identity at every transition.
+Callee writes update the caller's storage rather than a frozen copy. Entry snapshots for contracts
+have independent parameters, and frame-owned references cannot escape into caller storage.
+
+Host/ARM no_std fixtures prove persistent structs, mutable helper calls, shared array inputs and
+borrowed byte writes. Bad wraps, off-by-one writes and false snapshot contracts never pass; native
+tests replay the mutations. Changing reference targets, indexed borrows and interior-mutable inputs
+remain UNKNOWN. Iterator state is the next independent coverage step.

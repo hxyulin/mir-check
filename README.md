@@ -240,9 +240,10 @@ root-local instantiated MIR cache reduce repeated work without assuming function
 
 Experimental `--induction` uses Z3 Spacer to prove supported cyclic root bodies without unrolling
 an iteration bound. It supports integer/Boolean state, tuples, fixed byte arrays, available concrete
-callee MIR and checked preconditions/postconditions. Caller state and entry snapshots are carried
-through actual callee transitions. References, iterator storage, coroutines and recursion remain
-UNKNOWN in this mode. Raw reports retain
+callee MIR, checked preconditions/postconditions and typed shared/mutable storage. Caller state and
+entry snapshots are carried through actual callee transitions. Stable field references preserve
+aliases; iterator storage, changing reference targets, interior mutation, coroutines and recursion
+remain UNKNOWN in this mode. Raw reports retain
 inferred models separately in `invariants`. A positive Horn result proves panic freedom rather
 than termination. Solver failures and detected Horn failures remain UNKNOWN until counterexample
 replay is available. See [loop proof details](docs/proofs.md#loops-and-limits).

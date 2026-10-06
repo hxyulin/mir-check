@@ -48,7 +48,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Feature | Current support | Boundary |
 | --- | --- | --- |
 | Branches | Path-sensitive states; discard a branch only after an exact constant UNSAT decision or an unsat solver response | Ordinary mode does not merge states; induction forms per-block relations |
-| Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction includes available concrete callee MIR and checked contracts; references, iterator storage, recursion and coroutines remain gaps; incomplete or undecided proofs are UNKNOWN |
+| Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction includes available concrete callee MIR and checked contracts; typed stable references are supported; iterator storage, changing aliases, recursion and coroutines remain gaps; incomplete or undecided proofs are UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Function pointers and unsupported call shapes remain UNKNOWN |
@@ -320,7 +320,10 @@ Host/ARM call tests cover concrete generic instances, retained dependency bodies
 delegating to an endless helper, callee loops, restored caller state and original/final
 owned-byte snapshots. Changed wraps, violated call domains, false postconditions, recursion and
 unsupported inputs never pass. Existing 256- and 1,024-iteration scalar loops prove inductively.
-Iterator/reference storage still blocks its own induction cases, so finite unrolling retains
+Typed memory tests cover persistent structs, static field aliases, shared array roots, mutable
+byte-array roots and callee writes. Separate contract snapshots retain entry values. Off-by-one
+writes, bad wraps and false snapshot contracts never pass; changing aliases and interior mutation
+remain UNKNOWN. Iterator storage still blocks its own induction cases, so finite unrolling retains
 broader coverage for those shapes. A relational decrement/count query remains UNKNOWN after a Z3
 crash. A preprocessing experiment that claimed a native-replayed late panic was safe was
 rejected and is not enabled.

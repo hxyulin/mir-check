@@ -3,6 +3,9 @@ use mir_check::smt::horn::{Atom, Clause, System};
 use rustc_middle::mir::BasicBlock;
 use std::collections::BTreeSet;
 
+mod storage;
+use storage::same_shape;
+
 const MAX_BLOCKS: usize = 256;
 const MAX_STATE_VALUES: usize = 512;
 
@@ -87,15 +90,13 @@ impl<'tcx> Engine<'tcx> {
         conditions: Vec<Term>,
         memory: Vec<Option<Value>>,
     ) -> Result<(), String> {
-        if !memory.is_empty() {
-            return Err("loop induction does not yet model mutable or interior storage".into());
-        }
         let mut system = System {
             relations: Vec::new(),
             clauses: Vec::new(),
         };
-        let root = self.loop_frame(instance, Vec::new(), None, &mut system)?;
-        let initial = root.entry_atom(&arguments, Vec::new())?;
+        let (arguments, memory) = self.loop_root_storage(instance, arguments, memory)?;
+        let root = self.loop_frame(instance, Vec::new(), None, &mut system, &arguments, &memory)?;
+        let initial = self.loop_entry_atom(&root, &arguments, &memory, Vec::new())?;
         system.clauses.push(Clause {
             premise: None,
             conditions,
@@ -199,7 +200,11 @@ impl<'tcx> Engine<'tcx> {
                             .target
                             .ok_or("a diverging call unexpectedly returned")?;
                         let caller = &frames[resume.caller];
+                        self.validate_frame_escape(&result, &state, caller.state.memory.len())?;
                         let mut restored = caller.state.clone();
+                        restored
+                            .memory
+                            .clone_from_slice(&state.memory[..caller.state.memory.len()]);
                         restored.conditions = state.conditions;
                         self.loop_place_bounds(
                             &mut restored,
@@ -271,7 +276,7 @@ impl<'tcx> Engine<'tcx> {
                         )?;
                         values.push(self.operand(id, body, &state, &argument.node)?);
                     }
-                    let inherited = frame.parameters(&frame.state)?;
+                    let inherited = frame.captured(&frame.state)?;
                     let child = self.loop_frame(
                         callee,
                         inherited,
@@ -281,10 +286,12 @@ impl<'tcx> Engine<'tcx> {
                             destination: *destination,
                         }),
                         &mut system,
+                        &values,
+                        &state.memory,
                     )?;
                     self.loop_preconditions(&child, &values, &mut state, &mut system, &premise)?;
-                    let captured = frame.parameters(&state)?;
-                    let entry = child.entry_atom(&values, captured)?;
+                    let captured = frame.captured(&state)?;
+                    let entry = self.loop_entry_atom(&child, &values, &state.memory, captured)?;
                     system.clauses.push(Clause {
                         premise: Some(premise.clone()),
                         conditions: state.conditions,
@@ -341,6 +348,8 @@ impl<'tcx> Engine<'tcx> {
         inherited: Vec<Term>,
         resume: Option<Resume<'tcx>>,
         system: &mut System,
+        arguments: &[Value],
+        incoming_memory: &[Option<Value>],
     ) -> Result<Frame<'tcx>, String> {
         if self
             .specification(instance)?
@@ -358,23 +367,19 @@ impl<'tcx> Engine<'tcx> {
             );
         }
         let contracts = self.configured_contracts(instance)?;
-        let mut locals = Vec::new();
-        for declaration in &body.local_decls {
-            locals.push(Some(self.loop_input(declaration.ty, 0)?));
-        }
-        let state = State {
-            locals,
-            conditions: Vec::new(),
-            addresses: vec![None; body.local_decls.len()],
-            memory: Vec::new(),
-        };
+        let state = self.loop_storage(&body, arguments, incoming_memory)?;
         let mut entry = Vec::new();
         if contracts
             .iter()
             .any(|contract| matches!(contract.kind, ContractKind::Ensures))
         {
-            for local in body.args_iter() {
-                entry.push(self.loop_input(body.local_decls[local].ty, 0)?);
+            let values = body
+                .args_iter()
+                .map(|local| self.local(&state, local.as_usize()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let snapshots = self.snapshots(&values, &state.memory, &[])?;
+            for snapshot in &snapshots {
+                entry.push(self.loop_fresh_value(snapshot)?);
             }
         }
         let mut ghosts = inherited;
@@ -430,7 +435,8 @@ impl<'tcx> Engine<'tcx> {
             .args_iter()
             .map(|local| self.local(&frame.state, local.as_usize()))
             .collect::<Result<Vec<_>, _>>()?;
-        let bindings = self.configured_bindings(&frame.body, &arguments, frame.instance)?;
+        let snapshots = self.snapshots(&arguments, &frame.state.memory, &[])?;
+        let bindings = self.configured_bindings(&frame.body, &snapshots, frame.instance)?;
         let mut post_bindings = bindings.clone();
         if frame
             .contracts
@@ -481,7 +487,8 @@ impl<'tcx> Engine<'tcx> {
         if !needs_bindings {
             return Ok(());
         }
-        let bindings = self.configured_bindings(&frame.body, arguments, frame.instance)?;
+        let snapshots = self.snapshots(arguments, &state.memory, &state.conditions)?;
+        let bindings = self.configured_bindings(&frame.body, &snapshots, frame.instance)?;
         if frame
             .contracts
             .iter()
@@ -525,12 +532,14 @@ impl<'tcx> Engine<'tcx> {
             .args_iter()
             .map(|local| self.local(state, local.as_usize()))
             .collect::<Result<Vec<_>, _>>()?;
-        for (name, value) in
-            self.configured_bindings(&frame.body, &final_arguments, frame.instance)?
-        {
+        let snapshots = self.snapshots(&final_arguments, &state.memory, &state.conditions)?;
+        for (name, value) in self.configured_bindings(&frame.body, &snapshots, frame.instance)? {
             bindings.insert(format!("final_{name}"), value);
         }
-        bindings.insert("result".into(), result.clone());
+        bindings.insert(
+            "result".into(),
+            self.snapshot(result, &state.memory, &state.conditions, 0)?,
+        );
         for contract in frame.contracts.iter() {
             if matches!(contract.kind, ContractKind::Ensures) {
                 let predicate = contract
@@ -583,6 +592,30 @@ impl<'tcx> Engine<'tcx> {
                     )),
                 })
             }
+            ty::Adt(def, args)
+                if def.is_struct()
+                    && ty.is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized())
+                    && !ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) =>
+            {
+                let fields = def
+                    .non_enum_variant()
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        let field_ty = self
+                            .tcx
+                            .try_normalize_erasing_regions(
+                                ty::TypingEnv::fully_monomorphized(),
+                                field.ty(self.tcx, args),
+                            )
+                            .map_err(|error| {
+                                format!("loop field normalization failed: {error:?}")
+                            })?;
+                        self.loop_input(field_ty, depth + 1)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.constructed(ty, 0, fields)
+            }
             // Other representations need their own inductive memory/validity model.
             other => Err(format!("loop induction unsupported state type {other:?}")),
         }
@@ -612,6 +645,7 @@ impl<'tcx> Engine<'tcx> {
     ) -> Result<(), String> {
         for (position, projection) in place.projection.iter().enumerate() {
             match projection {
+                ProjectionElem::Deref => {}
                 ProjectionElem::Field(..) | ProjectionElem::ConstantIndex { .. } => {}
                 ProjectionElem::Index(index) => {
                     let prefix = Place {
@@ -658,9 +692,23 @@ impl<'tcx> Engine<'tcx> {
                 let (place, value) = assignment.as_ref();
                 self.loop_place_bounds(state, *place, system, premise)?;
                 match value {
+                    Rvalue::Ref(_, BorrowKind::Shared | BorrowKind::Mut { .. }, borrowed) => {
+                        self.loop_place_bounds(state, *borrowed, system, premise)?;
+                        let mutable = matches!(value, Rvalue::Ref(_, BorrowKind::Mut { .. }, _));
+                        let reference = self
+                            .loop_alias(state, *borrowed, mutable)?
+                            .ok_or("inductive borrow has no stable target")?;
+                        return self.write(state, *place, reference);
+                    }
+                    Rvalue::RawPtr(rustc_middle::mir::RawPtrKind::FakeForPtrMetadata, borrowed) => {
+                        self.loop_place_bounds(state, *borrowed, system, premise)?;
+                    }
+                    Rvalue::Cast(CastKind::PointerCoercion(..), operand, _) => {
+                        self.loop_operand_bounds(state, operand, system, premise)?;
+                    }
                     Rvalue::Use(operand, _)
                     | Rvalue::Cast(CastKind::IntToInt, operand, _)
-                    | Rvalue::UnaryOp(UnOp::Not | UnOp::Neg, operand)
+                    | Rvalue::UnaryOp(UnOp::Not | UnOp::Neg | UnOp::PtrMetadata, operand)
                     | Rvalue::Repeat(operand, _) => {
                         self.loop_operand_bounds(state, operand, system, premise)?;
                     }
@@ -720,41 +768,42 @@ struct Frame<'tcx> {
 }
 
 impl Frame<'_> {
-    fn parameters(&self, state: &State) -> Result<Vec<Term>, String> {
+    fn captured(&self, state: &State) -> Result<Vec<Term>, String> {
+        self.check_shape(state)?;
         let mut values = self.ghosts.clone();
         values.extend(flatten(state)?);
         Ok(values)
+    }
+
+    fn parameters(&self, state: &State) -> Result<Vec<Term>, String> {
+        let mut values = self.captured(state)?;
+        for cell in &state.memory {
+            flatten_value(
+                cell.as_ref().ok_or("unavailable inductive memory cell")?,
+                &mut values,
+            )?;
+        }
+        Ok(values)
+    }
+
+    fn check_shape(&self, state: &State) -> Result<(), String> {
+        if state.addresses != self.state.addresses || state.memory.len() != self.state.memory.len()
+        {
+            return Err("inductive allocation layout changed".into());
+        }
+        for (expected, value) in self.state.locals.iter().zip(&state.locals) {
+            same_shape(expected.as_ref(), value.as_ref())?;
+        }
+        for (expected, value) in self.state.memory.iter().zip(&state.memory) {
+            same_shape(expected.as_ref(), value.as_ref())?;
+        }
+        Ok(())
     }
 
     fn atom(&self, block: BasicBlock, state: &State) -> Result<Atom, String> {
         Ok(Atom {
             relation: self.base + block.as_usize(),
             arguments: self.parameters(state)?,
-        })
-    }
-
-    fn entry_atom(&self, arguments: &[Value], captured: Vec<Term>) -> Result<Atom, String> {
-        if arguments.len() != self.body.arg_count {
-            return Err("inductive entry arguments do not match its MIR body".into());
-        }
-        let mut initial = self.state.clone();
-        for (local, value) in self.body.args_iter().zip(arguments) {
-            initial.locals[local.as_usize()] = Some(value.clone());
-        }
-        let mut parameters = captured;
-        if self
-            .contracts
-            .iter()
-            .any(|contract| matches!(contract.kind, ContractKind::Ensures))
-        {
-            for value in arguments {
-                flatten_value(value, &mut parameters)?;
-            }
-        }
-        parameters.extend(flatten(&initial)?);
-        Ok(Atom {
-            relation: self.base + START_BLOCK.as_usize(),
-            arguments: parameters,
         })
     }
 }
@@ -781,11 +830,13 @@ fn check_reserved_names(bindings: &BTreeMap<String, Value>) -> Result<(), String
 
 fn flatten(state: &State) -> Result<Vec<Term>, String> {
     let mut result = Vec::new();
-    for local in &state.locals {
-        flatten_value(
-            local.as_ref().ok_or("uninitialized inductive state")?,
-            &mut result,
-        )?;
+    for (index, local) in state.locals.iter().enumerate() {
+        if state.addresses[index].is_none() {
+            flatten_value(
+                local.as_ref().ok_or("uninitialized inductive state")?,
+                &mut result,
+            )?;
+        }
     }
     Ok(result)
 }
@@ -800,21 +851,30 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
             flatten_value(length, result)?;
             result.push(data.clone());
         }
-        Value::Tuple(fields) => {
+        Value::Adt { fields, .. } => {
+            for (_, field) in fields {
+                flatten_value(field, result)?;
+            }
+        }
+        Value::Elements(fields) | Value::Tuple(fields) => {
             for field in fields {
                 flatten_value(field, result)?;
             }
         }
+        Value::Reference { projection, .. } => {
+            for part in projection {
+                if !matches!(part, symbolic::MemoryProjection::Field(_)) {
+                    return Err("inductive reference projection is not a static field".into());
+                }
+            }
+        }
+        Value::MetadataPointer(length) => flatten_value(length, result)?,
         Value::Unit => {}
         other @ (Value::Float { .. }
-        | Value::Adt { .. }
         | Value::Enum { .. }
         | Value::Cell { .. }
         | Value::Atomic { .. }
-        | Value::Reference { .. }
         | Value::SliceIterator { .. }
-        | Value::Elements(_)
-        | Value::MetadataPointer(_)
         | Value::StaticText
         | Value::FormatArguments
         | Value::Function) => return Err(format!("unsupported inductive value {other:?}")),

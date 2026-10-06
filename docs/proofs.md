@@ -140,7 +140,13 @@ inherited induction setting when the option is absent.
 
 Each call site receives its own callee block relations. They carry immutable copies of the caller's
 state as additional parameters, initialize the callee with the actual argument values, and return
-actual results to the caller's destination. Nested callees preserve every ancestor's state. Callee
+actual results to the caller's destination. Nested callees preserve every ancestor's state. Stable typed allocations carry borrowed storage as
+mutable relation parameters. Addressed locals live in that storage, so aliases see the same writes.
+Caller locals and entry snapshots are frozen separately; memory is carried through the actual
+callee transitions and restored on return. Every edge checks allocation and reference identities
+against the frame layout. Changing targets and indexed borrows remain UNKNOWN, and references to
+interior-mutable storage are rejected. Struct fields and byte-array storage require no byte-level
+raw-pointer model. Callee
 loops use the same transition encoding as root loops. Available local, concrete generic and retained
 dependency MIR is translated; a callee contract never replaces its body with a summary.
 
