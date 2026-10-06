@@ -13,7 +13,7 @@ completed a soundness audit. Every result is tied to its compiler, target, flags
 | Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | One mutable byte-slice root supports guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
-| Fixed non-byte arrays | At most 16 modeled elements, including structs and tuples | Larger arrays fail as UNKNOWN |
+| Fixed non-byte arrays | At most 16 input/constant elements; generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | One mutable root reference, field/byte writes, reborrows and call state propagation | Root pointees with reference fields, general aliasing, mutable returns/captures and partially initialized aggregates remain UNKNOWN |
@@ -130,3 +130,18 @@ bounds refute; a NaN input remains NaN and equality preserves the input's signed
 symbolic ordered bounds, infinities, signed-zero observations and a reversed-guard mutation.
 Raw float bit observation remains UNKNOWN. These models follow the pinned compiler's core
 intrinsic declaration and primitive clamp implementation; they do not trust application summaries.
+
+## Owned aggregate repeats
+
+Small repeated tuples, structs, enum values and nested arrays preserve their contents and variant
+tags. Each copy owns its data: changing a field or byte in one copy does not change another copy.
+Generated repeats have at most 128 elements and 256 modeled values, counting aggregate containers
+and their children. Input and constant non-byte arrays retain their 16-element limit; byte arrays
+retain their 128-byte limit.
+Tracked references, Cell/atomic identities and mutable views are excluded from repeat cloning.
+
+Host/ARM tests prove six-by-six float matrix initialization, tuple/struct/enum copies, 18-element
+scalar/enum arrays, 128-element generated arrays and byte writes inside nested tuples. An incorrect
+copy assertion and a mutation that writes the wrong matrix row refute. Ambiguous composite indices,
+excessive shapes and operations on repeated interior mutable storage remain UNKNOWN. Root input
+budgets and general aliasing limits are unchanged.

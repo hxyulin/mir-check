@@ -421,3 +421,16 @@ float ranges and special values. Invalid bounds and incorrect assertions refute.
 bound or reversing a passing clamp guard also refutes with a counterexample. Unsupported pointer
 inputs and raw float bit observations remain unknown. There are 73 compiler integration tests and
 one metadata test.
+
+## Stage 23: bounded owned aggregate repeats
+
+The repeat evaluator now accepts nested arrays, tuples, structs and enum values with owned
+modeled contents. Copies preserve symbolic fields and variant tags, while independent writes
+stay local to the selected copy. The model rejects tracked storage identities and limits each
+repeat to 128 elements and 256 modeled values to bound recursive expansion. Input and constant
+non-byte array limits remain unchanged.
+
+Host/ARM compiler tests cover six-by-six float matrices, diagonal initialization, tuple/struct/enum
+copies, larger generated arrays and nested byte-array writes. Wrong copy assertions and a wrong-row
+write mutation refute. Large repeats, ambiguous composite indices and repeated interior-storage
+accesses remain unknown. There are 75 compiler integration tests and one metadata test.

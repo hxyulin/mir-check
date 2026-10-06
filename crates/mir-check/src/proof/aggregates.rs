@@ -301,7 +301,7 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
-    pub(super) fn repeated_bytes(
+    pub(super) fn repeated_array(
         &self,
         id: DefId,
         body: &Body<'tcx>,
@@ -313,7 +313,13 @@ impl<'tcx> Engine<'tcx> {
             .try_to_target_usize(self.tcx)
             .ok_or("unevaluated repeat length")?;
         if count > MAX_ARRAY_BYTES {
-            return Err("byte array model size limit reached".to_owned());
+            return Err("array repeat exceeds the 128-element limit".to_owned());
+        }
+        if !operand
+            .ty(body, self.tcx)
+            .is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized())
+        {
+            return Err("repeated interior mutable storage is not modeled".to_owned());
         }
         let value = self.operand(id, body, state, operand)?;
         if !matches!(
@@ -324,13 +330,11 @@ impl<'tcx> Engine<'tcx> {
                 ..
             }
         ) {
-            if count > MAX_ARRAY_ELEMENTS as u64
-                || !matches!(
-                    value,
-                    Value::Int { .. } | Value::Float { .. } | Value::Bool(_)
-                )
-            {
-                return Err("only small scalar repeats are modeled".to_owned());
+            let size = value
+                .owned_repeat_size()
+                .ok_or("repeat operand needs a small owned value")?;
+            if size * count as usize + 1 > symbolic::MAX_REPEAT_VALUES {
+                return Err("owned repeat exceeds the 256-value budget".to_owned());
             }
             return Ok(Value::Elements(vec![value; count as usize]));
         }

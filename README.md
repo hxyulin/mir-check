@@ -196,6 +196,8 @@ containing a shared byte slice.
 | Contracts | Caller bounds, entry preconditions and postconditions on actual returns |
 
 Integer/bool/float arrays support symbolic bounded indices and array/slice pattern projections.
+Owned aggregate repeats preserve independent copies, with at most 128 elements and 256 modeled
+values per repeat. Input and constant non-byte arrays retain their 16-element limit.
 Tuple/struct/enum array elements require a uniquely determined index on the current path. Root
 struct fields are independent inputs; privacy and constructors do not supply an implicit type
 invariant. Nested input construction is limited to eight levels and 128 values; non-byte arrays have

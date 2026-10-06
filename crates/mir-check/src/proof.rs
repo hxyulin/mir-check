@@ -1110,7 +1110,7 @@ impl<'tcx> Engine<'tcx> {
                 Ok(Value::MetadataPointer(Box::new(length)))
             }
             Rvalue::Repeat(operand, length) => {
-                self.repeated_bytes(id, body, state, operand, *length)
+                self.repeated_array(id, body, state, operand, *length)
             }
             Rvalue::Discriminant(place) => {
                 let modeled = self.place(state, *place)?;

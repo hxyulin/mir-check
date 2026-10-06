@@ -1,6 +1,8 @@
 mod floating;
 pub use floating::{float, float_cast, float_sort};
 
+pub const MAX_REPEAT_VALUES: usize = 256;
+
 #[derive(Clone, Debug)]
 pub enum MemoryProjection {
     Field(usize),
@@ -62,6 +64,44 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn owned_repeat_size(&self) -> Option<usize> {
+        match self {
+            Self::Bool(_)
+            | Self::Int { .. }
+            | Self::Float { .. }
+            | Self::Bytes { .. }
+            | Self::Unit => Some(1),
+            Self::Tuple(fields) | Self::Elements(fields) => {
+                fields.iter().try_fold(1_usize, |size, value| {
+                    size.checked_add(value.owned_repeat_size()?)
+                        .filter(|size| *size <= MAX_REPEAT_VALUES)
+                })
+            }
+            Self::Adt { fields, .. } => fields.iter().try_fold(1_usize, |size, (_, value)| {
+                size.checked_add(value.owned_repeat_size()?)
+                    .filter(|size| *size <= MAX_REPEAT_VALUES)
+            }),
+            Self::Enum {
+                discriminant,
+                variants,
+                ..
+            } => variants
+                .iter()
+                .try_fold(1 + discriminant.owned_repeat_size()?, |size, value| {
+                    size.checked_add(value.owned_repeat_size()?)
+                        .filter(|size| *size <= MAX_REPEAT_VALUES)
+                }),
+            Self::Cell { .. }
+            | Self::Atomic { .. }
+            | Self::Reference { .. }
+            | Self::MutableBytes { .. }
+            | Self::MetadataPointer(_)
+            | Self::StaticText
+            | Self::FormatArguments
+            | Self::Function => None,
+        }
+    }
+
     pub fn contains_mutable(&self) -> bool {
         match self {
             Self::MutableBytes { .. } | Self::Reference { mutable: true, .. } => true,

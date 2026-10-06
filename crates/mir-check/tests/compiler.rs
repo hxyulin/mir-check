@@ -2409,6 +2409,87 @@ fn changed_population_bounds_and_reversed_clamp_guards_are_rejected() {
 }
 
 #[test]
+fn owned_aggregate_repeats_preserve_independent_copies_and_keep_storage_limits_on_host_and_arm() {
+    let entries = [
+        ("matrix", ProofStatus::Proved),
+        ("diagonal", ProofStatus::Proved),
+        ("structures", ProofStatus::Proved),
+        ("tuples", ProofStatus::Proved),
+        ("variants", ProofStatus::Proved),
+        ("empty_tuple", ProofStatus::Proved),
+        ("larger", ProofStatus::Proved),
+        ("maximum", ProofStatus::Proved),
+        ("large_input", ProofStatus::Unknown),
+        ("value_budget_limit", ProofStatus::Proved),
+        ("over_value_budget", ProofStatus::Unknown),
+        ("bad_copy", ProofStatus::Refuted),
+        ("too_many", ProofStatus::Unknown),
+        ("too_large", ProofStatus::Unknown),
+        ("ambiguous", ProofStatus::Unknown),
+        ("references", ProofStatus::Unknown),
+        ("interior", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("owned_repeats.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+            if name == "too_large" {
+                assert!(
+                    proof
+                        .obligations
+                        .iter()
+                        .any(|o| o.detail.contains("256-value budget"))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn changing_a_nested_repeat_write_to_another_row_refutes_the_original_assertion() {
+    let source = std::fs::read_to_string(fixture("owned_repeats.rs")).unwrap();
+    let original = "cells[2][3] = 7.0;";
+    assert!(source.contains(original));
+    let directory = Directory::new();
+    let path = directory.0.join("owned_repeats.rs");
+    std::fs::write(&path, source.replace(original, "cells[1][3] = 7.0;")).unwrap();
+    let (output, report) = verify_vendored(&path, &["matrix"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "matrix")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        proof.status,
+        ProofStatus::Refuted,
+        "{:?}",
+        proof.obligations
+    );
+    assert!(proof.obligations.iter().any(|o| o.model.is_some()));
+}
+
+#[test]
 fn aggregate_constants_preserve_variants_fields_and_initialized_memory_on_host_and_arm() {
     let entries = [
         ("guarded_as_ref", ProofStatus::Proved),

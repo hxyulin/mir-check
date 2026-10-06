@@ -160,3 +160,11 @@ Population count expands the compiler ctpop intrinsic into an exact bit-vector s
 result. Primitive core float clamp checks ordered, non-NaN bounds as a panic obligation before
 selecting its result; NaN inputs and signed-zero ties follow the pinned implementation. Host/ARM
 regressions reject bad bounds, same-named user methods and mutated guards/count limits.
+
+Repeated arrays support small owned tuples, structs, enums and nested arrays, preserving each copy's
+fields and independent writes. Generated repeats have at most 128 elements and 256 modeled values.
+Input and constant non-byte arrays retain their 16-element limit; byte arrays retain their 128-byte
+limit. Storage identities (Cell, atomics, tracked references and mutable byte views) are not cloned
+by the repeat model. Accessing repeated inline-constant interior mutable storage remains unknown.
+Composite indices still require a unique value on each path; this stage does not extend alias or
+iterator semantics.
