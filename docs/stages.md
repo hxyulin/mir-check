@@ -307,3 +307,18 @@ tags, nested fields and immutable constants. Off-by-one guards, wrong payload as
 mutated constant index refute. Inactive unsupported payloads need no read; active unions,
 interior mutation, unsupported transmutes and shape exhaustion stay unknown. There are 55
 compiler integration tests and one metadata test.
+
+## Stage 16: measure fleet after constant decoding
+
+The same 32 ARM units preserve all 196 proved and 71 refuted function outcomes. Constant support
+adds 97 proofs and three bounds refutations, leaving 293 proved, 74 refuted and 609 unknown
+function-declaration roots. All 54 Option::as_ref first blockers disappear. First constant gaps
+fall from 194 to 69; 51 of those remaining reject interior mutable storage, often validation
+counters. Mutable inputs still account for 300 first blockers.
+
+New proofs include motor feedback accessors, link decoding, balance-state readers, engineer
+commands and board controller/hardware helpers. The three new refutations concern engineer joint
+indices under unconstrained root domains. Original and intermediate measurements are preserved;
+the new JSON records transitions and remaining gaps. Verification reuses dependency-retaining
+metadata and takes 81.3 seconds on the development machine. No firmware source, configuration or
+dependencies changed.

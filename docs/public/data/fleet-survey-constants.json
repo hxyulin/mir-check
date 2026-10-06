@@ -1,0 +1,2813 @@
+{
+  "measured_on": "2026-10-06",
+  "firmware_revision": "b81a247a3295b13553087f5e328f201944a1eb61",
+  "analyzer_implementation": "55d9dd339f13bc807ab9d37e45aa205682f013b2",
+  "schema_version": 7,
+  "compiler_commit": "1303417c416e1595173d9689e7394c31e136ae95",
+  "target": "thumbv7em-none-eabihf",
+  "panic_strategy": "abort",
+  "overflow_checks": true,
+  "profile": "dev",
+  "root_domain": "No contract preconditions; supported fields/payloads are independent symbolic values, enum tags are legal compiler discriminants, and floats include NaN/infinities/signed zero.",
+  "declaration_filter": "Reported source line matches \\bfn\\s+\\w+ and root name excludes {closure#. Includes instantiated local macro methods; separate units remain separate.",
+  "parallel_compilers": 4,
+  "host": "Apple M3 Pro, aarch64-apple-darwin",
+  "verification_elapsed_s": 81.261,
+  "units": [
+    {
+      "workspace": "shared",
+      "crate": "attitude",
+      "crate_type": "lib",
+      "source": "shared/attitude/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 53,
+        "proved": 5,
+        "refuted": 0,
+        "unknown": 48
+      },
+      "function_declaration_roots": {
+        "total": 19,
+        "proved": 5,
+        "refuted": 0,
+        "unknown": 14
+      },
+      "analysis_elapsed_s": 17.712
+    },
+    {
+      "workspace": "shared",
+      "crate": "can_frame",
+      "crate_type": "lib",
+      "source": "shared/can-frame/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 18,
+        "proved": 11,
+        "refuted": 2,
+        "unknown": 5
+      },
+      "function_declaration_roots": {
+        "total": 9,
+        "proved": 6,
+        "refuted": 2,
+        "unknown": 1
+      },
+      "analysis_elapsed_s": 1.975
+    },
+    {
+      "workspace": "shared",
+      "crate": "controller",
+      "crate_type": "lib",
+      "source": "shared/controller/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 25,
+        "proved": 7,
+        "refuted": 0,
+        "unknown": 18
+      },
+      "function_declaration_roots": {
+        "total": 20,
+        "proved": 5,
+        "refuted": 0,
+        "unknown": 15
+      },
+      "analysis_elapsed_s": 0.248
+    },
+    {
+      "workspace": "shared",
+      "crate": "devices",
+      "crate_type": "lib",
+      "source": "shared/devices/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 410,
+        "proved": 198,
+        "refuted": 44,
+        "unknown": 168
+      },
+      "function_declaration_roots": {
+        "total": 216,
+        "proved": 60,
+        "refuted": 44,
+        "unknown": 112
+      },
+      "analysis_elapsed_s": 30.373
+    },
+    {
+      "workspace": "shared",
+      "crate": "link",
+      "crate_type": "lib",
+      "source": "shared/link/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 213,
+        "proved": 156,
+        "refuted": 1,
+        "unknown": 56
+      },
+      "function_declaration_roots": {
+        "total": 11,
+        "proved": 4,
+        "refuted": 1,
+        "unknown": 6
+      },
+      "analysis_elapsed_s": 13.152
+    },
+    {
+      "workspace": "shared",
+      "crate": "subsystems",
+      "crate_type": "lib",
+      "source": "shared/subsystems/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 363,
+        "proved": 145,
+        "refuted": 0,
+        "unknown": 218
+      },
+      "function_declaration_roots": {
+        "total": 156,
+        "proved": 28,
+        "refuted": 0,
+        "unknown": 128
+      },
+      "analysis_elapsed_s": 28.116
+    },
+    {
+      "workspace": "shared",
+      "crate": "validate",
+      "crate_type": "lib",
+      "source": "shared/validate/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 5,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 5
+      },
+      "function_declaration_roots": {
+        "total": 5,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 5
+      },
+      "analysis_elapsed_s": 0.171
+    },
+    {
+      "workspace": "dm",
+      "crate": "dm_mc02",
+      "crate_type": "lib",
+      "source": "bsp/dm-mc02/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 127,
+        "proved": 13,
+        "refuted": 0,
+        "unknown": 114
+      },
+      "function_declaration_roots": {
+        "total": 63,
+        "proved": 4,
+        "refuted": 0,
+        "unknown": 59
+      },
+      "analysis_elapsed_s": 12.084
+    },
+    {
+      "workspace": "dm",
+      "crate": "dm_mc02_bringup",
+      "crate_type": "lib",
+      "source": "bsp/dm-mc02-bringup/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 60,
+        "proved": 13,
+        "refuted": 1,
+        "unknown": 46
+      },
+      "function_declaration_roots": {
+        "total": 29,
+        "proved": 6,
+        "refuted": 1,
+        "unknown": 22
+      },
+      "analysis_elapsed_s": 3.644
+    },
+    {
+      "workspace": "dm",
+      "crate": "dm_mc02_bringup",
+      "crate_type": "bin",
+      "source": "bsp/dm-mc02-bringup/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 44,
+        "proved": 2,
+        "refuted": 1,
+        "unknown": 41
+      },
+      "function_declaration_roots": {
+        "total": 11,
+        "proved": 1,
+        "refuted": 1,
+        "unknown": 9
+      },
+      "analysis_elapsed_s": 0.325
+    },
+    {
+      "workspace": "dm",
+      "crate": "engineer_lower_board",
+      "crate_type": "lib",
+      "source": "robots/engineer/lower-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 71,
+        "proved": 21,
+        "refuted": 2,
+        "unknown": 48
+      },
+      "function_declaration_roots": {
+        "total": 31,
+        "proved": 10,
+        "refuted": 2,
+        "unknown": 19
+      },
+      "analysis_elapsed_s": 10.004
+    },
+    {
+      "workspace": "dm",
+      "crate": "engineer_lower_board",
+      "crate_type": "bin",
+      "source": "robots/engineer/lower-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 13,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 13
+      },
+      "function_declaration_roots": {
+        "total": 1,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 1
+      },
+      "analysis_elapsed_s": 0.133
+    },
+    {
+      "workspace": "dm",
+      "crate": "engineer_upper_board",
+      "crate_type": "lib",
+      "source": "robots/engineer/upper-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 87,
+        "proved": 29,
+        "refuted": 4,
+        "unknown": 54
+      },
+      "function_declaration_roots": {
+        "total": 45,
+        "proved": 20,
+        "refuted": 4,
+        "unknown": 21
+      },
+      "analysis_elapsed_s": 26.844
+    },
+    {
+      "workspace": "dm",
+      "crate": "engineer_upper_board",
+      "crate_type": "bin",
+      "source": "robots/engineer/upper-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 31,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 31
+      },
+      "function_declaration_roots": {
+        "total": 3,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 3
+      },
+      "analysis_elapsed_s": 0.156
+    },
+    {
+      "workspace": "dm",
+      "crate": "hero_chassis_board",
+      "crate_type": "lib",
+      "source": "robots/hero/chassis-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 110,
+        "proved": 46,
+        "refuted": 3,
+        "unknown": 61
+      },
+      "function_declaration_roots": {
+        "total": 69,
+        "proved": 30,
+        "refuted": 3,
+        "unknown": 36
+      },
+      "analysis_elapsed_s": 41.117
+    },
+    {
+      "workspace": "dm",
+      "crate": "hero_chassis_board",
+      "crate_type": "bin",
+      "source": "robots/hero/chassis-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 42,
+        "proved": 1,
+        "refuted": 0,
+        "unknown": 41
+      },
+      "function_declaration_roots": {
+        "total": 3,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 3
+      },
+      "analysis_elapsed_s": 0.197
+    },
+    {
+      "workspace": "dm",
+      "crate": "hero_gimbal_board",
+      "crate_type": "lib",
+      "source": "robots/hero/gimbal-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 19,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 8
+      },
+      "function_declaration_roots": {
+        "total": 16,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 5
+      },
+      "analysis_elapsed_s": 3.789
+    },
+    {
+      "workspace": "dm",
+      "crate": "hero_gimbal_board",
+      "crate_type": "bin",
+      "source": "robots/hero/gimbal-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 25,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 25
+      },
+      "function_declaration_roots": {
+        "total": 2,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 2
+      },
+      "analysis_elapsed_s": 0.151
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_1_chassis_board",
+      "crate_type": "lib",
+      "source": "robots/infantry-1/chassis-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 103,
+        "proved": 45,
+        "refuted": 3,
+        "unknown": 55
+      },
+      "function_declaration_roots": {
+        "total": 67,
+        "proved": 29,
+        "refuted": 3,
+        "unknown": 35
+      },
+      "analysis_elapsed_s": 41.268
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_1_chassis_board",
+      "crate_type": "bin",
+      "source": "robots/infantry-1/chassis-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 43,
+        "proved": 1,
+        "refuted": 0,
+        "unknown": 42
+      },
+      "function_declaration_roots": {
+        "total": 3,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 3
+      },
+      "analysis_elapsed_s": 0.194
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_1_gimbal_board",
+      "crate_type": "lib",
+      "source": "robots/infantry-1/gimbal-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 19,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 8
+      },
+      "function_declaration_roots": {
+        "total": 16,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 5
+      },
+      "analysis_elapsed_s": 3.766
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_1_gimbal_board",
+      "crate_type": "bin",
+      "source": "robots/infantry-1/gimbal-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 25,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 25
+      },
+      "function_declaration_roots": {
+        "total": 2,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 2
+      },
+      "analysis_elapsed_s": 0.145
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_2_chassis_board",
+      "crate_type": "lib",
+      "source": "robots/infantry-2/chassis-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 103,
+        "proved": 45,
+        "refuted": 3,
+        "unknown": 55
+      },
+      "function_declaration_roots": {
+        "total": 67,
+        "proved": 29,
+        "refuted": 3,
+        "unknown": 35
+      },
+      "analysis_elapsed_s": 41.306
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_2_chassis_board",
+      "crate_type": "bin",
+      "source": "robots/infantry-2/chassis-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 43,
+        "proved": 1,
+        "refuted": 0,
+        "unknown": 42
+      },
+      "function_declaration_roots": {
+        "total": 3,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 3
+      },
+      "analysis_elapsed_s": 0.193
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_2_gimbal_board",
+      "crate_type": "lib",
+      "source": "robots/infantry-2/gimbal-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 19,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 8
+      },
+      "function_declaration_roots": {
+        "total": 16,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 5
+      },
+      "analysis_elapsed_s": 3.732
+    },
+    {
+      "workspace": "dm",
+      "crate": "infantry_2_gimbal_board",
+      "crate_type": "bin",
+      "source": "robots/infantry-2/gimbal-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 25,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 25
+      },
+      "function_declaration_roots": {
+        "total": 2,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 2
+      },
+      "analysis_elapsed_s": 0.141
+    },
+    {
+      "workspace": "dm",
+      "crate": "sentry_chassis_board",
+      "crate_type": "lib",
+      "source": "robots/sentry/chassis-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 89,
+        "proved": 35,
+        "refuted": 2,
+        "unknown": 52
+      },
+      "function_declaration_roots": {
+        "total": 52,
+        "proved": 20,
+        "refuted": 2,
+        "unknown": 30
+      },
+      "analysis_elapsed_s": 21.061
+    },
+    {
+      "workspace": "dm",
+      "crate": "sentry_chassis_board",
+      "crate_type": "bin",
+      "source": "robots/sentry/chassis-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 45,
+        "proved": 2,
+        "refuted": 0,
+        "unknown": 43
+      },
+      "function_declaration_roots": {
+        "total": 3,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 3
+      },
+      "analysis_elapsed_s": 0.246
+    },
+    {
+      "workspace": "dm",
+      "crate": "sentry_gimbal_board",
+      "crate_type": "lib",
+      "source": "robots/sentry/gimbal-board/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 19,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 8
+      },
+      "function_declaration_roots": {
+        "total": 16,
+        "proved": 9,
+        "refuted": 2,
+        "unknown": 5
+      },
+      "analysis_elapsed_s": 3.772
+    },
+    {
+      "workspace": "dm",
+      "crate": "sentry_gimbal_board",
+      "crate_type": "bin",
+      "source": "robots/sentry/gimbal-board/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 30,
+        "proved": 1,
+        "refuted": 0,
+        "unknown": 29
+      },
+      "function_declaration_roots": {
+        "total": 3,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 3
+      },
+      "analysis_elapsed_s": 8.147
+    },
+    {
+      "workspace": "rm",
+      "crate": "rm_c",
+      "crate_type": "lib",
+      "source": "bsp/rm-c/src/lib.rs",
+      "mir_roots": {
+        "inventoried_bodies": 24,
+        "proved": 1,
+        "refuted": 0,
+        "unknown": 23
+      },
+      "function_declaration_roots": {
+        "total": 10,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 10
+      },
+      "analysis_elapsed_s": 1.811
+    },
+    {
+      "workspace": "rm",
+      "crate": "rm_c_bringup",
+      "crate_type": "bin",
+      "source": "bsp/rm-c-bringup/src/main.rs",
+      "mir_roots": {
+        "inventoried_bodies": 33,
+        "proved": 1,
+        "refuted": 0,
+        "unknown": 32
+      },
+      "function_declaration_roots": {
+        "total": 7,
+        "proved": 0,
+        "refuted": 0,
+        "unknown": 7
+      },
+      "analysis_elapsed_s": 0.267
+    }
+  ],
+  "totals": {
+    "mir_roots": {
+      "inventoried_bodies": 2336,
+      "proved": 815,
+      "refuted": 74,
+      "unknown": 1447
+    },
+    "function_declaration_roots": {
+      "total": 976,
+      "proved": 293,
+      "refuted": 74,
+      "unknown": 609
+    }
+  },
+  "dependency_mir_retained": true,
+  "dependency_mir_settings": [
+    "-Zalways-encode-mir=yes",
+    "-Zmir-opt-level=0"
+  ],
+  "inventory_elapsed_s": {
+    "shared": 13.49,
+    "dm": 17.53,
+    "rm": 14.66
+  },
+  "comparison": {
+    "baseline_implementation": "0dc755163db22bf096639f3d68af4d48c2344cf9",
+    "baseline_data": "fleet-survey-dependency-mir.json",
+    "before": {
+      "total": 976,
+      "proved": 196,
+      "refuted": 71,
+      "unknown": 709
+    },
+    "after": {
+      "total": 976,
+      "proved": 293,
+      "refuted": 74,
+      "unknown": 609
+    },
+    "transitions": {
+      "proved -> proved": 196,
+      "refuted -> refuted": 71,
+      "unknown -> proved": 97,
+      "unknown -> refuted": 3,
+      "unknown -> unknown": 609
+    },
+    "first_gap_classification": "First obligation with unknown status in report order, classified by its detail. Mutually exclusive root counts; a root can have other gaps.",
+    "first_gap_categories_before": {
+      "Constants": 194,
+      "Execution limits": 1,
+      "Input shape limits": 44,
+      "Missing dependency MIR": 16,
+      "Mutable inputs": 300,
+      "Other MIR/library/solver": 129,
+      "Other input shapes": 25
+    },
+    "first_gap_categories_after": {
+      "Constants": 69,
+      "Execution limits": 7,
+      "Input shape limits": 44,
+      "Missing dependency MIR": 17,
+      "Mutable inputs": 300,
+      "Other MIR/library/solver": 147,
+      "Other input shapes": 25
+    },
+    "first_gap_reasons_after": [
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::component::Balance",
+        "roots": 28,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "input shape exceeds the 128-value budget",
+        "roots": 23,
+        "category": "Input shape limits"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut hardware::Can2Bus",
+        "roots": 21,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type *mut u8",
+        "roots": 20,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut operator::Operator",
+        "roots": 16,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "fixed array input exceeds 16 elements",
+        "roots": 15,
+        "category": "Input shape limits"
+      },
+      {
+        "reason": "core::f32::<impl f32>::to_bits bb0: unsupported rvalue copy _1 as u32 (Transmute)",
+        "roots": 14,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut gimbal::State",
+        "roots": 13,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::slice::Iter::<'a, T>::new bb0: unsupported rvalue &raw const (*_1)",
+        "roots": 12,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "embassy_stm32::_generated::gpio_block bb2: unsupported rvalue move _4 as *mut () (PointerWithExposedProvenance)",
+        "roots": 12,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "MIR body unavailable for core::option::unwrap_failed",
+        "roots": 11,
+        "category": "Missing dependency MIR"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut hardware::Can1Bus",
+        "roots": 11,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type pattern_type!(*const u8 is !null)",
+        "roots": 11,
+        "category": "Other input shapes"
+      },
+      {
+        "reason": "devices::motor::DjiM3508::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 9,
+        "category": "Constants"
+      },
+      {
+        "reason": "mutable local borrows cannot cross an unmodeled call boundary",
+        "roots": 8,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type str",
+        "roots": 8,
+        "category": "Other input shapes"
+      },
+      {
+        "reason": "pulled_up bb0: writes through references or projected places are unmodeled",
+        "roots": 8,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "devices::dr16::KeyTracker::new bb0: only small scalar repeats are modeled",
+        "roots": 8,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut hardware::Can3Bus",
+        "roots": 8,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "symbolic execution step limit reached",
+        "roots": 7,
+        "category": "Execution limits"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut bench::Bench",
+        "roots": 7,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut chassis::State",
+        "roots": 7,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::f64::<impl f64>::from_bits bb0: unsupported rvalue copy _1 as f64 (Transmute)",
+        "roots": 6,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "motor::dm::mit_command bb16: unsupported constant reference to interior mutable storage",
+        "roots": 6,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::leg::Leg",
+        "roots": 6,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::states::Climb",
+        "roots": 6,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "chassis::config bb0: unsupported constant array exceeds element budget",
+        "roots": 6,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut bmi088::Bmi088<S/#0, P/#1>",
+        "roots": 5,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::states::StandUp",
+        "roots": 5,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut omni_chassis::Chassis",
+        "roots": 5,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "MIR body unavailable for critical_section::acquire::_critical_section_1_0_acquire",
+        "roots": 5,
+        "category": "Missing dependency MIR"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut w25q64::W25q64",
+        "roots": 5,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "devices::motor::dm::mit_command bb16: unsupported constant reference to interior mutable storage",
+        "roots": 5,
+        "category": "Constants"
+      },
+      {
+        "reason": "core::array::try_from_fn bb0: unsupported constant type core::mem::MaybeUninit<controller::Pid>",
+        "roots": 5,
+        "category": "Constants"
+      },
+      {
+        "reason": "unknown input array length",
+        "roots": 4,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Pid",
+        "roots": 4,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unmodeled call adapter Intrinsic(DefId(1:2410 ~ core[4689]::intrinsics::bswap))",
+        "roots": 4,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "recursion or call-depth limit requires an invariant",
+        "roots": 4,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "<balance::vmc::Linkage as core::default::Default>::default bb0: only small scalar repeats are modeled",
+        "roots": 4,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::states::Drive",
+        "roots": 4,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut [[subsystems::gimbal::PidAxis; 3_usize]; 2_usize]",
+        "roots": 4,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut [controller::Pid; 2_usize]",
+        "roots": 4,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "enum inputs need between 1 and 16 variants",
+        "roots": 3,
+        "category": "Input shape limits"
+      },
+      {
+        "reason": "motor::lk::Lk9025::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 3,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::lk::Mg4010Session",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::f32::<impl f32>::from_bits bb0: unsupported rvalue copy _1 as f32 (Transmute)",
+        "roots": 3,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::lqr::Lqr",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::power_limiter::PowerLimiter",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::states::PhaseBudget",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::states::Sit",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut gimbal::Axis",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut dyn [Binder { value: Trait(controller::Controller), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:6 ~ controller[02f1]::Controller::Output), args: [], term: Term::Ty(f32), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:4 ~ controller[02f1]::Controller::Target), args: [], term: Term::Ty(gimbal::AxisTarget), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:5 ~ controller[02f1]::Controller::Feedback), args: [], term: Term::Ty(gimbal::AxisFeedback), .. }), bound_vars: [] }] + '{erased}",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut dyn [Binder { value: Trait(controller::Controller), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:6 ~ controller[02f1]::Controller::Output), args: [], term: Term::Ty(f32), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:4 ~ controller[02f1]::Controller::Target), args: [], term: Term::Ty(f32), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:5 ~ controller[02f1]::Controller::Feedback), args: [], term: Term::Ty(f32), .. }), bound_vars: [] }] + '{erased}",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "bmi088 bb1: writes through references or projected places are unmodeled",
+        "roots": 3,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "input shape exceeds 8 levels of nesting",
+        "roots": 3,
+        "category": "Input shape limits"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Text",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut head::Head",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unmodeled call adapter Intrinsic(DefId(1:2448 ~ core[4689]::intrinsics::saturating_sub))",
+        "roots": 3,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "core::array::iter::<impl core::iter::IntoIterator for [T; N]>::into_iter bb0: unsupported rvalue copy _1 as [core::mem::MaybeUninit<(&devices::motor::Dm8009Multi, f32, (f32, f32))>; 4] (Transmute)",
+        "roots": 3,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "attitude::Attitude::new bb0: only small scalar repeats are modeled",
+        "roots": 3,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut imu::ChassisImu",
+        "roots": 3,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Attitude",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut CascadePid",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut [Pid; N/#0]",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Adrc",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Cascade",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut VelocityLoop",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "dr16::keys::KeyTracker::new bb0: only small scalar repeats are modeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "referee::Decoder::new bb0: byte array model size limit reached",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "core::array::try_from_fn bb0: unsupported constant type core::mem::MaybeUninit<f32>",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "dr16::Dr16::from_raw bb0: mutable borrowing only models owned local byte arrays",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut dr16::keys::KeyTracker",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dji::DjiM2006",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "motor::dji::DjiM3508::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dji::DjiM3508",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "motor::dm::Dm4310Multi::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::dm::Dm4310PMulti::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::dm::Dm4340Multi::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::dm::Dm4340PMulti::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::dm::Dm6248PMulti::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::dm::Dm8009Multi::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::dm::Dm8009PMulti::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::lk::Lk4010::raw_torque bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::lk::Lk8016::raw_torque bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "motor::lk::Lk9015::raw_torque bb2: unsupported constant reference to interior mutable storage",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::lk::Mg4010",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut referee::Decoder",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::num::<impl u16>::to_le_bytes bb0: unsupported rvalue copy _1 as [u8; 2] (Transmute)",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "<balance::lqr::LqrConfig as core::default::Default>::default bb0: only small scalar repeats are modeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut gimbal::PidAxis",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::f32::<impl f32>::clamp bb2: unsupported rvalue &raw const _5",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::pid::Pid",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::states::Jump",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut balance::velocity_kf::VelocityKf",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut dyn [Binder { value: Trait(controller::Controller), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:6 ~ controller[02f1]::Controller::Output), args: [], term: Term::Ty([f32; 2_usize]), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:4 ~ controller[02f1]::Controller::Target), args: [], term: Term::Ty([f32; 2_usize]), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:5 ~ controller[02f1]::Controller::Feedback), args: [], term: Term::Ty([f32; 2_usize]), .. }), bound_vars: [] }] + '{erased}",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut loader::Loader",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut dyn [Binder { value: Trait(controller::Controller), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:6 ~ controller[02f1]::Controller::Output), args: [], term: Term::Ty([f32; 4_usize]), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:4 ~ controller[02f1]::Controller::Target), args: [], term: Term::Ty([f32; 4_usize]), .. }), bound_vars: [] }, Binder { value: Projection(ExistentialProjection { def_id: DefId(2:5 ~ controller[02f1]::Controller::Feedback), args: [], term: Term::Ty([f32; 4_usize]), .. }), bound_vars: [] }] + '{erased}",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::sync::atomic::Atomic::<u32>::new bb0: unsupported rvalue copy _1 as core::sync::atomic::Atomic<u32> (Transmute)",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Analog",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Buzzer",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type dyn [Binder { value: Trait(embassy_sync::channel::DynamicChannel<core::result::Result<embassy_stm32::can::frame::Envelope, embassy_stm32::can::enums::BusError>>), bound_vars: [] }] + '{erased}",
+        "roots": 2,
+        "category": "Other input shapes"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut CanTx",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut FdCanTx",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "embassy_stm32::gpio::Output::<'d>::new bb3: mutable borrowing only models owned local byte arrays",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "UsbPort::open bb1: writes through references or projected places are unmodeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported constant type *mut u8",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type pattern_type!(u16 is 1..)",
+        "roots": 2,
+        "category": "Other input shapes"
+      },
+      {
+        "reason": "dr16_config bb1: writes through references or projected places are unmodeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unmodeled call adapter Intrinsic(DefId(1:2297 ~ core[4689]::intrinsics::assert_zero_valid))",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut [u16; 248_usize]",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "bench::Bench::new bb0: only small scalar repeats are modeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut bench::Sniff",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut [u8]",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut chassis::Chassis",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::array::try_from_fn bb0: unsupported constant type core::mem::MaybeUninit<controller::Cascade>",
+        "roots": 2,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut hardware::Heard",
+        "roots": 2,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "shooter::heat bb3: writes through references or projected places are unmodeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "hardware::Can1Bus::wired bb4: only small scalar repeats are modeled",
+        "roots": 2,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "Attitude::new bb0: only small scalar repeats are modeled",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut calibration::Calibration",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "core::array::try_from_fn bb0: unevaluated repeat length",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported constant type {closure@<f32 as core::iter::Sum>::sum<core::iter::Map<core::ops::Range<usize>, {closure@shared/attitude/src/matrix.rs:33:31: 33:34}>>::{closure#0}}",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "only read-only byte slices and byte arrays are modeled: [Use]",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut VelocityFilter",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type S/#0",
+        "roots": 1,
+        "category": "Other input shapes"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut S/#0",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::Revive",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::RotorCounter",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "motor::dji::DjiM2006::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dji::Gm6020",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4310Mit",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4310Multi",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4310PMit",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4310PMulti",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4340Mit",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4340Multi",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm4340PMulti",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm6248Mit",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm6248PMulti",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm8009Mit",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm8009Multi",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::dm::Dm8009PMulti",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::lk::Lk4010",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::lk::Lk8016",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::lk::Lk9015",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut motor::lk::Lk9025",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "motor::lk::Mg4010::command bb2: unsupported constant reference to interior mutable storage",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "closure call arguments are not a Rust-call tuple",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "motor::lk::check_lk_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "<&T as zerocopy::util::AsAddress>::addr bb0: unsupported rvalue &raw const (*_1)",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "referee::encode bb0: byte array model size limit reached",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "core::num::<impl u32>::to_le_bytes bb0: unsupported rvalue copy _1 as [u8; 4] (Transmute)",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut supercap::Supercap",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "zerocopy::byteorder::f32_ext::to_le_bytes bb3: unsupported rvalue move _10 as u32 (Transmute)",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "MIR body unavailable for core::convert::From::from",
+        "roots": 1,
+        "category": "Missing dependency MIR"
+      },
+      {
+        "reason": "balance::velocity_kf::VelocityKf::new bb0: mutable borrowing only models owned local byte arrays",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut friction::Friction",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut gimbal::Gimbal",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "Site::fail bb0: unsupported constant reference to interior mutable storage",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "unmodeled call adapter Intrinsic(DefId(1:2400 ~ core[4689]::intrinsics::ctpop))",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "total bb0: unsupported constant reference to interior mutable storage",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "unsupported argument type dyn [Binder { value: Trait(embassy_sync::channel::DynamicChannel<core::result::Result<embassy_stm32::can::frame::FdEnvelope, embassy_stm32::can::enums::BusError>>), bound_vars: [] }] + '{erased}",
+        "roots": 1,
+        "category": "Other input shapes"
+      },
+      {
+        "reason": "embassy_stm32::gpio::Input::<'d>::new bb1: mutable borrowing only models owned local byte arrays",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "core::num::NonZero::<T>::new bb0: unsupported rvalue copy _1 as core::option::Option<core::num::NonZero<u16>> (Transmute)",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "referee_config bb1: writes through references or projected places are unmodeled",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "core::num::<impl u32>::checked_add bb4: unsupported binary operation AddUnchecked",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut ws2812::Led",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut console::LineReader",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "Text::new bb0: byte array model size limit reached",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut dm_mc02_bringup::bench::Bench",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut arm::Arm",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut arm::Gripper",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "devices::motor::DjiM2006::raw_current bb2: unsupported constant reference to interior mutable storage",
+        "roots": 1,
+        "category": "Constants"
+      },
+      {
+        "reason": "core::array::iter::<impl core::iter::IntoIterator for [T; N]>::into_iter bb0: unsupported rvalue copy _1 as [core::mem::MaybeUninit<(&devices::motor::DjiM3508, f32, f32)>; 2] (Transmute)",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "ambiguous argument name in contract bindings",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut ([controller::Pid; 4_usize], controller::Pid)",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "CanPair::open bb0: unsupported aggregate kind",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "Imu::open bb1: writes through references or projected places are unmodeled",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Led",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "<Line as core::default::Default>::default bb0: byte array model size limit reached",
+        "roots": 1,
+        "category": "Other MIR/library/solver"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut Line",
+        "roots": 1,
+        "category": "Mutable inputs"
+      },
+      {
+        "reason": "unsupported argument type &'{erased} mut BusSeen",
+        "roots": 1,
+        "category": "Mutable inputs"
+      }
+    ],
+    "changed_roots": [
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dji::DjiM2006::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dji.rs",
+          "line": 276,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dji::DjiM3508::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dji.rs",
+          "line": 165,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dji::Gm6020::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dji.rs",
+          "line": 361,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4310Mit::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 79,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4310Multi::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4310PMit::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 79,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4310PMulti::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4340Mit::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 79,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4340Multi::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm4340PMulti::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm6248Mit::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 79,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm6248PMulti::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm8009Mit::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 79,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm8009Multi::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::dm::Dm8009PMulti::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/dm.rs",
+          "line": 190,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::lk::Lk4010::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/lk.rs",
+          "line": 78,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::lk::Lk8016::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/lk.rs",
+          "line": 78,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::lk::Lk9015::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/lk.rs",
+          "line": 78,
+          "column": 13
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::lk::Lk9025::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/lk.rs",
+          "line": 235,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "devices",
+        "name": "motor::lk::Mg4010::feedback",
+        "source": {
+          "file": "shared/devices/src/motor/lk.rs",
+          "line": 369,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "link",
+        "name": "from_raw",
+        "source": {
+          "file": "shared/link/src/lib.rs",
+          "line": 396,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "subsystems",
+        "name": "balance::states::Climb::done",
+        "source": {
+          "file": "shared/subsystems/src/balance/states.rs",
+          "line": 611,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "subsystems",
+        "name": "balance::states::Jump::done",
+        "source": {
+          "file": "shared/subsystems/src/balance/states.rs",
+          "line": 239,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "shared",
+        "crate": "subsystems",
+        "name": "balance::states::StandUp::done",
+        "source": {
+          "file": "shared/subsystems/src/balance/states.rs",
+          "line": 361,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "<hardware::Can1Bus as core::default::Default>::default",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 549,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "<hardware::Can2Bus as core::default::Default>::default",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 555,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "hardware::Can1Bus::new",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 145,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "hardware::Can1Bus::wired",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 150,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "hardware::Can2Bus::new",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 360,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "hardware::Can2Bus::wired",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 365,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_lower_board",
+        "name": "hardware::joint",
+        "source": {
+          "file": "robots/engineer/lower-board/src/hardware.rs",
+          "line": 93,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "refuted"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "arm::command",
+        "source": {
+          "file": "robots/engineer/upper-board/src/arm.rs",
+          "line": 145,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::Can1Bus::new",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 170,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::Can1Bus::wired",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 175,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::Can1Bus::yaw",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 244,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::Can2Bus::new",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 333,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::Can2Bus::pitch",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 419,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::Can2Bus::wired",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 338,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::joint",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 73,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "refuted"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "hardware::joint_current_a",
+        "source": {
+          "file": "robots/engineer/upper-board/src/hardware.rs",
+          "line": 83,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "refuted"
+      },
+      {
+        "workspace": "dm",
+        "crate": "engineer_upper_board",
+        "name": "head::Head::new",
+        "source": {
+          "file": "robots/engineer/upper-board/src/head.rs",
+          "line": 101,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "gimbal::controllers",
+        "source": {
+          "file": "robots/hero/chassis-board/src/gimbal.rs",
+          "line": 88,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can2Bus::loader",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 477,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can2Bus::new",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 345,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can2Bus::wired",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 350,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can3Bus::new",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 553,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can3Bus::pitch",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 651,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can3Bus::uses",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 573,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can3Bus::wired",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 558,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::Can3Bus::yaw",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 633,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::joint",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 72,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "hardware::wheel",
+        "source": {
+          "file": "robots/hero/chassis-board/src/hardware.rs",
+          "line": 301,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "shooter::controllers",
+        "source": {
+          "file": "robots/hero/chassis-board/src/shooter.rs",
+          "line": 71,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_chassis_board",
+        "name": "shooter::target",
+        "source": {
+          "file": "robots/hero/chassis-board/src/shooter.rs",
+          "line": 250,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_gimbal_board",
+        "name": "hardware::Can1Bus::velocity",
+        "source": {
+          "file": "robots/hero/gimbal-board/src/hardware.rs",
+          "line": 77,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "hero_gimbal_board",
+        "name": "hardware::Can2Bus::velocity",
+        "source": {
+          "file": "robots/hero/gimbal-board/src/hardware.rs",
+          "line": 136,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "gimbal::controllers",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/gimbal.rs",
+          "line": 78,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can2Bus::loader",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 455,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can2Bus::new",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 341,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can2Bus::wired",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 346,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can3Bus::new",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 535,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can3Bus::pitch",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 633,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can3Bus::uses",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 555,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can3Bus::wired",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 540,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::Can3Bus::yaw",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 615,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::joint",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 75,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "hardware::wheel",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/hardware.rs",
+          "line": 304,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "shooter::controllers",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/shooter.rs",
+          "line": 83,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_chassis_board",
+        "name": "shooter::target",
+        "source": {
+          "file": "robots/infantry-1/chassis-board/src/shooter.rs",
+          "line": 261,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_gimbal_board",
+        "name": "hardware::Can1Bus::velocity",
+        "source": {
+          "file": "robots/infantry-1/gimbal-board/src/hardware.rs",
+          "line": 77,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_1_gimbal_board",
+        "name": "hardware::Can2Bus::velocity",
+        "source": {
+          "file": "robots/infantry-1/gimbal-board/src/hardware.rs",
+          "line": 136,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "gimbal::controllers",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/gimbal.rs",
+          "line": 78,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can2Bus::loader",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 456,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can2Bus::new",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 342,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can2Bus::wired",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 347,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can3Bus::new",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 536,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can3Bus::pitch",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 634,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can3Bus::uses",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 556,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can3Bus::wired",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 541,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::Can3Bus::yaw",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 616,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::joint",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 75,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "hardware::wheel",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/hardware.rs",
+          "line": 305,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "shooter::controllers",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/shooter.rs",
+          "line": 83,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_chassis_board",
+        "name": "shooter::target",
+        "source": {
+          "file": "robots/infantry-2/chassis-board/src/shooter.rs",
+          "line": 263,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_gimbal_board",
+        "name": "hardware::Can1Bus::velocity",
+        "source": {
+          "file": "robots/infantry-2/gimbal-board/src/hardware.rs",
+          "line": 77,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "infantry_2_gimbal_board",
+        "name": "hardware::Can2Bus::velocity",
+        "source": {
+          "file": "robots/infantry-2/gimbal-board/src/hardware.rs",
+          "line": 136,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "chassis::wheel_pid",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/chassis.rs",
+          "line": 96,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "gimbal::controllers",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/gimbal.rs",
+          "line": 71,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can2Bus::loader",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 288,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can2Bus::new",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 173,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can2Bus::wired",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 178,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can2Bus::yaw",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 266,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can3Bus::new",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 354,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can3Bus::pitch",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 411,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can3Bus::uses",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 371,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "hardware::Can3Bus::wired",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/hardware.rs",
+          "line": 359,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "shooter::controllers",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/shooter.rs",
+          "line": 65,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_chassis_board",
+        "name": "shooter::target",
+        "source": {
+          "file": "robots/sentry/chassis-board/src/shooter.rs",
+          "line": 198,
+          "column": 1
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_gimbal_board",
+        "name": "hardware::Can1Bus::velocity",
+        "source": {
+          "file": "robots/sentry/gimbal-board/src/hardware.rs",
+          "line": 77,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      },
+      {
+        "workspace": "dm",
+        "crate": "sentry_gimbal_board",
+        "name": "hardware::Can2Bus::velocity",
+        "source": {
+          "file": "robots/sentry/gimbal-board/src/hardware.rs",
+          "line": 136,
+          "column": 5
+        },
+        "before": "unknown",
+        "after": "proved"
+      }
+    ]
+  },
+  "inventory_reused_from": "fleet-survey-dependency-mir.json",
+  "constant_model_limits": {
+    "depth": 8,
+    "values": 256,
+    "array_bytes": 128,
+    "non_byte_elements": 16
+  }
+}
