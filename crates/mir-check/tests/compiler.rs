@@ -3234,7 +3234,7 @@ fn mutable_storage_preserves_call_writes_branch_states_and_entry_snapshots_on_ho
         ("arrays", ProofStatus::Proved),
         ("bytes", ProofStatus::Proved),
         ("bad_bytes", ProofStatus::Refuted),
-        ("two_mutable", ProofStatus::Unknown),
+        ("two_mutable", ProofStatus::Proved),
         ("nested_reference", ProofStatus::Unknown),
         ("escaping_reference", ProofStatus::Proved),
         ("ambiguous_array", ProofStatus::Unknown),

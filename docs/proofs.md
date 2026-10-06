@@ -315,17 +315,16 @@ does not need decoding. Constant shape limits are eight levels and 256 values, w
 128 elements per evaluated array/slice. This adds compiler constant inspection to the
 trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
 
-Coverage remains limited by enum/struct slices, general aliasing, multiple mutable root references,
-unresolved generic inputs, float remainder, trait objects, function pointers and general iterator
-machinery, destructors and several MIR operations/constants, including some constant shapes.
-Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work for integers,
-floats and booleans; enum/struct elements need a uniquely determined index. Array/slice patterns
-prove their minimum length and index bounds before applying constant start/end offsets. Generic
-roots with unresolved type parameters remain unsupported. Experimental loop induction supports
-scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges.
-Byte-slice/scalar-array
-iterators support indexed references. Automatic type invariants, dedicated termination checks and
-verified general effects remain unsupported.
+Coverage remains limited by enum/struct slices, general aliasing, interior-mutable root
+combinations, unresolved generic inputs, float remainder, trait objects, function pointers and
+general iterator machinery, destructors and several MIR operations/constants, including some
+constant shapes. Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work
+for integers, floats and booleans; enum/struct elements need a uniquely determined index.
+Array/slice patterns prove their minimum length and index bounds before applying constant start/end
+offsets. Generic roots with unresolved type parameters remain unsupported. Experimental loop
+induction supports scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges.
+Byte-slice/scalar-array iterators support indexed references. Automatic type invariants, dedicated
+termination checks and verified general effects remain unsupported.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
 propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and
@@ -351,8 +350,14 @@ reborrows update the original object. Dead or uninitialized storage cannot be re
 writes currently require initialized aggregates; non-byte array writes require a uniquely
 established index. Byte writes support symbolic indices with proven bounds.
 
-Root construction accepts one mutable reference and rejects reference fields inside its pointee.
-This avoids assuming distinct locations for unresolved root aliases. Multiple references created
+Root construction accepts multiple safe mutable references as distinct typed allocations.
+Simultaneously usable safe mutable borrows have exclusive access to their pointee storage; this
+does not require an SMT alias assumption. Reference fields inside mutable root pointees remain
+unsupported. When there is more than one mutable root, every pointee must be Freeze (contain no
+interior mutation). Shared scalar Cell roots mixed with mutable or other Cell roots remain UNKNOWN
+in either argument order. Immutable Freeze roots retain snapshot semantics. Disjoint subslices and
+fields may share a backing allocation in native Rust: separate root allocations model their
+nonoverlapping contents, without modeling addresses or pointer equality. Multiple references created
 from known local storage can cross supported calls. Tuples, structs, enums and closure environments
 retain tracked references. Returns can retain references into incoming storage, including inside
 iterators or closures. The returned graph and incoming storage are checked for references into the
@@ -363,6 +368,11 @@ allocate one environment per invocation and propagate owned field updates and ca
 between callbacks. The temporary environment is retired after traversal. Local byte borrows use
 tracked allocations across ordinary calls. Shared immutable byte values retain their snapshot
 semantics; mutable byte regions keep allocation identities and offsets.
+
+Host/ARM fixtures check independent scalar, struct-field and byte roots, shared snapshots, callee
+preconditions and postconditions, and two-allocation loop induction. False final-state claims and
+changed callee writes are refuted; interior/reference-bearing pointees remain UNKNOWN. Native replay
+uses disjoint fields and subslices from the same backing object, plus failing bounds mutations.
 
 Postcondition parameter names refer to entry snapshots. The `final_<parameter>` binding refers to
 the argument's state at return, for example final_state.count or final_self.integral. Parameter

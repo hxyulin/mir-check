@@ -189,7 +189,7 @@ containing a shared byte slice.
 | Constants | Evaluated structs, tuples, active enum variants, bounded arrays/slices and immutable promoted/static references |
 | Arithmetic | Exact integer operations, min/max, saturation, bit counts and rearrangement; IEEE f32/f64 arithmetic, comparisons and saturating casts |
 | Interior mutation | Scalar Cell aliases/calls and conservative integer atomic counters with checked orderings |
-| Mutable storage | One mutable root receiver, projected writes, reborrows, tracked aggregate references and call effects |
+| Mutable storage | Disjoint mutable root inputs, projected writes, reborrows, tracked aggregate references and call effects |
 | Calls | Concrete generics, static traits, available dependency MIR, function items, tracked mutable captures and noncapturing evaluated closure constants |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation completely unrolled finite loops and opt-in scalar/byte-array induction |
 | Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map/from_fn, float abs/min/max/clamp and static formatting arguments |
@@ -215,8 +215,9 @@ Tracked mutable references can be stored in tuples, structs, enums and closure e
 keep allocation identity through calls and returns when their storage belongs to the caller; dead
 references and references into the returning frame fail verification. FnMut callbacks retain both
 owned capture state and writes through captured references between invocations. Local byte borrows
-and bounded chunk/remainder views retain their original allocation. Multiple mutable root
-references, general aliasing and ambiguous non-byte writes remain gaps.
+and bounded chunk/remainder views retain their original allocation. Multiple safe mutable root
+inputs receive independent storage when their pointees have no interior mutation or references.
+General aliasing and ambiguous non-byte writes remain gaps.
 
 Float storage bits are tracked through inputs, constants, from_bits/to_bits, moves, negation, abs
 and clamp. Arithmetic has exact numeric IEEE semantics; NaN output bits conservatively allow all

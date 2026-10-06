@@ -100,7 +100,7 @@ fn tracked_aggregate_borrows_preserve_writes_on_host_and_arm() {
         ("predicate_capture_state", ProofStatus::Proved),
         ("folded_capture_state", ProofStatus::Proved),
         ("byte_capture_boundary", ProofStatus::Proved),
-        ("multiple_mutable_inputs", ProofStatus::Unknown),
+        ("multiple_mutable_inputs", ProofStatus::Proved),
         ("ambiguous_write", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {

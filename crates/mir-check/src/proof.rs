@@ -138,24 +138,46 @@ impl<'tcx> Engine<'tcx> {
         let mut conditions = Vec::new();
         let mut arguments = Vec::new();
         let mut memory = Vec::new();
+        let mutable_inputs = body
+            .args_iter()
+            .filter_map(|local| match body.local_decls[local].ty.kind() {
+                ty::Ref(_, element, mutability) if mutability.is_mut() => Some(*element),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if mutable_inputs.len() > 1
+            && mutable_inputs
+                .iter()
+                .any(|ty| !ty.is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized()))
+        {
+            return Err(
+                "multiple mutable root pointees cannot contain interior mutation".to_owned(),
+            );
+        }
+        let mut interior_root = false;
         for local in body.args_iter() {
             let ty = body.local_decls[local].ty;
             if let ty::Ref(_, element, mutability) = ty.kind()
                 && mutability.is_mut()
             {
-                if !memory.is_empty() {
-                    return Err("only one mutable root reference is supported".to_owned());
+                if interior_root {
+                    return Err(
+                        "multiple interior/mutable root locations need alias constraints"
+                            .to_owned(),
+                    );
+                }
+                if memory.len() >= MAX_INPUT_VALUES {
+                    return Err("memory allocation budget reached".to_owned());
                 }
                 self.building_mutable_input = true;
-                let value = if matches!(element.kind(), ty::Slice(_)) {
-                    self.byte_input(id, *element, &mut conditions)?
-                } else {
-                    self.argument(id, *element, &mut conditions)?
-                };
+                let value = self.argument(id, *element, &mut conditions)?;
                 self.building_mutable_input = false;
+                // Simultaneously usable safe mutable borrows have disjoint reachable storage.
+                // Reference-bearing pointees remain rejected during input construction.
+                let allocation = memory.len();
                 memory.push(Some(value));
                 arguments.push(Value::Reference {
-                    allocation: 0,
+                    allocation,
                     projection: Vec::new(),
                     mutable: true,
                 });
@@ -169,6 +191,7 @@ impl<'tcx> Engine<'tcx> {
                     );
                 }
                 let value = self.argument(id, inner, &mut conditions)?;
+                interior_root = true;
                 memory.push(Some(value));
                 arguments.push(Value::Cell { allocation: 0 });
             } else {
@@ -412,6 +435,7 @@ impl<'tcx> Engine<'tcx> {
             ty::Array(element, _) if *element == self.tcx.types.u8 => {
                 self.byte_input(id, ty, conditions)
             }
+            ty::Slice(_) if self.building_mutable_input => self.byte_input(id, ty, conditions),
             ty::Array(..) => self.element_input(id, ty, conditions),
             ty::Adt(def, _) if def.is_struct() => self.struct_input(id, ty, conditions),
             ty::Adt(def, _) if def.is_enum() => self.enum_input(id, ty, conditions),

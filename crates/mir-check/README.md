@@ -71,12 +71,13 @@ encoding/decoding, shared byte-slice-to-array conversion, fixed-array map, owned
 exact integer population counts, floating-point absolute value/min/max/clamp and static formatting
 arguments. Array map executes actual callable bodies in order. Reports list interpreted bodies and
 trusted models separately. MIR assume becomes a checked validity obligation. Typed allocations
-support one mutable root receiver, projected writes, reborrows and call state propagation. Tracked
-references in aggregates and captures preserve writes to their allocations. General aliasing and
-multiple mutable root references remain unsupported. Structs, symbolic input enums and constructed
-variants preserve tags, fields and return facts. Small integer/bool/float arrays support symbolic
-bounded indices and pattern projections; other elements require uniquely determined indices. Struct
-inputs do not acquire implicit invariants.
+support disjoint mutable root inputs, projected writes, reborrows and call state propagation.
+Multiple mutable root pointees must have no interior mutation or reference fields. Scalar Cell
+roots mixed with mutable roots remain unsupported. Tracked references in aggregates and captures
+preserve writes to their allocations. General aliasing remains unsupported. Structs, symbolic input
+enums and constructed variants preserve tags, fields and return facts. Small integer/bool/float
+arrays support symbolic bounded indices and pattern projections; other elements require uniquely
+determined indices. Struct inputs do not acquire implicit invariants.
 
 Root inputs include tuples, nested local/dependency structs and enums, concrete generic fields,
 supported shared references and small arrays of modeled aggregates. Input enums have at most 64
