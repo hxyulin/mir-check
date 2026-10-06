@@ -59,7 +59,7 @@ Reports retain queries, models, declared assumptions, input bindings and trusted
 Cargo root selectors match exact inventory names or crate-qualified names across selected
 targets. Only selected roots acquire independent proofs; callees can still be interpreted with
 the caller's particular values. A missing requested root fails after Cargo finishes, while
-preserving reports. Schema version 7 counts root outcomes separately from unselected bodies and
+preserving reports. Schema version 8 counts root outcomes separately from unselected bodies and
 distinct interpreted instances, and groups unknown obligations by reason. These are analysis
 counts, not runtime coverage or whole-crate safety percentages.
 
@@ -122,7 +122,7 @@ constant shapes. Non-byte arrays are limited to 16 elements; symbolic bounded in
 integers, floats and booleans; enum/struct elements need a uniquely determined index. Array/slice
 patterns prove their minimum length and index bounds before applying constant start/end offsets.
 Generic roots with unresolved type parameters remain unsupported. There are no inductive loop
-invariants, automatic type invariants, dedicated termination checks or general effect contracts.
+invariants, automatic type invariants, dedicated termination checks or verified general effects.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
 propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and
@@ -179,3 +179,24 @@ boundaries. The models and their interference policy appear in reports.
 
 An atomic-only wrapper such as validate::Site can be represented without reading its mutable
 initializer as immutable data. Other interior-mutable constant references remain unsupported.
+
+## External contracts and conditional proofs
+
+JSON sidecars can supply checked requires/ensures clauses for unchanged code. Their default
+execution is the same as source metadata: interpret actual bodies, prove call bounds and check
+postconditions. Exact selectors and positional argument aliases are validated; stale or ambiguous
+configuration fails instead of silently disappearing.
+
+An explicit trusted summary replaces only calls to its selected concrete function. The engine
+proves its preconditions, generates fresh supported return values, applies the claimed memory
+effects and assumes its ensures clauses. Missing effects invalidate modeled storage facts;
+an explicit effect list includes a trusted frame claim for storage outside that list. Supported
+reference writes update known aliases. Unsupported ownership/alias shapes and inconsistent
+summary constraints remain UNKNOWN. Generic summaries require a concrete instance selector.
+
+The engine records every used summary, reason, call site, instance and crate hash. Such a root
+is PROVED_WITH_ASSUMPTIONS and is excluded from ordinary PROVED counts. Default verification
+rejects it; --allow-assumptions explicitly accepts that conditional outcome. REFUTED and UNKNOWN
+take precedence and still fail. A trusted function selected as a root executes its real body,
+so an assumed call boundary never becomes a body proof. Source annotations alone cannot opt
+into trust. See [contracts](contracts.md#explicitly-trusted-call-boundaries) for the policy.

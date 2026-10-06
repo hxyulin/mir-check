@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+mod config;
+pub use config::{ContractConfig, FunctionContract};
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
@@ -17,6 +20,10 @@ pub struct Report {
     pub functions: Vec<Function>,
     pub traces: Vec<Trace>,
     pub coverage: Coverage,
+    #[serde(default)]
+    pub contract_config: Option<ContractConfig>,
+    #[serde(default)]
+    pub matched_contracts: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -24,6 +31,8 @@ pub struct Coverage {
     pub inventoried_bodies: usize,
     pub selected_roots: usize,
     pub proved: usize,
+    #[serde(default)]
+    pub proved_with_assumptions: usize,
     pub refuted: usize,
     pub unknown: usize,
     pub unselected_bodies: usize,
@@ -56,6 +65,7 @@ pub fn coverage(report: &Report) -> Coverage {
         result.selected_roots += 1;
         match proof.status {
             ProofStatus::Proved => result.proved += 1,
+            ProofStatus::ProvedWithAssumptions => result.proved_with_assumptions += 1,
             ProofStatus::Refuted => result.refuted += 1,
             ProofStatus::Unknown => result.unknown += 1,
         }
@@ -97,6 +107,13 @@ pub fn render_coverage(report: &Report) -> String {
         coverage.unselected_bodies,
         coverage.interpreted_instances
     );
+    if coverage.proved_with_assumptions > 0 {
+        let _ = writeln!(
+            output,
+            "  PROVED_WITH_ASSUMPTIONS {} (excluded from PROVED)",
+            coverage.proved_with_assumptions
+        );
+    }
     for function in &report.functions {
         if let Some(proof) = &function.proof {
             let _ = writeln!(output, "  {} {}", proof.status.label(), function.name);
@@ -133,12 +150,25 @@ pub struct Proof {
     pub models: Vec<String>,
     pub analyzed_bodies: Vec<String>,
     pub obligations: Vec<Obligation>,
+    #[serde(default)]
+    pub trusted_calls: Vec<TrustedCall>,
+    #[serde(default)]
+    pub matched_contracts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TrustedCall {
+    pub contract: FunctionContract,
+    pub instance: String,
+    pub crate_hash: String,
+    pub source: Source,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProofStatus {
     Proved,
+    ProvedWithAssumptions,
     Refuted,
     Unknown,
 }
@@ -147,6 +177,7 @@ impl ProofStatus {
     pub fn label(self) -> &'static str {
         match self {
             Self::Proved => "PROVED",
+            Self::ProvedWithAssumptions => "PROVED_WITH_ASSUMPTIONS",
             Self::Refuted => "REFUTED",
             Self::Unknown => "UNKNOWN",
         }
@@ -306,7 +337,7 @@ pub struct Contract {
     pub status: ContractStatus,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContractKind {
     NoPanic,
@@ -319,6 +350,7 @@ pub enum ContractKind {
 pub enum ContractStatus {
     PendingVerification,
     VerifiedUnderPreconditions,
+    VerifiedWithTrustedAssumptions,
 }
 
 pub fn render(report: &Report) -> String {
@@ -365,6 +397,9 @@ pub fn render(report: &Report) -> String {
             let status = match contract.status {
                 ContractStatus::PendingVerification => "pending verification",
                 ContractStatus::VerifiedUnderPreconditions => "verified under preconditions",
+                ContractStatus::VerifiedWithTrustedAssumptions => {
+                    "verified with trusted external assumptions"
+                }
             };
             let _ = writeln!(output, "    {kind}({predicate}): {status}");
         }
@@ -400,6 +435,24 @@ pub fn render(report: &Report) -> String {
             }
             for assumption in &proof.assumptions {
                 let _ = writeln!(output, "      assumes: {assumption}");
+            }
+            for trusted in &proof.trusted_calls {
+                let _ = writeln!(
+                    output,
+                    concat!(
+                        "      USER TRUSTED {} {} crate {} at {}:{}; reason: {}; ",
+                        "requires {:?}; ensures {:?}; modifies {:?}"
+                    ),
+                    trusted.contract.function,
+                    trusted.instance,
+                    trusted.crate_hash,
+                    trusted.source.file,
+                    trusted.source.line,
+                    trusted.contract.reason.as_deref().unwrap_or(""),
+                    trusted.contract.requires,
+                    trusted.contract.ensures,
+                    trusted.contract.modifies
+                );
             }
             for body in &proof.analyzed_bodies {
                 let _ = writeln!(output, "      interpreted body: {body}");

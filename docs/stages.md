@@ -349,3 +349,28 @@ unchecked counter arithmetic, invalid ordering and unsupported history assertion
 RefCell guards and general raw-pointer operations remain unknown. Ordinary Cargo verification
 also proves the unchanged fleet validate::Site::fail and total on ARM. There are 58 compiler
 integration tests and one metadata test.
+
+## Stage 19: external checked contracts and explicit trusted summaries
+
+JSON sidecars add contracts to unchanged code without a metadata dependency. Checked clauses
+execute actual bodies, constrain root domains and verify call/return obligations. Trusted
+summaries require an exact function selector, a no-panic claim and a reason. Generic calls need
+an exact compiler instance. Return values remain arbitrary unless constrained, and explicit
+memory effects preserve known aliases while claiming a frame for other storage. Omitted effects
+invalidate modeled storage; unsupported ownership shapes and inconsistent summaries stay unknown.
+
+Schema version 8 records the configuration, matched selectors and every used summary with its
+reason, instance, crate hash and call site. Conditional roots are PROVED_WITH_ASSUMPTIONS,
+excluded from ordinary proof counts and rejected unless --allow-assumptions is explicitly set.
+Selecting the assumed function itself still checks its actual body.
+
+Host/ARM tests refute out-of-bound calls, erroneous success assumptions and stale state claims.
+Cargo tests use unavailable dependency bodies, check configuration forwarding and preserve strict
+exits. Malformed/stale selectors, unsupported references and inconsistent summaries fail. There
+are 63 compiler integration tests and one metadata test. Report-format and CLI presentation work
+is deferred to the next step.
+
+Ordinary ARM Cargo analysis proves the unchanged fleet controller::Pid::reset and its external
+final-state postcondition without annotations or a new dependency. The selected check takes
+0.25 seconds on the development machine, including compilation. This is selected-root evidence;
+the published whole-workspace survey has not been rerun for these memory stages.

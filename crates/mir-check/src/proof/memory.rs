@@ -344,7 +344,7 @@ impl<'tcx> Engine<'tcx> {
         Ok(())
     }
 
-    fn write_projection(
+    pub(super) fn write_projection(
         &self,
         storage: &mut Value,
         path: &[MemoryProjection],

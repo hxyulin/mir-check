@@ -26,7 +26,7 @@ success establishes only that the inventory was collected.
 Cargo accepts repeated exact or crate-qualified --entry selectors. Crates without a matching root
 retain inventories; the Cargo wrapper rejects any requested root absent from all selected targets.
 --summary prints outcomes and grouped unknown reasons. Available reports are rendered even after
-verification failure. Schema version 7 includes root coverage counts separately from distinct
+verification failure. Schema version 8 includes root coverage counts separately from distinct
 interpreted body instances; neither count claims runtime or whole-crate coverage.
 
 The report model uses std and serde. No compiler types escape the adapter, so JSON consumers
@@ -123,3 +123,13 @@ wrap on overflow. Load/store ordering restrictions are checked, including symbol
 arguments. Atomic-only static wrappers are represented without freezing mutable initializers.
 Reports record these models; atomic history assertions can refute under the conservative
 abstraction. RefCell guards, general UnsafeCell operations and raw pointers remain unsupported.
+
+--contracts FILE attaches checked clauses to unchanged code through a schema-1 JSON sidecar.
+Exact crate-qualified selectors and positional aliases are validated; stale configuration fails.
+Explicit trusted summaries require no_panic=true and a reason, check caller bounds, generate fresh
+supported returns and apply declared memory effects. Missing effects invalidate modeled storage;
+an explicit modifies list trusts the frame outside listed arguments. Known aliases share writes.
+Generic summaries require an exact compiler instance. Unsupported return/effect ownership remains
+unknown. Roots using summaries are PROVED_WITH_ASSUMPTIONS, recorded separately from PROVED and
+rejected without --allow-assumptions. Selecting a trusted function still checks its actual body.
+Reports retain configuration, matched selectors and used summary provenance. See docs/contracts.md.

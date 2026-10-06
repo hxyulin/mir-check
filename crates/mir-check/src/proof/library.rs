@@ -47,8 +47,8 @@ impl<'tcx> Engine<'tcx> {
         let callee = instance.def_id();
         let body = self.instantiated_body(instance)?;
         let snapshots = self.snapshots(&values, &memory, &conditions)?;
-        let bindings = self.bindings(&body, &snapshots)?;
-        for contract in self.contracts(callee) {
+        let bindings = self.configured_bindings(&body, &snapshots, instance)?;
+        for contract in self.configured_contracts(instance)? {
             if matches!(contract.kind, ContractKind::Requires) {
                 let text = contract
                     .predicate

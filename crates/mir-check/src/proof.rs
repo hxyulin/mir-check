@@ -23,6 +23,7 @@ const MAX_ROOT_SECONDS: u64 = 30;
 mod aggregates;
 mod builtins;
 mod constants;
+mod external;
 mod interior;
 mod library;
 mod memory;
@@ -50,9 +51,11 @@ struct Engine<'tcx> {
     building_mutable_input: bool,
     started: std::time::Instant,
     proof: Proof,
+    config: mir_check::ContractConfig,
+    resolved_contracts: BTreeMap<String, DefId>,
 }
 
-pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
+pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) -> Proof {
     let mut engine = Engine {
         tcx,
         declarations: Vec::new(),
@@ -61,6 +64,8 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
         input_values: 0,
         building_mutable_input: false,
         started: std::time::Instant::now(),
+        config: config.clone(),
+        resolved_contracts: BTreeMap::new(),
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
@@ -68,6 +73,8 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
             models: Vec::new(),
             analyzed_bodies: Vec::new(),
             obligations: Vec::new(),
+            trusted_calls: Vec::new(),
+            matched_contracts: Vec::new(),
         },
     };
     let result = engine.root(id);
@@ -88,6 +95,8 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId) -> Proof {
         .any(|o| o.status == ProofStatus::Unknown)
     {
         ProofStatus::Unknown
+    } else if !engine.proof.trusted_calls.is_empty() {
+        ProofStatus::ProvedWithAssumptions
     } else {
         ProofStatus::Proved
     };
@@ -138,11 +147,12 @@ impl<'tcx> Engine<'tcx> {
             }
         }
         let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
-        let bindings = self.bindings(body, &snapshots)?;
+        let instance = ty::Instance::new_raw(id, ty::GenericArgs::identity_for_item(self.tcx, id));
+        let bindings = self.configured_bindings(body, &snapshots, instance)?;
         for (name, value) in &bindings {
             self.input_binding(name, value)?;
         }
-        for contract in self.contracts(id) {
+        for contract in self.configured_contracts(instance)? {
             if matches!(contract.kind, ContractKind::Requires) {
                 let text = contract
                     .predicate
@@ -157,7 +167,6 @@ impl<'tcx> Engine<'tcx> {
                 "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
             );
         }
-        let instance = ty::Instance::new_raw(id, ty::GenericArgs::identity_for_item(self.tcx, id));
         self.execute(instance, arguments, conditions, memory, &[])?;
         Ok(())
     }
@@ -515,8 +524,8 @@ impl<'tcx> Engine<'tcx> {
             return Err("mutable local borrows cannot cross an unmodeled call boundary".to_owned());
         }
         let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
-        let bindings = self.bindings(body, &snapshots)?;
-        let contracts = self.contracts(id);
+        let bindings = self.configured_bindings(body, &snapshots, instance)?;
+        let contracts = self.configured_contracts(instance)?;
         if bindings.keys().any(|name| name.starts_with("final_"))
             && contracts
                 .iter()
@@ -622,19 +631,34 @@ impl<'tcx> Engine<'tcx> {
                         return Err("mutable local borrows cannot escape their frame".to_owned());
                     }
                     let mut post_bindings = bindings.clone();
-                    let final_arguments = body
-                        .args_iter()
-                        .map(|local| self.local(&state, local.as_usize()))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let final_snapshots =
-                        self.snapshots(&final_arguments, &state.memory, &state.conditions)?;
-                    for (name, value) in self.bindings(body, &final_snapshots)? {
-                        post_bindings.insert(format!("final_{name}"), value);
+                    if contracts.iter().any(|contract| {
+                        matches!(contract.kind, ContractKind::Ensures)
+                            && contract
+                                .predicate
+                                .as_ref()
+                                .is_some_and(|predicate| predicate.contains("final_"))
+                    }) {
+                        let final_arguments = body
+                            .args_iter()
+                            .map(|local| self.local(&state, local.as_usize()))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let final_snapshots =
+                            self.snapshots(&final_arguments, &state.memory, &state.conditions)?;
+                        for (name, value) in
+                            self.configured_bindings(body, &final_snapshots, instance)?
+                        {
+                            post_bindings.insert(format!("final_{name}"), value);
+                        }
                     }
-                    post_bindings.insert(
-                        "result".to_owned(),
-                        self.snapshot(&value, &state.memory, &state.conditions, 0)?,
-                    );
+                    if contracts
+                        .iter()
+                        .any(|contract| matches!(contract.kind, ContractKind::Ensures))
+                    {
+                        post_bindings.insert(
+                            "result".to_owned(),
+                            self.snapshot(&value, &state.memory, &state.conditions, 0)?,
+                        );
+                    }
                     for contract in &contracts {
                         if matches!(contract.kind, ContractKind::Ensures) {
                             let text = contract
@@ -741,26 +765,47 @@ impl<'tcx> Engine<'tcx> {
                         instance
                     };
                     let callee = instance.def_id();
-                    let modeled_values =
-                        self.snapshots(&values, &state.memory, &state.conditions)?;
-                    if let Some(value) = self.interior_call(
+                    if let Some(results) = self.trusted_call(
                         instance,
-                        &modeled_values,
-                        &mut state,
+                        &values,
+                        &state,
                         (id, terminator.source_info.span),
                     )? {
+                        let target = target.ok_or("trusted call has no return edge")?;
+                        for result in results {
+                            let mut continuation = state.clone();
+                            continuation.conditions = result.conditions;
+                            continuation.memory = result.memory;
+                            self.write(&mut continuation, *destination, result.value)?;
+                            queue.push_back((target, continuation));
+                        }
+                        continue;
+                    }
+                    let configured = self.specification(instance)?.is_some();
+                    let modeled_values =
+                        self.snapshots(&values, &state.memory, &state.conditions)?;
+                    if !configured
+                        && let Some(value) = self.interior_call(
+                            instance,
+                            &modeled_values,
+                            &mut state,
+                            (id, terminator.source_info.span),
+                        )?
+                    {
                         self.write(&mut state, *destination, value)?;
                         let target = target.ok_or("interior call has no return edge")?;
                         queue.push_back((target, state));
                         continue;
                     }
-                    if let Some(results) = self.library_call(
-                        instance,
-                        &modeled_values,
-                        &state,
-                        &stack,
-                        (id, terminator.source_info.span),
-                    )? {
+                    if !configured
+                        && let Some(results) = self.library_call(
+                            instance,
+                            &modeled_values,
+                            &state,
+                            &stack,
+                            (id, terminator.source_info.span),
+                        )?
+                    {
                         let target = target.ok_or("modeled call has no return edge")?;
                         for result in results {
                             let mut continuation = state.clone();
@@ -771,14 +816,16 @@ impl<'tcx> Engine<'tcx> {
                         }
                         continue;
                     }
-                    if let Some(value) = self.builtin(
-                        body,
-                        callee,
-                        instance.args,
-                        &modeled_values,
-                        &mut state,
-                        terminator.source_info.span,
-                    )? {
+                    if !configured
+                        && let Some(value) = self.builtin(
+                            body,
+                            callee,
+                            instance.args,
+                            &modeled_values,
+                            &mut state,
+                            terminator.source_info.span,
+                        )?
+                    {
                         self.write(&mut state, *destination, value)?;
                         let target = target.ok_or("modeled call has no return edge")?;
                         queue.push_back((target, state));

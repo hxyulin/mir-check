@@ -74,7 +74,7 @@ Arithmetic, dynamic indexing, arbitrary predicate calls and Result contract matc
 
 Cargo can select exact or crate-qualified roots. Unselected callees can still be interpreted
 with particular symbolic arguments; that does not independently verify their full input domains.
-Schema version 7 separates root outcome counts, unselected bodies, interpreted instance counts
+Schema version 8 separates root outcome counts, unselected bodies, interpreted instance counts
 and grouped unknown reasons. An empty inventory or zero selected roots establishes no safety.
 
 ## Concrete evidence
@@ -108,3 +108,12 @@ Interior-mutation tests prove shared Cell writes through aliases, branches and a
 Atomic tests prove wrapping counters and guarded orderings, refute invalid orderings/unchecked
 increments/history assumptions, and keep RefCell conflicts unknown on host/ARM. The fleet's
 unchanged validate::Site::fail and total also prove through ordinary ARM Cargo verification.
+
+External sidecars check unchanged body/caller contracts without a source dependency. Host/ARM
+tests cover formatter-boundary preconditions, arbitrary Result failures, tracked effects and
+strict rejection of conditional proofs. Additional tests cover unavailable dependency bodies
+through Cargo, generic instance selection, invalid/stale configuration, inconsistent assumptions
+and unsupported reference returns. Trusted summaries remain explicit assumptions, excluded from
+ordinary proof counts; they expand caller analysis without establishing the skipped body's safety.
+An external checked postcondition also proves final_state.integral == 0.0 for the unchanged fleet
+controller::Pid::reset through ARM Cargo verification, without adding a firmware dependency.

@@ -120,6 +120,7 @@ the tool does not claim that every architecture has been tested.
 | Outcome | Meaning | Verification exit |
 | --- | --- | --- |
 | PROVED | Every explored feasible path completed and all body/contract obligations passed under the declared root domain | Success if every selected root proves |
+| PROVED_WITH_ASSUMPTIONS | Obligations passed using explicit user-trusted call summaries | Nonzero unless --allow-assumptions is set |
 | REFUTED | A supported translated obligation has a satisfying failing assignment | Nonzero |
 | UNKNOWN | Unsupported behavior, missing MIR, solver failure or an exploration/input/query limit prevented completion | Nonzero |
 | Unselected | The body has an inventory, without an independent root proof | Does not affect selected-root verification |
@@ -134,12 +135,13 @@ instances are deduplicated within one crate report; they can include callees and
 bodies. The counts are not statement/branch coverage percentages or whole-crate safety claims.
 
 Omit `--summary` to inspect sites, assumptions, named input bindings, interpreted instances,
-trusted models and individual obligations. Schema version 7 JSON includes:
+trusted models and individual obligations. Schema version 8 JSON includes:
 
 - `coverage`: inventoried/selected/unselected counts, root outcomes, interpreted instance count
   and gap groups.
 - `functions[].proof`: root status, assumptions, input bindings, interpreted bodies, explicit
-  library models and obligations with SMT queries and optional solver models.
+  library models, used user-trusted summaries and obligations with SMT queries and optional models.
+- `contract_config`, `matched_contracts`: the optional external configuration and matched selectors.
 - `functions[].sites`: the independent unverified MIR inventory.
 - `rustc_arguments`, `compiler`, `target`, `panic_strategy`, `overflow_checks`: analysis build data.
 
@@ -148,7 +150,8 @@ It renders available reports even when verification fails. Compiler failures can
 for other completed crates; they cannot produce a successful run. Missing requested roots also
 fail while retaining the collected reports. Build directories can be removed after use.
 
-Direct mode accepts `--json`, `--summary`, `--verify` and repeated `--entry` before rustc arguments:
+Direct mode accepts `--json`, `--summary`, `--verify`, repeated `--entry`, `--contracts FILE` and
+`--allow-assumptions` before rustc arguments:
 
 ```sh
 target/debug/mir-check --json --verify --entry next_byte -- \
@@ -157,6 +160,13 @@ target/debug/mir-check --json --verify --entry next_byte -- \
 
 `--json` takes precedence over `--summary` in direct mode. Cargo always retains JSON reports;
 its console summary is optional. Direct mode rejects missing roots before emitting a report.
+
+`--contracts FILE` reads a JSON sidecar for checked source-independent contracts or explicitly
+trusted summaries. Paths are resolved from the invoking directory and forwarded to compiler
+workers. Unmatched selectors fail the run. `--allow-assumptions` accepts conditional proofs while
+retaining their distinct status; UNKNOWN and REFUTED still fail. See [contracts](contracts.md)
+for examples, effect claims and provenance fields. Schema 7 reports can still be read; new fields
+default to empty values when absent.
 
 ## Work through UNKNOWN
 

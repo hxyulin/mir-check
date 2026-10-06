@@ -1981,7 +1981,7 @@ fn coverage_counts_root_results_separately_from_unselected_and_interpreted_bodie
     );
     assert!(!output.status.success());
     let analysis: Report = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(analysis.schema_version, 7);
+    assert_eq!(analysis.schema_version, 8);
     let coverage = &analysis.coverage;
     assert_eq!(coverage.selected_roots, 3);
     assert_eq!(
@@ -2921,5 +2921,435 @@ fn cells_preserve_alias_writes_and_atomics_check_orderings_without_assuming_hist
                 .iter()
                 .any(|model| model.contains("possible interference"))
         );
+    }
+}
+
+#[test]
+fn external_contracts_check_bounds_and_label_trusted_returns_and_effects_on_host_and_arm() {
+    let directory = Directory::new();
+    let config = directory.0.join("contracts.json");
+    let spec = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"external_contracts::write_float",
+        "arguments":["writer","value","precision"],
+        "requires":["precision <= 6"],"trusted":true,"no_panic":true,"modifies":["writer"],
+        "ensures":["final_writer.len <= 32"],
+        "reason":"Accepted float formatting boundary for this test"
+    }, {
+        "function":"external_contracts::increment",
+        "requires":["value < 255"],"ensures":["result > value"]
+    }]});
+    std::fs::write(&config, serde_json::to_vec_pretty(&spec).unwrap()).unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let rustc_args = target
+            .map(|target| vec!["--target", target, "-Cpanic=abort", "-Coverflow-checks=yes"])
+            .unwrap_or_else(|| vec!["-Cpanic=abort", "-Coverflow-checks=yes"]);
+        let checker = [
+            "--verify",
+            "--contracts",
+            config.to_str().unwrap(),
+            "--entry",
+            "caller",
+            "--entry",
+            "bad_bound",
+            "--entry",
+            "result_failure",
+            "--entry",
+            "stale",
+            "--entry",
+            "increment",
+            "--entry",
+            "checked_caller",
+            "--entry",
+            "bad_checked_caller",
+            "--entry",
+            "unrelated",
+        ];
+        let output = analyze_from(
+            &fixture("external_contracts.rs"),
+            &directory,
+            &checker,
+            &rustc_args,
+        );
+        assert!(
+            !output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+        for (name, expected) in [
+            ("caller", ProofStatus::ProvedWithAssumptions),
+            ("bad_bound", ProofStatus::Refuted),
+            ("result_failure", ProofStatus::Refuted),
+            ("stale", ProofStatus::Refuted),
+            ("increment", ProofStatus::Proved),
+            ("checked_caller", ProofStatus::Proved),
+            ("bad_checked_caller", ProofStatus::Refuted),
+            ("unrelated", ProofStatus::Proved),
+        ] {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == "caller")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.trusted_calls.len(), 1);
+        assert_eq!(
+            proof.trusted_calls[0].contract.modifies,
+            Some(vec!["writer".to_owned()])
+        );
+        assert!(!proof.trusted_calls[0].crate_hash.is_empty());
+        assert_eq!(report.coverage.proved_with_assumptions, 1);
+        assert!(mir_check::render(&report).contains("USER TRUSTED"));
+        let allowed = analyze_from(
+            &fixture("external_contracts.rs"),
+            &directory,
+            &[
+                "--verify",
+                "--allow-assumptions",
+                "--contracts",
+                config.to_str().unwrap(),
+                "--entry",
+                "caller",
+            ],
+            &rustc_args,
+        );
+        assert!(
+            allowed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&allowed.stderr)
+        );
+        let strict = analyze_from(
+            &fixture("external_contracts.rs"),
+            &directory,
+            &[
+                "--verify",
+                "--contracts",
+                config.to_str().unwrap(),
+                "--entry",
+                "caller",
+            ],
+            &rustc_args,
+        );
+        assert!(!strict.status.success());
+    }
+}
+
+#[test]
+fn summary_defaults_invalidate_storage_and_never_prove_the_assumed_body() {
+    let directory = Directory::new();
+    let config = directory.0.join("contracts.json");
+    let mut spec = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"external_contracts::write_float","arguments":["writer","value","precision"],
+        "trusted":true,"no_panic":true,"reason":"Explicit test boundary"
+    }, {
+        "function":"external_contracts::assumed","arguments":["value"],"trusted":true,
+        "no_panic":true,"modifies":[],"ensures":["result == value"],
+        "reason":"Deliberately false assumption to verify reporting"
+    }]});
+    std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let output = analyze_from(
+        &fixture("external_contracts.rs"),
+        &directory,
+        &[
+            "--verify",
+            "--allow-assumptions",
+            "--contracts",
+            config.to_str().unwrap(),
+            "--entry",
+            "ignored",
+            "--entry",
+            "stale",
+            "--entry",
+            "assumed",
+            "--entry",
+            "assumed_caller",
+        ],
+        &["-Cpanic=abort"],
+    );
+    let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+    for (name, expected) in [
+        ("ignored", ProofStatus::ProvedWithAssumptions),
+        ("stale", ProofStatus::Unknown),
+        ("assumed", ProofStatus::Refuted),
+        ("assumed_caller", ProofStatus::ProvedWithAssumptions),
+    ] {
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, expected, "{name}: {:?}", proof.obligations);
+    }
+    spec["functions"][0]["modifies"] = serde_json::json!(["writer"]);
+    spec["functions"][0]["ensures"] = serde_json::json!(["result == 0"]);
+    std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let output = analyze_from(
+        &fixture("external_contracts.rs"),
+        &directory,
+        &[
+            "--verify",
+            "--allow-assumptions",
+            "--contracts",
+            config.to_str().unwrap(),
+            "--entry",
+            "ignored",
+        ],
+        &["-Cpanic=abort"],
+    );
+    let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report
+            .functions
+            .iter()
+            .find(|f| f.name == "ignored")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap()
+            .status,
+        ProofStatus::Unknown
+    );
+}
+
+#[test]
+fn external_contracts_reject_stale_selectors_unsupported_aliases_and_inconsistent_summaries() {
+    let directory = Directory::new();
+    let config = directory.0.join("contracts.json");
+    for (function, entry, instance, ensures, expected) in [
+        (
+            "generic",
+            "generic_call",
+            None,
+            Vec::new(),
+            ProofStatus::Unknown,
+        ),
+        (
+            "generic",
+            "generic_call",
+            Some("[u8]"),
+            vec!["result == value"],
+            ProofStatus::ProvedWithAssumptions,
+        ),
+        (
+            "reference",
+            "reference_call",
+            None,
+            Vec::new(),
+            ProofStatus::Unknown,
+        ),
+        (
+            "assumed",
+            "assumed_caller",
+            None,
+            vec!["result != result"],
+            ProofStatus::Unknown,
+        ),
+    ] {
+        let spec = serde_json::json!({"schema_version":1,"functions":[{
+            "function":format!("external_contracts::{function}"), "instance":instance,
+            "arguments":["value"],"trusted":true,"no_panic":true,"modifies":[],
+            "ensures":ensures,"reason":"Explicit regression boundary"
+        }]});
+        std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+        let output = analyze_from(
+            &fixture("external_contracts.rs"),
+            &directory,
+            &[
+                "--verify",
+                "--allow-assumptions",
+                "--contracts",
+                config.to_str().unwrap(),
+                "--entry",
+                entry,
+            ],
+            &[],
+        );
+        let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            report
+                .functions
+                .iter()
+                .find(|f| f.name == entry)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap()
+                .status,
+            expected,
+            "{function}: {}",
+            mir_check::render(&report)
+        );
+        assert_eq!(
+            output.status.success(),
+            expected == ProofStatus::ProvedWithAssumptions
+        );
+    }
+    let spec = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"external_contracts::missing", "no_panic":true
+    }]});
+    std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+    let output = analyze_from(
+        &fixture("external_contracts.rs"),
+        &directory,
+        &[
+            "--verify",
+            "--contracts",
+            config.to_str().unwrap(),
+            "--entry",
+            "unrelated",
+        ],
+        &[],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("matched no definition"));
+}
+
+#[test]
+fn malformed_contract_configuration_fails_before_compilation() {
+    let directory = Directory::new();
+    let config = directory.0.join("contracts.json");
+    let valid = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"external_contracts::assumed", "arguments":["value"],
+        "trusted":true,"no_panic":true,"modifies":[],"reason":"Test boundary"
+    }]});
+    for (field, value) in [
+        ("reason", serde_json::json!(" ")),
+        ("no_panic", serde_json::json!(false)),
+        ("modifies", serde_json::json!(["typo"])),
+        ("arguments", serde_json::json!(["result"])),
+        ("function", serde_json::json!("external_contracts::*")),
+        ("requires", serde_json::json!(["value <"])),
+        ("misspelt_option", serde_json::json!(true)),
+    ] {
+        let mut invalid = valid.clone();
+        invalid["functions"][0][field] = value;
+        std::fs::write(&config, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        let output = analyze_from(
+            &fixture("external_contracts.rs"),
+            &directory,
+            &[
+                "--verify",
+                "--contracts",
+                config.to_str().unwrap(),
+                "--entry",
+                "unrelated",
+            ],
+            &[],
+        );
+        assert!(!output.status.success(), "{field}");
+        assert!(
+            output.stdout.is_empty(),
+            "{field}: report must not imply success"
+        );
+    }
+    for invalid in [
+        serde_json::json!({"schema_version":2,"functions":[]}),
+        serde_json::json!({"schema_version":1,"functions":[
+            valid["functions"][0].clone(), valid["functions"][0].clone()]}),
+    ] {
+        std::fs::write(&config, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(mir_check::ContractConfig::read(&config).is_err());
+    }
+}
+
+#[test]
+fn cargo_forwards_trusted_contracts_without_dependency_mir_and_stays_strict_by_default() {
+    let directory = Directory::new();
+    for name in ["consumer", "dependency"] {
+        std::fs::create_dir(directory.0.join(name)).unwrap();
+        let dependency = if name == "consumer" {
+            "[dependencies]\ndependency={path='../dependency'}\n"
+        } else {
+            ""
+        };
+        std::fs::write(
+            directory.0.join(name).join("Cargo.toml"),
+            format!(
+                "[package]\nname='{name}'\nversion='0.1.0'\nedition='2024'\n\
+             [lib]\npath='lib.rs'\n[workspace]\n{dependency}"
+            ),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        directory.0.join("dependency/lib.rs"),
+        "#![no_std]\n#![forbid(unsafe_code)]\npub fn increment(value: u8) -> u8 { value + 1 }",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.0.join("consumer/lib.rs"),
+        "#![no_std]\n#![forbid(unsafe_code)]\npub fn guarded(value: u8) -> u8 { \
+         if value < 255 { dependency::increment(value) } else { 0 } }",
+    )
+    .unwrap();
+    let config = directory.0.join("contracts.json");
+    let spec = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"dependency::increment","arguments":["value"],"requires":["value < 255"],
+        "ensures":["result > value"],"trusted":true,"no_panic":true,"modifies":[],
+        "reason":"Test unavailable ordinary dependency body"
+    }]});
+    std::fs::write(&config, serde_json::to_vec(&spec).unwrap()).unwrap();
+    for allow in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_cargo-mir-check"));
+        command.current_dir(directory.0.join("consumer")).args([
+            "--verify",
+            "--summary",
+            "--entry",
+            "guarded",
+            "--contracts",
+            "../contracts.json",
+            "--no-dependency-mir",
+            "--lib",
+            "--offline",
+        ]);
+        if allow {
+            command.arg("--allow-assumptions");
+        }
+        let output = command.output().unwrap();
+        assert_eq!(
+            output.status.success(),
+            allow,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("PROVED_WITH_ASSUMPTIONS"));
+        let console = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let reports = console
+            .lines()
+            .find_map(|line| line.strip_prefix("JSON reports: "))
+            .unwrap();
+        let path = std::fs::read_dir(reports)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let report: Report = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(report.matched_contracts, ["dependency::increment"]);
+        assert_eq!(report.coverage.proved, 0);
+        assert_eq!(report.coverage.proved_with_assumptions, 1);
     }
 }

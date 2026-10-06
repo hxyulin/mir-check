@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use mir_check::Report;
+use mir_check::{ContractConfig, Report};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -17,7 +17,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
-            [--no-dependency-mir] \
+            [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
             Repeat --entry to select exact or crate-qualified roots; missing roots fail.\n\
@@ -30,6 +30,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut summary = false;
     let mut dependency_mir = true;
     let mut entries = Vec::new();
+    let mut contracts_path = None;
+    let mut allow_assumptions = false;
     let mut cargo_args = Vec::new();
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -37,6 +39,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Some("--verify") => verify = true,
             Some("--summary") => summary = true,
             Some("--no-dependency-mir") => dependency_mir = false,
+            Some("--allow-assumptions") => allow_assumptions = true,
+            Some("--contracts") => {
+                let path = args.next().ok_or("--contracts requires a JSON file")?;
+                contracts_path = Some(std::fs::canonicalize(PathBuf::from(path))?);
+            }
             Some("--entry") => {
                 let name = args.next().ok_or("--entry requires a function name")?;
                 entries.push(entry_name(name)?);
@@ -57,6 +64,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     {
         return Err("--target-dir is managed by mir-check to prevent stale inventories".into());
     }
+    let config = contracts_path
+        .as_ref()
+        .map(|path| ContractConfig::read(path))
+        .transpose()?;
     let run_id = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let root = std::env::current_dir()?.join(format!("target/mir-check/{run_id}"));
     let reports = root.join("reports");
@@ -82,6 +93,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env("MIR_CHECK_REPORT_DIR", &reports)
         .env("MIR_CHECK_ENTRIES", serde_json::to_string(&entries)?)
         .env("CARGO_INCREMENTAL", "0");
+    command
+        .env_remove("MIR_CHECK_CONTRACTS")
+        .env_remove("MIR_CHECK_ALLOW_ASSUMPTIONS");
+    if let Some(path) = contracts_path {
+        command.env("MIR_CHECK_CONTRACTS", path);
+    }
+    if allow_assumptions {
+        command.env("MIR_CHECK_ALLOW_ASSUMPTIONS", "1");
+    }
     if dependency_mir {
         command.env("RUSTC_WRAPPER", compiler_wrapper);
     }
@@ -122,6 +142,20 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         }) {
             eprintln!("mir-check: entry {entry:?} has no inventoried MIR body in selected targets");
             missing = true;
+        }
+    }
+    if let Some(config) = config {
+        for spec in config.functions {
+            if !collected
+                .iter()
+                .any(|report| report.matched_contracts.contains(&spec.selector()))
+            {
+                eprintln!(
+                    "mir-check: contract selector {:?} matched no definition or analyzed call",
+                    spec.selector()
+                );
+                missing = true;
+            }
         }
     }
     if status.success() && !missing {

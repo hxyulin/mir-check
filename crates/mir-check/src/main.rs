@@ -11,7 +11,9 @@ extern crate rustc_interface;
 extern crate rustc_middle;
 extern crate rustc_span;
 
-use mir_check::{Contract, ContractKind, ContractStatus, Function, ProofStatus, Report, Source};
+use mir_check::{
+    Contract, ContractConfig, ContractKind, ContractStatus, Function, ProofStatus, Report, Source,
+};
 use rustc_attr_ir::HasAttrs;
 use rustc_driver::{Callbacks, Compilation};
 use rustc_hir::def::DefKind;
@@ -35,6 +37,9 @@ struct Checker {
     rustc_arguments: Vec<String>,
     verify: bool,
     summary: bool,
+    contracts_path: Option<PathBuf>,
+    contract_config: Option<ContractConfig>,
+    allow_assumptions: bool,
 }
 
 impl Callbacks for Checker {
@@ -50,6 +55,32 @@ impl Callbacks for Checker {
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
         tcx.dcx().abort_if_errors();
+        report.contract_config = self.contract_config.clone();
+        if let Some(config) = &self.contract_config {
+            for function in &mut report.functions {
+                let name = format!("{}::{}", report.crate_name, function.name);
+                let id = tcx
+                    .mir_keys(())
+                    .iter()
+                    .find(|id| tcx.def_path_str(id.to_def_id()) == function.name)
+                    .expect("inventoried local function");
+                let instance = rustc_middle::ty::Instance::new_raw(
+                    id.to_def_id(),
+                    rustc_middle::ty::GenericArgs::identity_for_item(tcx, id.to_def_id()),
+                );
+                for spec in &config.functions {
+                    if spec.function == name
+                        && spec
+                            .instance
+                            .as_ref()
+                            .is_none_or(|expected| *expected == format!("{:?}", instance.args))
+                    {
+                        function.contracts.extend(spec.metadata());
+                        report.matched_contracts.push(spec.selector());
+                    }
+                }
+            }
+        }
         let missing = self.entries.iter().find(|entry| {
             !report
                 .functions
@@ -74,6 +105,7 @@ impl Callbacks for Checker {
             .collect();
         match mir_check::build_traces(&mut report, &entries) {
             Ok(()) => {
+                let config = self.contract_config.clone().unwrap_or_default();
                 if self.verify {
                     for function in &mut report.functions {
                         if !self.entries.is_empty() && !entries.contains(&function.name) {
@@ -84,31 +116,65 @@ impl Callbacks for Checker {
                             .iter()
                             .find(|id| tcx.def_path_str(id.to_def_id()) == function.name)
                             .expect("inventoried functions have local MIR bodies");
-                        function.proof = Some(proof::verify(tcx, id.to_def_id()));
-                        if function
-                            .proof
-                            .as_ref()
-                            .is_some_and(|proof| proof.status == ProofStatus::Proved)
-                        {
+                        function.proof = Some(proof::verify(tcx, id.to_def_id(), &config));
+                        if function.proof.as_ref().is_some_and(|proof| {
+                            matches!(
+                                proof.status,
+                                ProofStatus::Proved | ProofStatus::ProvedWithAssumptions
+                            )
+                        }) {
                             for contract in &mut function.contracts {
-                                contract.status = ContractStatus::VerifiedUnderPreconditions;
+                                contract.status = if function.proof.as_ref().is_some_and(|proof| {
+                                    proof.status == ProofStatus::ProvedWithAssumptions
+                                }) {
+                                    ContractStatus::VerifiedWithTrustedAssumptions
+                                } else {
+                                    ContractStatus::VerifiedUnderPreconditions
+                                };
                             }
                         }
                     }
                 }
                 tcx.dcx().abort_if_errors();
+                for function in &report.functions {
+                    if let Some(proof) = &function.proof {
+                        report
+                            .matched_contracts
+                            .extend(proof.matched_contracts.iter().cloned());
+                    }
+                }
+                report.matched_contracts.sort();
+                report.matched_contracts.dedup();
                 report.coverage = mir_check::coverage(&report);
                 if let Err(error) = self.emit(&report) {
                     self.error = Some(error.to_string());
                 } else if report.functions.iter().any(|function| {
-                    function
-                        .proof
-                        .as_ref()
-                        .is_some_and(|proof| proof.status != ProofStatus::Proved)
+                    function.proof.as_ref().is_some_and(|proof| {
+                        proof.status != ProofStatus::Proved
+                            && !(self.allow_assumptions
+                                && proof.status == ProofStatus::ProvedWithAssumptions)
+                    })
                 }) {
                     self.error = Some(
-                        "verification failed; inspect REFUTED and UNKNOWN obligations".to_owned(),
+                        "verification failed; inspect failed obligations and trusted assumptions"
+                            .to_owned(),
                     );
+                }
+                if self.report_dir.is_none()
+                    && let Some(config) = &self.contract_config
+                {
+                    let missing = config
+                        .functions
+                        .iter()
+                        .filter(|spec| !report.matched_contracts.contains(&spec.selector()))
+                        .map(|spec| spec.selector())
+                        .collect::<Vec<_>>();
+                    if !missing.is_empty() {
+                        self.error = Some(format!(
+                            "contract selectors matched no definition or analyzed call: {}",
+                            missing.join(", ")
+                        ));
+                    }
                 }
             }
             Err(error) => self.error = Some(error),
@@ -168,7 +234,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 7,
+        schema_version: 8,
         compiler: env!("MIR_CHECK_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),
@@ -179,6 +245,8 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
         functions,
         traces: Vec::new(),
         coverage: mir_check::Coverage::default(),
+        contract_config: None,
+        matched_contracts: Vec::new(),
     }
 }
 
@@ -243,6 +311,9 @@ fn main() -> ExitCode {
         rustc_arguments: Vec::new(),
         verify: std::env::var_os("MIR_CHECK_VERIFY").is_some(),
         summary: false,
+        contracts_path: std::env::var_os("MIR_CHECK_CONTRACTS").map(PathBuf::from),
+        contract_config: None,
+        allow_assumptions: std::env::var_os("MIR_CHECK_ALLOW_ASSUMPTIONS").is_some(),
     };
     if checker.report_dir.is_some() {
         if args.len() > 1 {
@@ -255,7 +326,8 @@ fn main() -> ExitCode {
             || args.len() == 1
         {
             println!(
-                "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] -- \
+                "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] \
+                [--contracts FILE] [--allow-assumptions] -- \
                 <rustc arguments>\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail."
             );
@@ -275,6 +347,18 @@ fn main() -> ExitCode {
                     checker.summary = true;
                     args.remove(1);
                 }
+                Some("--allow-assumptions") => {
+                    checker.allow_assumptions = true;
+                    args.remove(1);
+                }
+                Some("--contracts") => {
+                    args.remove(1);
+                    if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
+                        eprintln!("mir-check: --contracts requires a JSON file");
+                        return ExitCode::FAILURE;
+                    }
+                    checker.contracts_path = Some(PathBuf::from(args.remove(1)));
+                }
                 Some("--entry") => {
                     args.remove(1);
                     if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
@@ -288,6 +372,15 @@ fn main() -> ExitCode {
         }
         if args.get(1).is_some_and(|arg| arg == "--") {
             args.remove(1);
+        }
+    }
+    if let Some(path) = &checker.contracts_path {
+        match ContractConfig::read(path) {
+            Ok(config) => checker.contract_config = Some(config),
+            Err(error) => {
+                eprintln!("mir-check: {error}");
+                return ExitCode::FAILURE;
+            }
         }
     }
     if !args

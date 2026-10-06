@@ -74,11 +74,13 @@ These counts describe analysis roots, not runtime test coverage or the safety of
 | Result | What it tells you |
 | --- | --- |
 | **PROVED** | Every feasible path completed and every obligation passed for the selected root domain |
+| **PROVED_WITH_ASSUMPTIONS** | The root passed using explicit user-trusted call summaries; acceptance requires --allow-assumptions |
 | **REFUTED** | The solver found a failing assignment for a translated obligation |
 | **UNKNOWN** | Unsupported behavior, a missing body or a limit prevented a complete proof |
 
-Only a run where every selected root proves succeeds. A solver assignment is not automatically
-a confirmed Rust failure; mutation and replay tests provide independent evidence for fixtures.
+Strict verification succeeds only when every selected root is PROVED. A solver assignment is not
+automatically a confirmed Rust failure; mutation and replay tests provide independent evidence
+for fixtures.
 
 ## Use it in a project
 
@@ -192,8 +194,15 @@ behavior, allocation failure, stack exhaustion, interrupt races or hardware timi
 
 See [the coverage matrix](docs/coverage.md) for evidence and limits, and
 [proof execution](docs/proofs.md) for how obligations are generated and what the result trusts.
-JSON schema version 7 includes per-root proofs and a per-crate coverage summary. Inventory sites
+JSON schema version 8 includes per-root proofs and a per-crate coverage summary. Inventory sites
 keep their separate unverified status even when a selected root proves their paths safe.
+
+Use `--contracts contracts.json` to attach checked preconditions and postconditions without adding
+a crate dependency or editing the analyzed code. The sidecar can also declare explicit trusted
+call boundaries with a reason, input bounds, return constraints and memory effects. Those calls
+produce PROVED_WITH_ASSUMPTIONS, recorded separately from ordinary proofs and rejected by default.
+See [external contracts](docs/contracts.md#contracts-without-a-source-dependency) for configuration
+and the acceptance policy. Dynamic formatting itself remains outside the supported body model.
 
 The [fleet workspace survey](docs/fleet-survey.md) checks unchanged shared crates, board support
 and robot firmware. It separates generated MIR roots from function declarations, records the
