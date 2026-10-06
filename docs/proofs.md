@@ -258,3 +258,13 @@ rejects it; --allow-assumptions explicitly accepts that conditional outcome. REF
 take precedence and still fail. A trusted function selected as a root executes its real body,
 so an assumed call boundary never becomes a body proof. Source annotations alone cannot opt
 into trust. See [contracts](contracts.md#explicitly-trusted-call-boundaries) for the policy.
+
+## Deferred float storage relations
+
+Each computed float receives a fresh stable encoding symbol. Copies and bit-preserving
+transformations retain that symbol or a derived bit expression. The equality between its numeric
+SMT value and the decoded encoding is included only when an obligation/path expression references
+the encoding. Query construction follows exact symbol dependencies transitively; unfamiliar
+lexical forms conservatively include all encoding equalities. This relies on every binary32/64
+numeric SMT value having an IEEE encoding, including the existing NaN overapproximation. Ordinary
+path constraints remain mandatory, and query limits apply after required relations are included.

@@ -679,3 +679,23 @@ for each possible element. Composite reads still require a uniquely determined i
 Original host/ARM regressions cover integer/Boolean tables, exact float payloads and copied
 aliases, structs, nested arrays, bounded slices and resource exhaustion. Wrong bounds and payload
 assertions refute; a changed table-spacing mutation refutes and fails under native execution.
+
+## Stage 37: defer unused float representation constraints
+
+Computed float values retain fresh stable raw-bit symbols. Their numeric/encoding equalities are
+stored within the root and included in a query only when its expressions reference those symbols.
+Exact token matching follows dependencies transitively, including bit-preserving transformations
+and roundtrips; uncertain lexical forms include every relation. Numeric expressions, ordinary path
+conditions, the NaN overapproximation and resource limits remain unchanged. Exported SMT scripts
+contain the required equalities and are independently runnable.
+
+Original host/ARM regressions cover array-based gauge encoding, arithmetic/return/transformation/
+selection roundtrips, transitive conversions and stable copied bits. An incorrect assertion
+refutes; float remainder stays unknown. Unit regressions distinguish exact variable tokens,
+unused declarations, cyclic dependencies and conservative lexical fallback. Native IEEE cases
+exercise signed zeros, subnormals, infinities and NaNs.
+
+On the development host, one warm-up plus three measured release runs of the original gauge
+fixture improved from a 4.887-second median UNKNOWN result to a 0.056-second median PROVED result.
+Other analysis processes were active; this is a small-case measurement rather than a general
+speed guarantee.

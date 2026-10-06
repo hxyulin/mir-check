@@ -259,3 +259,9 @@ Evaluated constants now allow up to 128 elements, with the same 256-value total 
 depth budgets. Symbolic compatible scalar selection needs a bounds proof, while constant indices
 select directly. Composite indices still require uniqueness. Host/ARM tests retain unknown results
 for oversized, ambiguous, uninitialized and interior-mutable cases.
+
+Deferred float encoding relations avoid translating unused storage observations into numeric-only
+queries. Exact symbol dependency closure includes the required relations for computed, returned,
+transformed and selected bit roundtrips. Wrong roundtrip assertions refute; native IEEE cases and
+copy-correlation regressions check the retained encodings. Arithmetic NaN payload overapproximation
+remains unchanged.

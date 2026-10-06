@@ -56,9 +56,76 @@ impl Query {
         query
     }
 
+    pub fn with_bindings(
+        declarations: &[String],
+        conditions: &[String],
+        failure: &str,
+        bindings: &std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        let mut pending: Vec<&str> = conditions
+            .iter()
+            .map(String::as_str)
+            .chain([failure])
+            .collect();
+        let mut included = std::collections::BTreeSet::new();
+        while let Some(expression) = pending.pop() {
+            let Some(symbols) = expression_symbols(expression) else {
+                let conditions: Vec<String> = conditions
+                    .iter()
+                    .chain(bindings.values())
+                    .cloned()
+                    .collect();
+                return Self::new(declarations, &conditions, failure);
+            };
+            for symbol in symbols {
+                if let Some(constraint) = bindings.get(symbol)
+                    && included.insert(symbol)
+                {
+                    pending.push(constraint);
+                }
+            }
+        }
+        let conditions: Vec<String> = conditions
+            .iter()
+            .cloned()
+            .chain(included.into_iter().map(|symbol| bindings[symbol].clone()))
+            .collect();
+        Self::new(declarations, &conditions, failure)
+    }
+
     pub fn text(&self) -> &str {
         &self.text
     }
+}
+
+fn expression_symbols(expression: &str) -> Option<Vec<&str>> {
+    let mut symbols = Vec::new();
+    let mut start = None;
+    let mut depth = 0_usize;
+    for (position, byte) in expression.bytes().enumerate() {
+        if !byte.is_ascii()
+            || (byte.is_ascii_control() && !matches!(byte, b'\t' | b'\r' | b'\n'))
+            || matches!(byte, b';' | b'"' | b'|' | b'\\')
+        {
+            return None;
+        }
+        if byte.is_ascii_whitespace() || matches!(byte, b'(' | b')') {
+            if let Some(start) = start.take() {
+                symbols.push(&expression[start..position]);
+            }
+            match byte {
+                b'(' => depth = depth.checked_add(1)?,
+                b')' => depth = depth.checked_sub(1)?,
+                _ => {}
+            }
+        } else {
+            start.get_or_insert(position);
+        }
+    }
+    if let Some(start) = start {
+        symbols.push(&expression[start..]);
+    }
+    (depth == 0).then_some(symbols)
 }
 
 fn prelude() -> &'static str {
@@ -671,5 +738,92 @@ mod incremental_tests {
         assert!(query.text().contains("(assert false)"));
         let query = Query::new(&[], &["p".into(), "(not p)".into()], "p");
         assert_eq!(query.assertions, ["p", "(not p)"]);
+    }
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn latent_encodings_follow_exact_symbol_dependencies_without_matching_prefixes() {
+        let declarations = [
+            "(declare-const v1 (_ BitVec 8))".to_owned(),
+            "(declare-const v2 (_ BitVec 8))".to_owned(),
+            "(declare-const v10 (_ BitVec 8))".to_owned(),
+        ];
+        let bindings = BTreeMap::from([
+            ("v1".to_owned(), "(= v1 (_ bv41 8))".to_owned()),
+            ("v2".to_owned(), "(= v2 (bvadd v1 (_ bv1 8)))".to_owned()),
+            ("v10".to_owned(), "(= v10 (_ bv77 8))".to_owned()),
+        ]);
+        let query = Query::with_bindings(&declarations, &[], "(distinct v2 (_ bv42 8))", &bindings);
+        assert!(
+            query
+                .assertions
+                .iter()
+                .any(|assertion| assertion == &bindings["v1"])
+        );
+        assert!(
+            query
+                .assertions
+                .iter()
+                .any(|assertion| assertion == &bindings["v2"])
+        );
+        assert!(
+            !query
+                .assertions
+                .iter()
+                .any(|assertion| assertion == &bindings["v10"])
+        );
+        let mut solver = Solver {
+            custom: false,
+            ..Solver::default()
+        };
+        assert!(matches!(solver.check_query(&query), Answer::Unsat));
+        let missing_definition = Query::new(&declarations, &[], "(distinct v2 (_ bv42 8))");
+        assert!(matches!(
+            solver.check_query(&missing_definition),
+            Answer::Sat(_)
+        ));
+        let query = Query::with_bindings(&declarations, &[], "(= v10 (_ bv77 8))", &bindings);
+        assert_eq!(query.assertions.len(), 1);
+        assert_eq!(query.assertions[0], bindings["v10"]);
+        let unused = Query::with_bindings(&declarations, &[], "true", &bindings);
+        assert!(unused.assertions.is_empty());
+    }
+
+    #[test]
+    fn latent_encoding_cycles_terminate_and_uncertain_lexing_includes_every_definition() {
+        let bindings = BTreeMap::from([
+            ("v1".to_owned(), "(= v1 v2)".to_owned()),
+            ("v2".to_owned(), "(= v2 v1)".to_owned()),
+        ]);
+        let query = Query::with_bindings(&[], &[], "v1", &bindings);
+        assert_eq!(query.assertions.len(), 3);
+        for expression in [
+            "(= |v1| v1)",
+            "(= \"v1\" \"v2\")",
+            "true ; v1",
+            "(= v1 v2",
+            "(= v1 v2))",
+            "(= v1 \\v2)",
+            "(= v1 café)",
+            "true\u{0000}",
+            "true\u{000b}",
+            "true\u{000c}",
+            "true\u{007f}",
+        ] {
+            let query = Query::with_bindings(&[], &[], expression, &bindings);
+            for binding in bindings.values() {
+                assert!(
+                    query
+                        .assertions
+                        .iter()
+                        .any(|assertion| assertion == binding)
+                );
+            }
+        }
     }
 }

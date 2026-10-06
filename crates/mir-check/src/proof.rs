@@ -48,6 +48,7 @@ struct Return {
 struct Engine<'tcx> {
     tcx: TyCtxt<'tcx>,
     declarations: Vec<String>,
+    float_encodings: BTreeMap<String, String>,
     steps: usize,
     input_depth: usize,
     input_values: usize,
@@ -65,6 +66,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) ->
     let mut engine = Engine {
         tcx,
         declarations: Vec::new(),
+        float_encodings: BTreeMap::new(),
         steps: 0,
         input_depth: 0,
         input_values: 0,
@@ -412,7 +414,12 @@ impl<'tcx> Engine<'tcx> {
         if self.started.elapsed().as_secs() >= MAX_ROOT_SECONDS {
             return Err("symbolic root exceeded the 30-second execution budget".to_owned());
         }
-        let query = Query::new(&self.declarations, conditions, failure);
+        let query = Query::with_bindings(
+            &self.declarations,
+            conditions,
+            failure,
+            &self.float_encodings,
+        );
         if query.text().len() > MAX_QUERY_BYTES {
             return Err("symbolic query size limit reached".to_owned());
         }
@@ -1207,7 +1214,7 @@ impl<'tcx> Engine<'tcx> {
                     other => return Err(format!("unsupported binary operation {other:?}")),
                 };
                 let value = symbolic::binary(operation, left, right)?;
-                Ok(self.materialize_float(value, state))
+                Ok(self.materialize_float(value))
             }
             Rvalue::UnaryOp(operation, operand) => {
                 let value = self.operand(id, body, state, operand)?;
@@ -1268,7 +1275,7 @@ impl<'tcx> Engine<'tcx> {
                     self.float_type(*target)
                         .ok_or("unsupported float cast target")?,
                 )?;
-                Ok(self.materialize_float(value, state))
+                Ok(self.materialize_float(value))
             }
             Rvalue::Cast(CastKind::Transmute, operand, target) => {
                 let source = operand.ty(&body.local_decls, self.tcx);

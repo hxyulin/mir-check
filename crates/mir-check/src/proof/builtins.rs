@@ -25,7 +25,7 @@ impl<'tcx> Engine<'tcx> {
                     if element.is_str() && !mutability.is_mut()))
     }
 
-    pub(super) fn materialize_float(&mut self, value: Value, state: &mut State) -> Value {
+    pub(super) fn materialize_float(&mut self, value: Value) -> Value {
         let Value::Float {
             expression,
             bits,
@@ -44,7 +44,8 @@ impl<'tcx> Engine<'tcx> {
         };
         // SMT represents all NaN encodings as one value. This equality allows every
         // NaN payload/sign while fixing the exact encoding of other IEEE values.
-        state.conditions.push(format!("(= {decoded} {expression})"));
+        self.float_encodings
+            .insert(raw_bits.clone(), format!("(= {decoded} {expression})"));
         Value::Float {
             expression,
             bits,
@@ -207,7 +208,7 @@ impl<'tcx> Engine<'tcx> {
                 bits: *bits,
                 raw_bits: None,
             };
-            return Ok(Some(self.materialize_float(result, state)));
+            return Ok(Some(self.materialize_float(result)));
         }
         let parent = self.tcx.parent(callee);
         let trait_id = if self.tcx.def_kind(parent) == DefKind::Trait {
