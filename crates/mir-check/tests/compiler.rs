@@ -810,7 +810,6 @@ fn proofs_use_the_target_width_and_record_the_actual_overflow_configuration() {
 fn unknown_memory_and_dispatch_boundaries_fail_verification() {
     for name in [
         "unwrap_option",
-        "clamp",
         "dynamic",
         "generic",
         "indirect",
@@ -2248,6 +2247,165 @@ fn floating_paths_preserve_nan_zero_rounding_saturation_and_call_bounds_on_host_
     assert_eq!(f64::NEG_INFINITY as i32, i32::MIN);
     assert_eq!((16_777_217_u32 as f32) as u32, 16_777_216);
     assert_eq!(f32::MAX as u128, u128::MAX - ((1_u128 << 104) - 1));
+}
+
+#[test]
+fn population_counts_are_exact_for_signed_and_target_width_integers_on_host_and_arm() {
+    let entries = [
+        ("byte", ProofStatus::Proved),
+        ("widths", ProofStatus::Proved),
+        ("signed", ProofStatus::Proved),
+        ("masked", ProofStatus::Proved),
+        ("bad_bound", ProofStatus::Refuted),
+        ("bad_signed", ProofStatus::Refuted),
+        ("user_method", ProofStatus::Refuted),
+        ("unsupported", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("population_count.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+            if expected == ProofStatus::Proved {
+                assert!(
+                    proof
+                        .models
+                        .iter()
+                        .any(|model| model.contains("exact integer population"))
+                );
+            }
+            if name == "user_method" {
+                assert!(
+                    !proof
+                        .models
+                        .iter()
+                        .any(|model| model.contains("population count"))
+                );
+            }
+        }
+    }
+    for value in 0_u8..=u8::MAX {
+        let expected: u32 = (0..8).map(|bit| u32::from((value >> bit) & 1)).sum();
+        assert_eq!(value.count_ones(), expected);
+        assert_eq!((value as i8).count_ones(), expected);
+        assert_eq!(value.count_zeros(), 8 - expected);
+    }
+}
+
+#[test]
+fn float_clamp_checks_bounds_and_preserves_nan_and_zero_on_host_and_arm() {
+    let entries = [
+        ("guarded", ProofStatus::Proved),
+        ("guarded_double", ProofStatus::Proved),
+        ("special_values", ProofStatus::Proved),
+        ("unchecked", ProofStatus::Refuted),
+        ("reversed", ProofStatus::Refuted),
+        ("nan_min", ProofStatus::Refuted),
+        ("nan_max", ProofStatus::Refuted),
+        ("bad_nan", ProofStatus::Refuted),
+        ("bad_zero", ProofStatus::Refuted),
+        ("user_method", ProofStatus::Refuted),
+        ("unsupported", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("float_clamp.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+            if name == "user_method" {
+                assert!(
+                    !proof
+                        .models
+                        .iter()
+                        .any(|model| model.contains("floating-point clamp"))
+                );
+            } else {
+                assert!(
+                    proof
+                        .models
+                        .iter()
+                        .any(|model| model.contains("checked ordered bounds"))
+                );
+            }
+        }
+    }
+    assert!(f32::NAN.clamp(-1.0, 1.0).is_nan());
+    assert_eq!((-0.0_f32).clamp(0.0, 0.0).to_bits(), (-0.0_f32).to_bits());
+    assert_eq!(0.0_f64.clamp(-0.0, -0.0).to_bits(), 0.0_f64.to_bits());
+    assert_eq!(f64::INFINITY.clamp(-1.0, 1.0), 1.0);
+}
+
+#[test]
+fn changed_population_bounds_and_reversed_clamp_guards_are_rejected() {
+    let directory = Directory::new();
+    for (file, entry, before, after) in [
+        (
+            "population_count.rs",
+            "masked",
+            "active <= 3",
+            "active <= 2",
+        ),
+        ("float_clamp.rs", "guarded", "min <= max", "min >= max"),
+    ] {
+        let source = std::fs::read_to_string(fixture(file)).unwrap();
+        assert!(source.contains(before));
+        let path = directory.0.join(file);
+        std::fs::write(&path, source.replace(before, after)).unwrap();
+        let (output, report) = verify_vendored(&path, &[entry], &[]);
+        assert!(!output.status.success());
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            ProofStatus::Refuted,
+            "{file}: {:?}",
+            proof.obligations
+        );
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .any(|obligation| obligation.model.is_some())
+        );
+    }
 }
 
 #[test]

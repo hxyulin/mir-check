@@ -42,8 +42,9 @@ unfinished paths never become a passing result. Concrete generics, static trait 
 function items and read-only closures resolve to instantiated MIR bodies. Available dependency MIR
 is interpreted; unavailable bodies and unsupported shims remain unknown. Explicit core models cover
 slice lengths/ranges, lossless integer conversion, integer endian decoding, shared
-byte-slice-to-array conversion, fixed-array map, owned byte-array copies, floating-point absolute
-value/min/max and static formatting arguments. Array map executes actual callable bodies in order.
+byte-slice-to-array conversion, fixed-array map, owned byte-array copies, exact integer population
+counts, floating-point absolute value/min/max/clamp and static formatting arguments. Array map
+executes actual callable bodies in order.
 Reports list interpreted bodies and trusted models separately. MIR assume becomes a checked validity
 obligation. Typed allocations support one mutable root receiver, projected writes, reborrows and
 call state
@@ -154,3 +155,8 @@ construction/coroutine execution remains unsupported, and compiler invocations t
 analysis cannot succeed as verification runs.
 Reused Cargo diagnostic flags are replaced with human output and the chosen color policy;
 analysis flags are preserved and the actual invocation is recorded in the new report.
+
+Population count expands the compiler ctpop intrinsic into an exact bit-vector sum with a u32
+result. Primitive core float clamp checks ordered, non-NaN bounds as a panic obligation before
+selecting its result; NaN inputs and signed-zero ties follow the pinned implementation. Host/ARM
+regressions reject bad bounds, same-named user methods and mutated guards/count limits.

@@ -40,6 +40,35 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
+        if self.tcx.is_intrinsic(callee, Symbol::intern("ctpop"))
+            && signature.inputs().len() == 1
+            && self.integer_type(signature.inputs()[0]).is_some()
+            && signature.output() == self.tcx.types.u32
+        {
+            let [value] = values else {
+                return Err("population count requires one modeled integer".to_owned());
+            };
+            let (expression, bits, _) = value.integer()?;
+            let mut terms: Vec<_> = (0..bits)
+                .map(|bit| format!("((_ zero_extend 31) ((_ extract {bit} {bit}) {expression}))"))
+                .collect();
+            while terms.len() > 1 {
+                terms = terms
+                    .chunks(2)
+                    .map(|pair| match pair {
+                        [left, right] => format!("(bvadd {left} {right})"),
+                        [only] => only.clone(),
+                        _ => unreachable!("pairs have one or two elements"),
+                    })
+                    .collect();
+            }
+            self.record_model(callee, "exact integer population count");
+            return Ok(Some(Value::Int {
+                expression: terms.pop().ok_or("empty population count operand")?,
+                bits: 32,
+                signed: false,
+            }));
+        }
         if signature.inputs().len() == 1
             && signature.inputs()[0] == signature.output()
             && self.float_type(signature.output()).is_some()
@@ -110,6 +139,58 @@ impl<'tcx> Engine<'tcx> {
             None
         };
         let name = self.tcx.item_name(callee);
+        if self.tcx.crate_name(callee.krate) == Symbol::intern("core")
+            && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+            && self
+                .float_type(
+                    self.tcx
+                        .type_of(parent)
+                        .instantiate(self.tcx, args)
+                        .skip_norm_wip(),
+                )
+                .is_some()
+            && name == Symbol::intern("clamp")
+            && signature.inputs().len() == 3
+            && signature
+                .inputs()
+                .iter()
+                .all(|ty| *ty == signature.output())
+            && self.float_type(signature.output()).is_some()
+        {
+            let [
+                Value::Float { expression, bits },
+                Value::Float {
+                    expression: min, ..
+                },
+                Value::Float {
+                    expression: max, ..
+                },
+            ] = values
+            else {
+                return Err("float clamp requires three modeled floats".to_owned());
+            };
+            let safe = format!("(fp.leq {min} {max})");
+            self.record_model(
+                callee,
+                "IEEE floating-point clamp with checked ordered bounds",
+            );
+            self.require(
+                caller,
+                span,
+                &state.conditions,
+                &safe,
+                ObligationKind::PanicSafety,
+                "float clamp bounds must be ordered and neither bound may be NaN".to_owned(),
+            )?;
+            state.conditions.push(safe);
+            return Ok(Some(Value::Float {
+                expression: format!(
+                    "(ite (fp.lt {expression} {min}) {min} \
+                     (ite (fp.gt {expression} {max}) {max} {expression}))"
+                ),
+                bits: *bits,
+            }));
+        }
         if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
             && matches!(
                 self.tcx.type_of(parent).instantiate(self.tcx, args).skip_norm_wip().kind(),

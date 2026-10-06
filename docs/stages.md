@@ -408,3 +408,16 @@ and reject the previously passing main despite loading its saved report. Legacy 
 invalid invocations and missing main selectors are covered. Main-related MIR hints help users
 select expanded macro names. A coroutine construction case stays unknown; no async execution
 semantics were added. There are 70 compiler integration tests and one metadata test.
+
+## Stage 22: integer population counts and checked float clamp
+
+The compiler-identified ctpop model counts every input bit, returns u32 and covers signed,
+unsigned and target-width integers. Primitive core f32/f64 clamp has an explicit panic obligation
+for ordered, non-NaN bounds, then preserves NaN inputs and signed-zero ties. Compiler identity and
+normalized signatures distinguish these models from same-named user functions.
+
+Host/ARM tests prove byte count/complement relationships, masks, integer-width bounds, guarded
+float ranges and special values. Invalid bounds and incorrect assertions refute. Mutating a mask
+bound or reversing a passing clamp guard also refutes with a counterexample. Unsupported pointer
+inputs and raw float bit observations remain unknown. There are 73 compiler integration tests and
+one metadata test.

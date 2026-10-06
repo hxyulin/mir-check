@@ -8,8 +8,8 @@ completed a soundness audit. Every result is tied to its compiler, target, flags
 
 | Feature | Current support | Boundary |
 | --- | --- | --- |
-| Integers and bool | Symbolic target-width values, signed comparisons and exact bit-vector operations | Char and raw pointers are unsupported inputs |
-| Floating point | f32/f64 inputs/constants, IEEE arithmetic/comparisons, abs/min/max and integer/float casts | Remainder, raw bits and wider float formats are unsupported |
+| Integers and bool | Symbolic target-width values, signed comparisons, exact bit-vector operations and population counts | Char and raw pointers are unsupported inputs |
+| Floating point | f32/f64 inputs/constants, IEEE arithmetic/comparisons, abs/min/max/clamp and integer/float casts | Remainder, raw bits and wider float formats are unsupported |
 | Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | One mutable byte-slice root supports guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
@@ -117,3 +117,16 @@ and unsupported reference returns. Trusted summaries remain explicit assumptions
 ordinary proof counts; they expand caller analysis without establishing the skipped body's safety.
 An external checked postcondition also proves final_state.integral == 0.0 for the unchanged fleet
 controller::Pid::reset through ARM Cargo verification, without adding a firmware dependency.
+
+## Population counts and floating-point clamp
+
+The compiler-identified ctpop intrinsic counts individual bits exactly and returns u32, including
+for signed operands and target-width usize/isize. The model does not recognize user methods by
+name. Host/ARM tests prove width bounds, masked counts and byte count/complement relationships;
+wrong bounds and a tightened mask bound refute. Unsupported pointer inputs remain UNKNOWN.
+
+Primitive core f32/f64 clamp checks min <= max before producing a value. Reversed bounds and NaN
+bounds refute; a NaN input remains NaN and equality preserves the input's signed zero. Tests cover
+symbolic ordered bounds, infinities, signed-zero observations and a reversed-guard mutation.
+Raw float bit observation remains UNKNOWN. These models follow the pinned compiler's core
+intrinsic declaration and primitive clamp implementation; they do not trust application summaries.
