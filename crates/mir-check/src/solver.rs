@@ -184,6 +184,24 @@ impl Default for Solver {
 }
 
 impl Solver {
+    /// HORN satisfiability means the safety clauses have an inductive model.
+    /// It has the opposite interpretation to a SAT counterexample query.
+    pub fn inductive_model(&mut self, query: &str) -> Result<String, String> {
+        if query.len() > MAX_QUERY_BYTES {
+            return Err("Horn query size limit reached".into());
+        }
+        self.context = None;
+        let output = self.request(&format!("(reset)\n{query}"))?;
+        match output.trim() {
+            "sat" => validate_model(self.request("(get-model)\n")?),
+            "unsat" => Err("Spacer found reachable failure; no replayed counterexample yet".into()),
+            output => {
+                self.session = None;
+                Err(format!("Spacer did not establish an invariant: {output}"))
+            }
+        }
+    }
+
     pub fn feasible_query(&mut self, query: &Query) -> Result<bool, String> {
         self.feasible_inner(query.text(), Some(query))
     }
@@ -534,6 +552,35 @@ mod tests {
             "(set-logic ALL)\n(set-option :timeout 5000)\n\
              (declare-fun v0 () (_ BitVec 8))\n(assert {assertion})\n(check-sat)\n"
         )
+    }
+
+    #[test]
+    fn horn_safety_models_have_the_opposite_polarity_to_counterexample_queries() {
+        let mut solver = persistent();
+        let safe = "(set-logic HORN)\n(set-option :fp.engine spacer)\n\
+            (declare-fun reach ((_ BitVec 8)) Bool)\n\
+            (assert (reach (_ bv0 8)))\n\
+            (assert (forall ((x (_ BitVec 8))) (=> (reach x) (reach (bvand x (_ bv7 8))))))\n\
+            (assert (forall ((x (_ BitVec 8))) (=> (and (reach x) (bvugt x (_ bv7 8))) false)))\n\
+            (check-sat)\n";
+        assert!(solver.inductive_model(safe).unwrap().contains("reach"));
+        let bad = safe.replace("(reach (_ bv0 8))", "(reach (_ bv8 8))");
+        assert!(
+            solver
+                .inductive_model(&bad)
+                .unwrap_err()
+                .contains("reachable failure")
+        );
+        assert!(matches!(
+            solver.check(&query("(distinct v0 v0)")),
+            Answer::Unsat
+        ));
+        assert!(solver.feasible(&query("(= v0 (_ bv93 8))")).unwrap());
+        assert!(
+            solver
+                .inductive_model("(set-logic HORN)\n(assert wrong)\n(check-sat)\n")
+                .is_err()
+        );
     }
 
     #[test]

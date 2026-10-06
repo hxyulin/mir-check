@@ -14,7 +14,8 @@ including scoped post-state references. Strings remain appropriate for source se
 diagnostics and the separately generated SMT protocol.
 
 A typed, interned term DAG carries symbolic values, path conditions and encoding constraints. Its
-nodes carry explicit sorts and operator enums; construction checks arity, widths and analysis-context identity before folding.
+nodes carry explicit sorts and operator enums; construction checks arity, widths and
+analysis-context identity before folding.
 The printer introduces scoped lets when sharing saves bytes and enforces an output byte budget.
 Closed Boolean and at-most-128-bit integer operations fold structurally; larger widened arithmetic
 and floating-point operations retain exact solver terms. Numeric fp.eq is kept distinct from SMT
@@ -107,6 +108,44 @@ returns unknown. Infinite loops and larger finite loops can therefore remain unk
 do not panic. Calls, including recursion, can use at most 16 active frames. Finite recursion can
 complete within those bounds; an unfinished recursive path returns unknown.
 
+The opt-in `--induction` mode translates cyclic root bodies into constrained Horn clauses for
+Z3's Spacer engine. Each reachable MIR block has a relation over the function's modeled locals.
+The entry clause contains the actual initialized arguments and checked entry preconditions;
+other locals start unconstrained. Assignments, branches and backedges become transition clauses.
+Assertions, panic calls and byte-array bounds failures become clauses excluding those paths.
+Storage markers do not restrict values: safe Rust assigns locals before reading them, and dead
+scalar values remain unconstrained in the entry state.
+
+A satisfiable HORN system supplies an inductive model containing all initial states, closed under
+every encoded transition and excluding every encoded failure. This proves panic freedom for any
+number of iterations; it does not prove termination. Its SAT polarity is the opposite of an
+ordinary counterexample query. The checker requests the model only after SAT, retains it in the
+raw report's `invariants` array, and keeps counterexample `models` separate. Malformed models or
+solver output, UNSAT and timeouts remain UNKNOWN. An UNSAT system does not yet produce a replayed
+Rust counterexample, so it is not labeled REFUTED.
+
+This first integration supports integer/Boolean locals, tuples, fixed byte arrays up to 128 bytes,
+checked arithmetic, integer casts, branches, direct byte indexing/writes and loop exits. Scalar
+MIR statements use the existing typed term operations; byte indexing has an explicit Horn safety
+clause before a successful access. The translation is limited to 256 blocks and 512 scalar/array
+state parameters. The 200,000-byte script limit and five-second Z3/six-second host request limits
+still apply. There is no iteration limit inside an inductive proof.
+
+Only selected root bodies receive this encoding. Ordinary calls, recursion, references, interior
+mutation, coroutines, float/enum state and function postconditions still need inductive models;
+a cyclic root containing one returns UNKNOWN rather than silently omitting it. Entry requires
+are restricted input domains, as in ordinary proof mode; ensures are rejected in induction mode.
+Acyclic roots retain ordinary interpretation. Without `--induction`, all roots retain the existing
+bounded interpreter. The Cargo command forwards the option explicitly and clears an inherited
+induction setting when the option is absent.
+
+The original unbounded-loops fixture includes a wrapping counter, tuple state, a register parser
+with persistent byte history, and a loop with an exit. Positive cases prove on host and ARM
+`no_std`. Changed masks/cursors and a panic after 12,000 iterations never pass; native tests replay
+the mutated panics. A plain binary `main` also proves. The parser's packet is a fixed arbitrary root
+input, not a hardware read renewed each iteration. Actual async/executor firmware needs coroutine
+storage, call effects and shared/hardware state modeled before a whole-main proof is possible.
+
 Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a six-second host
 deadline per solver request. Reaching these limits is a verification failure. A root lazily starts
 one Z3 process. Structured queries retain common assertion prefixes, pop the old branch suffix and
@@ -185,8 +224,9 @@ machinery, destructors and several MIR operations/constants, including some cons
 Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work for integers,
 floats and booleans; enum/struct elements need a uniquely determined index. Array/slice patterns
 prove their minimum length and index bounds before applying constant start/end offsets. Generic
-roots with unresolved type parameters remain unsupported. There are no inductive loop invariants,
-automatic type invariants, dedicated termination checks or verified general effects.
+roots with unresolved type parameters remain unsupported. Experimental loop induction supports
+scalar/tuple state and fixed byte arrays. Automatic type invariants, dedicated termination checks
+and verified general effects remain unsupported.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
 propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and

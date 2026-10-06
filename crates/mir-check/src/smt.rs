@@ -1,6 +1,7 @@
 //! Typed, interned solver terms. SMT-LIB is emitted only by the printer.
 
 mod fold;
+pub mod horn;
 mod printer;
 
 use std::cell::RefCell;

@@ -845,7 +845,30 @@ declarations, assertion wrappers and the prelude. Reports retain standalone text
 subprocess, assumptions policy and analysis limits remain unchanged.
 
 The operator differential suite covers 57 encodings. Host/ARM byte, float and integer fixtures
-retain their outcomes with smaller queries. An original repeated-signal fixture proves a 20-step wrapping
-calculation that previously hit the query-size cap; a changed scale refutes and an unresolved
-callback remains UNKNOWN. Native replay covers integer boundaries and the changed assertion.
-This changes representation and sharing, not language coverage, type invariants or loop induction.
+retain their outcomes with smaller queries. An original repeated-signal fixture proves a 20-step
+wrapping calculation that previously hit the query-size cap; a changed scale refutes and an
+unresolved callback remains UNKNOWN. Native replay covers integer boundaries and the changed
+assertion. This changes representation and sharing, not language coverage, type invariants or
+loop induction.
+
+
+## Stage 50: experimental induction over real MIR loops
+
+The opt-in induction mode translates cyclic root bodies to constrained Horn clauses through a typed,
+budgeted printer. Each MIR block has a state relation. Entry arguments and preconditions initialize
+reachability; assignments, branches, assertions, byte-array bounds and backedges become transition
+or safety clauses. Z3 Spacer supplies an inductive model only if all encoded reachable paths remain
+panic-free. There is no iteration bound in these proofs and no claim of termination.
+
+Integer/Boolean state, tuples, fixed byte arrays, persistent local byte writes and loop exits are
+covered. Ordinary calls, recursion, references, coroutines, floats, enum state and function
+postconditions still return UNKNOWN in cyclic roots. Unsupported code is never dropped from the
+translation. Acyclic/default verification retains the existing interpreter. Cargo explicitly
+forwards the mode and clears inherited settings. Raw reports retain models in a backward-compatible
+invariants field separate from counterexamples.
+
+Host/ARM compiler cases prove endless counters, tuple state, a register parser/history loop and
+an exiting loop. A plain host main proves too. Mask/cursor mutations and a late panic never pass;
+native tests replay the failures. Typed Horn tests check SAT/UNSAT polarity, malformed types,
+foreign contexts, arity and exact output budgets. Solver tests check mode changes and reject errors.
+Inductive UNSAT/timeouts remain UNKNOWN until a real Rust counterexample can be reconstructed.

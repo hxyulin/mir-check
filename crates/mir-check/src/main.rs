@@ -48,6 +48,7 @@ struct Checker {
     contract_config: Option<ContractConfig>,
     allow_assumptions: bool,
     all_failures: bool,
+    induction: bool,
 }
 
 impl Callbacks for Checker {
@@ -171,6 +172,7 @@ impl Callbacks for Checker {
                             id.to_def_id(),
                             &config,
                             self.all_failures,
+                            self.induction,
                         ));
                         completed += 1;
                         if function.proof.as_ref().is_some_and(|proof| {
@@ -403,6 +405,7 @@ fn main() -> ExitCode {
         contract_config: None,
         allow_assumptions: std::env::var_os("MIR_CHECK_ALLOW_ASSUMPTIONS").is_some(),
         all_failures: std::env::var_os("MIR_CHECK_ALL_FAILURES").is_some(),
+        induction: std::env::var_os("MIR_CHECK_INDUCTION").is_some(),
     };
     let mut from_report = None;
     if checker.report_dir.is_some() {
@@ -417,13 +420,15 @@ fn main() -> ExitCode {
         {
             println!(
                 "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] \
-                [--contracts FILE] [--allow-assumptions] [--all-failures] [--verbose] [--quiet] \
+                [--contracts FILE] [--allow-assumptions] [--all-failures] [--induction] \
+                [--verbose] [--quiet] \
                 [--color auto|always|never] [--jsonl FILE|-] -- \
                 <rustc arguments>\n\
                 Or: mir-check --verify --from-report FILE [--entry FUNCTION] [display options]\n\
                 Without --entry, --verify checks every inventoried MIR body in the crate.\n\
                 --from-report recompiles with saved arguments; it does not reuse saved proofs.\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
+                --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
                 Refuted roots stop at their first counterexample; --all-failures continues them.\n\
                 mir-check report <file or directory> reads saved JSON/JSONL reports."
             );
@@ -437,6 +442,10 @@ fn main() -> ExitCode {
                 }
                 Some("--verify") => {
                     checker.verify = true;
+                    args.remove(1);
+                }
+                Some("--induction") => {
+                    checker.induction = true;
                     args.remove(1);
                 }
                 Some("--all-failures") => {

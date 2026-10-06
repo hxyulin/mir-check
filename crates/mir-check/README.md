@@ -205,7 +205,7 @@ updates
 typed iterator storage; adapters such as enumerate, copied and rev execute their actual MIR.
 Predicate callbacks execute actual bodies in order, preserve memory effects and stop immediately
 at the deciding element. Symbolic byte slices work when paths finish within the execution budget;
-unbounded loops, unsupported iterator views and raw pointer operations remain unknown.
+unbounded iterator loops, unsupported iterator views and raw pointer operations remain unknown.
 Compiler layouts supply constant tags for single-variant enum representations, including the
 uninhabited residual optimized by core's question-mark implementation.
 
@@ -329,3 +329,24 @@ and explicit argument aliases retain validation, while callee snapshots still ch
 Compiler-identified scalar static-value hints use independent Boolean choices per call, following
 the intrinsic's formal contract. Both branches are explored. Pointer hints and unsupported
 transmute layouts remain UNKNOWN, with diagnostics naming their source and destination types.
+
+
+Experimental `--induction` translates cyclic root MIR into typed Horn clauses for Z3 Spacer.
+Integer/Boolean locals, tuples and fixed byte arrays have per-block state relations; initialization,
+branches, assignments and backedges establish inductive panic freedom for any number of iterations.
+Byte-array bounds are explicit safety clauses, including writes to persistent local arrays. Loop
+exits are checked too. Acyclic roots still use ordinary interpretation.
+
+Inductive SAT is a safety model, not a counterexample. Raw JSON/JSONL reports retain those models
+in the additive `invariants` field; old reports without it deserialize. UNSAT, malformed output and
+solver timeouts remain UNKNOWN pending counterexample replay. Source assertions retain their actual
+MIR meaning. Contracts do not inject runtime code; requires restrict the initial domain and ensures
+remain unsupported in cyclic induction roots. Ordinary calls, recursion, references, enums, floats,
+interior mutable storage and coroutines also remain UNKNOWN in this mode.
+
+The encoding has 256-block, 512-state-parameter and 200,000-byte script limits, with five-second Z3
+and six-second host request deadlines. It proves panic freedom, not termination. Host/ARM original
+fixtures include endless scalar/tuple loops, a register parser with byte history, exits and mutated
+masks/cursors; native replay exposes mutated panics beyond the old execution budget. A host binary
+main is also covered. The Cargo frontend forwards the option without inheriting a previous run's
+setting. The default bounded interpreter and its budgets remain unchanged.

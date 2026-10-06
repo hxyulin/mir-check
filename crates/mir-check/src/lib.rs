@@ -152,6 +152,8 @@ pub struct Proof {
     pub assumptions: Vec<String>,
     pub inputs: std::collections::BTreeMap<String, String>,
     pub models: Vec<String>,
+    #[serde(default)]
+    pub invariants: Vec<String>,
     pub analyzed_bodies: Vec<String>,
     pub obligations: Vec<Obligation>,
     #[serde(default)]

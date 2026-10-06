@@ -191,7 +191,7 @@ containing a shared byte slice.
 | Interior mutation | Scalar Cell aliases/calls and conservative integer atomic counters with checked orderings |
 | Mutable storage | One mutable root receiver, projected writes, reborrows, tracked aggregate references and call effects |
 | Calls | Concrete generics, static traits, available dependency MIR, function items, tracked mutable captures and noncapturing evaluated closure constants |
-| Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |
+| Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation completely unrolled finite loops and opt-in scalar/byte-array induction |
 | Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map/from_fn, float abs/min/max/clamp and static formatting arguments |
 | Iteration | Shared/mutable slices and owned arrays; checked predicates, ordered folds and supported Zip/Flatten bodies |
 | Contracts | Caller bounds, entry preconditions and postconditions on actual returns |
@@ -237,6 +237,19 @@ The default execution limits are 8,192 steps and 16 active call frames per root.
 can complete within those limits; unfinished paths remain UNKNOWN. Each root retains a 30-second
 budget and a 200,000-byte query limit. Incremental solver scopes, exact constant folding and a
 root-local instantiated MIR cache reduce repeated work without assuming function summaries.
+
+Experimental `--induction` uses Z3 Spacer to prove supported cyclic root bodies without unrolling
+an iteration bound. It supports integer/Boolean state, tuples and fixed byte arrays; calls,
+references, coroutines and function postconditions remain UNKNOWN in this mode. Raw reports retain
+inferred models separately in `invariants`. A positive Horn result proves panic freedom rather
+than termination. Solver failures and detected Horn failures remain UNKNOWN until counterexample
+replay is available. See [loop proof details](docs/proofs.md#loops-and-limits).
+
+```sh
+target/release/mir-check --verify --induction --entry sampled_registers -- \
+  --crate-type=lib --edition=2024 tests/fixtures/unbounded_loops.rs \
+  --target thumbv7em-none-eabihf -Cpanic=abort -Coverflow-checks=yes
+```
 
 See [the coverage matrix](docs/coverage.md) for evidence and limits, and
 [proof execution](docs/proofs.md) for how obligations are generated and what the result trusts.

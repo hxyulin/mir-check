@@ -29,13 +29,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
-            [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] [--all-failures] \
+            [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] \
+            [--all-failures] [--induction] \
             [--verbose] [--color auto|always|never] [--quiet] [--jsonl FILE|-] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
             Repeat --entry to select exact or crate-qualified roots; missing roots fail.\n\
             Dependency MIR is retained by default; --no-dependency-mir disables retention.\n\
             Without --entry, --verify requires all local bodies to pass.\n\
+            --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
             Refuted roots stop at their first counterexample; --all-failures continues them.\n\
             Default output is compact; --verbose shows the full inventory and obligations.\n\
             cargo mir-check report <file or directory> reads saved JSON/JSONL reports."
@@ -52,6 +54,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut contracts_path = None;
     let mut allow_assumptions = false;
     let mut all_failures = false;
+    let mut induction = false;
     let mut cargo_args = Vec::new();
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -80,6 +83,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Some("--no-dependency-mir") => dependency_mir = false,
             Some("--allow-assumptions") => allow_assumptions = true,
             Some("--all-failures") => all_failures = true,
+            Some("--induction") => induction = true,
             Some("--contracts") => {
                 let path = args.next().ok_or("--contracts requires a JSON file")?;
                 contracts_path = Some(std::fs::canonicalize(PathBuf::from(path))?);
@@ -143,7 +147,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     command
         .env_remove("MIR_CHECK_CONTRACTS")
         .env_remove("MIR_CHECK_ALLOW_ASSUMPTIONS")
-        .env_remove("MIR_CHECK_ALL_FAILURES");
+        .env_remove("MIR_CHECK_ALL_FAILURES")
+        .env_remove("MIR_CHECK_INDUCTION");
+    if induction {
+        command.env("MIR_CHECK_INDUCTION", "1");
+    }
     if all_failures {
         command.env("MIR_CHECK_ALL_FAILURES", "1");
     }

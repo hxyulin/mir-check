@@ -24,6 +24,7 @@ mod aggregates;
 mod builtins;
 mod constants;
 mod external;
+mod induction;
 mod inputs;
 mod integer_intrinsics;
 mod interior;
@@ -59,6 +60,7 @@ struct Engine<'tcx> {
     proof: Proof,
     config: mir_check::ContractConfig,
     all_failures: bool,
+    induction: bool,
     resolved_contracts: BTreeMap<String, DefId>,
     solver: std::cell::RefCell<Solver>,
     bodies:
@@ -70,6 +72,7 @@ pub fn verify(
     id: DefId,
     config: &mir_check::ContractConfig,
     all_failures: bool,
+    induction: bool,
 ) -> Proof {
     let mut engine = Engine {
         tcx,
@@ -83,6 +86,7 @@ pub fn verify(
         started: std::time::Instant::now(),
         config: config.clone(),
         all_failures,
+        induction,
         resolved_contracts: BTreeMap::new(),
         solver: std::cell::RefCell::new(Solver::default()),
         bodies: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -91,6 +95,7 @@ pub fn verify(
             assumptions: Vec::new(),
             inputs: BTreeMap::new(),
             models: Vec::new(),
+            invariants: Vec::new(),
             analyzed_bodies: Vec::new(),
             obligations: Vec::new(),
             trusted_calls: Vec::new(),
@@ -189,6 +194,9 @@ impl<'tcx> Engine<'tcx> {
             return Err(
                 "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
             );
+        }
+        if self.induction && self.has_cycle(body) {
+            return self.inductive_root(instance, arguments, conditions, memory);
         }
         self.execute(instance, arguments, conditions, memory, &[])?;
         Ok(())
