@@ -325,7 +325,9 @@ impl<'tcx> Engine<'tcx> {
         {
             let (callable, has_environment) = match signature.inputs()[1].kind() {
                 ty::Closure(id, args) => (ty::Instance::new_raw(*id, args), true),
-                ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
+                ty::FnDef(id, args) => {
+                    (self.resolve_function_item(*id, args.skip_binder())?, false)
+                }
                 _ => return Ok(None),
             };
             let [array, closure] = raw_values else {
@@ -452,7 +454,7 @@ impl<'tcx> Engine<'tcx> {
         }
         let (callable, has_environment) = match callback_ty.kind() {
             ty::Closure(id, args) => (ty::Instance::new_raw(*id, args), true),
-            ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
+            ty::FnDef(id, args) => (self.resolve_function_item(*id, args.skip_binder())?, false),
             _ => return Err("array from_fn requires a concrete callback body".to_owned()),
         };
         let (callback, memory) = if has_environment {

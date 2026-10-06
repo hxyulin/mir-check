@@ -110,6 +110,9 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
+        if let Some(value) = self.core_endian_encoding(callee, args, signature, values)? {
+            return Ok(Some(value));
+        }
         if let Some(value) = self.integer_intrinsic(callee, signature, values)? {
             return Ok(Some(value));
         }

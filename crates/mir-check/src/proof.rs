@@ -484,10 +484,7 @@ impl<'tcx> Engine<'tcx> {
             return Err(format!("unmodeled call adapter {:?}", instance.def));
         }
         if !self.tcx.is_mir_available(instance.def_id()) {
-            return Err(format!(
-                "MIR body unavailable for {}",
-                self.tcx.def_path_str(instance.def_id())
-            ));
+            return Err(self.missing_body_reason(instance.def_id()));
         }
         let body = instance
             .try_instantiate_mir_and_normalize_erasing_regions(
@@ -749,7 +746,7 @@ impl<'tcx> Engine<'tcx> {
                             );
                         };
                         values = parameters.clone();
-                        ty::Instance::new_raw(*id, args.skip_binder())
+                        self.resolve_function_item(*id, args.skip_binder())?
                     } else {
                         instance
                     };

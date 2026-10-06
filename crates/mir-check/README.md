@@ -286,3 +286,7 @@ UNKNOWN.
 Local byte borrows and finite as_chunks_mut views retain tracked allocation identities across
 calls. Prefix copies and literal byte-index contracts preserve parent storage. Unsupported
 lengths and unresolved aliases remain UNKNOWN.
+
+Function-item callbacks resolve concrete trait implementations before requesting MIR. Exact core
+integer endian encoding is modeled, and missing-body diagnostics distinguish foreign declarations
+from omitted prebuilt core bodies. Cargo -Zbuild-std=core can capture rebuilt core MIR.

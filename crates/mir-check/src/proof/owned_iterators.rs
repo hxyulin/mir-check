@@ -340,7 +340,7 @@ impl<'tcx> Engine<'tcx> {
         }
         let (callable, has_environment) = match callback_ty.kind() {
             ty::Closure(id, args) => (ty::Instance::new_raw(*id, args), true),
-            ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
+            ty::FnDef(id, args) => (self.resolve_function_item(*id, args.skip_binder())?, false),
             _ => return Err("iterator fold requires a concrete callback body".to_owned()),
         };
         let (callback, memory) = if has_environment {

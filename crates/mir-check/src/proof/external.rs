@@ -10,6 +10,97 @@ pub(super) fn canonical_name(tcx: TyCtxt<'_>, id: DefId) -> String {
 }
 
 impl<'tcx> Engine<'tcx> {
+    pub(super) fn core_endian_encoding(
+        &mut self,
+        callee: DefId,
+        args: ty::GenericArgsRef<'tcx>,
+        signature: ty::FnSig<'tcx>,
+        values: &[Value],
+    ) -> Result<Option<Value>, String> {
+        let parent = self.tcx.parent(callee);
+        let name = self.tcx.item_name(callee);
+        if !self
+            .tcx
+            .lang_items()
+            .get(LangItem::SliceLen)
+            .is_some_and(|core| core.krate == callee.krate)
+            || !matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+            || !matches!(name.as_str(), "to_le_bytes" | "to_be_bytes" | "to_ne_bytes")
+            || signature.inputs().len() != 1
+        {
+            return Ok(None);
+        }
+        let Some((bits, signed)) = self.integer_type(signature.inputs()[0]) else {
+            return Ok(None);
+        };
+        if self
+            .tcx
+            .type_of(parent)
+            .instantiate(self.tcx, args)
+            .skip_norm_wip()
+            != signature.inputs()[0]
+            || !matches!(signature.output().kind(), ty::Array(element, length)
+                if *element == self.tcx.types.u8
+                    && length.try_to_target_usize(self.tcx) == Some(u64::from(bits / 8)))
+        {
+            return Ok(None);
+        }
+        let [value] = values else {
+            return Err("endian encoding requires one primitive integer".to_owned());
+        };
+        let (expression, actual_bits, actual_signed) = value.integer()?;
+        if (bits, signed) != (actual_bits, actual_signed) {
+            return Err("endian encoding integer type mismatch".to_owned());
+        }
+        let little = name.as_str() == "to_le_bytes"
+            || (name.as_str() == "to_ne_bytes"
+                && self.tcx.data_layout.endian == rustc_abi::Endian::Little);
+        let count = bits / 8;
+        let pointer_bits = u32::from(self.tcx.sess.target.pointer_width);
+        let mut data =
+            format!("((as const (Array (_ BitVec {pointer_bits}) (_ BitVec 8))) (_ bv0 8))");
+        for index in 0..count {
+            let byte = if little { index } else { count - index - 1 };
+            let low = byte * 8;
+            let high = low + 7;
+            data = format!(
+                "(store {data} (_ bv{index} {pointer_bits}) ((_ extract {high} {low}) {expression}))"
+            );
+        }
+        self.record_model(callee, "integer endian encoding; exact byte extraction");
+        Ok(Some(Value::Bytes {
+            length: Box::new(symbolic::integer(u128::from(count), pointer_bits, false)),
+            data,
+        }))
+    }
+
+    pub(super) fn missing_body_reason(&self, id: DefId) -> String {
+        let name = self.tcx.def_path_str(id);
+        let explanation = if self.tcx.is_foreign_item(id) {
+            "; foreign declarations have no Rust MIR body to retain"
+        } else if self
+            .tcx
+            .lang_items()
+            .get(LangItem::SliceLen)
+            .is_some_and(|core| core.krate == id.krate)
+        {
+            "; the prebuilt core library omitted this body; cargo -Zbuild-std=core can retain it"
+        } else {
+            "; rebuild the dependency with MIR retention enabled"
+        };
+        format!("MIR body unavailable for {name}{explanation}")
+    }
+
+    pub(super) fn resolve_function_item(
+        &self,
+        id: DefId,
+        args: ty::GenericArgsRef<'tcx>,
+    ) -> Result<ty::Instance<'tcx>, String> {
+        ty::Instance::try_resolve(self.tcx, ty::TypingEnv::fully_monomorphized(), id, args)
+            .map_err(|error| format!("function-item resolution failed: {error:?}"))?
+            .ok_or_else(|| format!("unresolved function item {}", self.tcx.def_path_str(id)))
+    }
+
     pub(super) fn specification(
         &self,
         instance: ty::Instance<'tcx>,

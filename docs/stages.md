@@ -719,3 +719,13 @@ writes translate directly to parent byte offsets. Symbolic lengths, excessive vi
 root aliases remain UNKNOWN. Fixed byte post-state contracts support checked literal indices.
 Original host/ARM cases exercise helper writes, returned views, disjoint copies, parent updates,
 impostor methods and failure/unknown cases; native replay and a mutation verify writes.
+
+## Stage 40: resolve dependency function items and encode integer bytes
+
+Function-item callbacks resolve concrete trait dispatch before requesting MIR. Map/from_fn,
+predicates, folds and Fn adapters execute actual implementations, including panic paths. Exact
+primitive integer endian encoding complements decoding on all signed/unsigned widths. Missing-body
+diagnostics distinguish omitted prebuilt core bodies from genuine foreign declarations. The existing
+-Zbuild-std=core Cargo path retains core MIR and saved reports can replay it; unsupported pointer
+operations remain UNKNOWN after those bodies become available. No foreign bodies are assumed
+panic-free. Host/ARM, native boundary cases, mutations and captured replay cover this work.

@@ -603,7 +603,7 @@ impl<'tcx> Engine<'tcx> {
             .skip_binder();
         let (callable, environment) = match signature.inputs()[1].kind() {
             ty::Closure(id, args) => (ty::Instance::new_raw(*id, args), true),
-            ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
+            ty::FnDef(id, args) => (self.resolve_function_item(*id, args.skip_binder())?, false),
             _ => return Err("iterator predicate requires a concrete callable body".to_owned()),
         };
         let predicate = values.get(1).ok_or("iterator predicate is missing")?;
