@@ -48,7 +48,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Feature | Current support | Boundary |
 | --- | --- | --- |
 | Branches | Path-sensitive states; discard a branch only after an exact constant UNSAT decision or an unsat solver response | Ordinary mode does not merge states; induction forms per-block relations |
-| Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction includes available concrete callee MIR and checked contracts; typed stable references are supported; integer ranges, tagged enums and typed custom iterators are supported; slice iterators, changing aliases, recursion and coroutines remain gaps; incomplete or undecided proofs are UNKNOWN |
+| Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction includes available concrete callee MIR and checked contracts; typed stable references are supported; integer ranges, tagged enums and typed custom iterators are supported; byte-slice/scalar-array iterators and indexed references are supported; slice views, arbitrary non-byte slices, changing allocations, recursion and coroutines remain gaps; incomplete or undecided proofs are UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Function pointers and unsupported call shapes remain UNKNOWN |
@@ -326,8 +326,12 @@ writes, bad wraps and false snapshot contracts never pass; changing aliases and 
 remain UNKNOWN. Integer range loops, tagged enum state and a custom iterator's actual body also
 prove on host/ARM.
 Tests cover signed endpoints, maximum endpoints, early breaks and borrowed-array writes. Mutated
-ends, false custom-iterator claims and a late range panic never pass. Slice iterator storage still
-blocks induction, so finite unrolling retains broader coverage for those shapes. A supported
+ends, false custom-iterator claims and a late range panic never pass. Slice tests prove
+shared/mutable
+byte iteration, retained references, mixed forward/backward steps, skips, cursor cloning, borrowed
+count exhaustion, fixed integer/Boolean arrays and indexed helper snapshots. Mutated assertions,
+writes and bounds never pass. Native cases and small complete unrollings cross-check the encoding.
+Slice views, arbitrary non-byte slices and adapters still remain unsupported. A supported
 12,000-element range can exhaust invariant inference; it is not guaranteed faster than unrolling. A
 relational decrement/count query remains UNKNOWN after a Z3
 crash. A preprocessing experiment that claimed a native-replayed late panic was safe was

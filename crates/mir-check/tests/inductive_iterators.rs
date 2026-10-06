@@ -28,7 +28,7 @@ fn integer_ranges_tags_and_actual_custom_iterators_preserve_failure_paths() {
             ProofStatus::Unknown,
         ),
         ("a_late_range_panic", ProofStatus::Unknown),
-        ("unsupported_slice_iterator_storage", ProofStatus::Unknown),
+        ("a_slice_value_can_reach_255", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_mir-check"));

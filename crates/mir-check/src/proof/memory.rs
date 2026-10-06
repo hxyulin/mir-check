@@ -290,7 +290,7 @@ impl<'tcx> Engine<'tcx> {
         Ok(())
     }
 
-    fn memory_path(
+    pub(super) fn memory_path(
         &self,
         state: &State,
         place: Place<'tcx>,

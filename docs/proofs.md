@@ -161,7 +161,7 @@ typed allocations carry borrowed storage as
 mutable relation parameters. Addressed locals live in that storage, so aliases see the same writes.
 Caller locals and entry snapshots are frozen separately; memory is carried through the actual
 callee transitions and restored on return. Every edge checks allocation and reference identities
-against the frame layout. Changing targets and indexed borrows remain UNKNOWN, and references to
+against the frame layout. Changing allocation targets remain UNKNOWN, and references to
 interior-mutable storage are rejected. Struct fields and byte-array storage require no byte-level
 raw-pointer model. Callee loops use the same transition encoding as root loops. Available local,
 concrete generic and retained
@@ -173,9 +173,10 @@ arguments have independent snapshot parameters when ensures are present; origina
 arguments therefore remain distinguishable. final_ names refer to the current argument values.
 Declared predicates are checked for supported syntax even when a function never returns.
 Unsupported predicates and invalid aliases remain UNKNOWN. Recursive call contexts, changing
-references, interior mutation, slice iterator storage, coroutines, float state and trusted
-boundaries
-still need inductive models. Unsupported behavior is never omitted.
+allocations, interior mutation, slice views, arbitrary non-byte slices, iterator adapters,
+coroutines,
+float state and trusted boundaries still need inductive models. Unsupported behavior is never
+omitted.
 
 Supported enums have separate tag and payload parameters. Construction updates the selected payload
 and tag, retaining a typed representation for inactive variants. Reading a downcast payload adds a
@@ -190,8 +191,36 @@ branch
 returns `Some(start)` and increments start; the exhausted branch returns `None` without changing
 storage. The strict comparison guarantees increment cannot overflow for primitive signed or unsigned
 integers. Custom iterators use their actual available MIR rather than this range model. Configured
-contracts cannot be bypassed by the model. Slice iterator storage and indexed reference identities
-remain separate unsupported cases.
+contracts cannot be bypassed by the model.
+
+Slice iterator models identify core types, concrete signatures and their traits before translating
+operations. Iterator relations carry the source allocation/projection, front and back. Every step
+checks front <= back <= source length with a failure clause. A successful next/nth yields a
+reference
+with the selected index and advances the front; next_back/nth_back update the back instead. Skipping
+past exhaustion closes the remaining range at the appropriate end. Borrowed count exhausts the
+original cursor. Shared clones have separate cursor parameters over the same storage.
+
+An indexed reference carries its own bit-vector index rather than reusing the iterator cursor's
+canonical variable. Index values can vary across transitions, while allocation, projection shape
+and mutability must match the frame layout. Each dereference adds an index < length failure clause
+before reading or writing. This supports retained references and indexed helper calls without a
+raw-pointer model or an assumed non-aliasing relation. Actual transitions establish separation
+between previously yielded mutable elements and the remaining range.
+
+Byte slices use SMT arrays. Fixed integer/Boolean arrays use scalar fields and conditional writes:
+element k becomes ite(index == k, new, old). Guards prove the index is valid before the update.
+Contract entry snapshots encode the entry pointee value in separate parameters; current/final
+bindings read current memory. Reference-layout inference chooses parameter types and identities,
+and cannot replace callee execution or inject a safety assumption. Return and edge checks reject
+incompatible layouts. Local scalar arrays are limited to 16 elements; root shape and relation limits
+also apply. Arbitrary non-byte slices, offset slice views and general iterator adapters remain
+UNKNOWN. Formatting and compiler-inlined raw-pointer internals still require supported models.
+
+The Horn printer sets pp.max_indent to zero. One mixed-end fixture's complete model shrank from
+570,463 to 131,593 bytes by removing indentation, fitting the existing 256 KiB response cap. This
+changes presentation only; bit-blasting remains disabled and solver strategies/timeouts are
+unchanged.
 
 The 256-block budget now includes every translated call context, and each relation's 512-parameter
 budget includes captured caller state and contract snapshots. The call depth remains 16 frames.
@@ -285,9 +314,10 @@ Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work
 floats and booleans; enum/struct elements need a uniquely determined index. Array/slice patterns
 prove their minimum length and index bounds before applying constant start/end offsets. Generic
 roots with unresolved type parameters remain unsupported. Experimental loop induction supports
-scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges. Automatic type
-invariants, dedicated termination checks
-and verified general effects remain unsupported.
+scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges.
+Byte-slice/scalar-array
+iterators support indexed references. Automatic type invariants, dedicated termination checks and
+verified general effects remain unsupported.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark
 propagation, three closures, array map, shifts and endian decoding. It proves panic freedom and

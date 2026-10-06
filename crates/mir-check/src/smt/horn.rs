@@ -27,7 +27,8 @@ impl System {
         append(
             &mut output,
             "(set-logic HORN)\n(set-option :fp.engine spacer)\n\
-             (set-option :fp.xform.bit_blast false)\n(set-option :timeout 5000)\n",
+             (set-option :fp.xform.bit_blast false)\n(set-option :pp.max_indent 0)\n\
+             (set-option :timeout 5000)\n",
             max_bytes,
         )?;
         for (index, sorts) in self.relations.iter().enumerate() {

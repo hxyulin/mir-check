@@ -935,3 +935,24 @@ Same-fixture release measurements found no speedup on the cheap finite cases: un
 The endless counter proved in 44 ms with induction while bounded interpretation returned UNKNOWN.
 Measurements used a warm-up and five sequential samples with identical build flags and JSON output.
 Induction remains opt-in because invariant inference can cost more than complete finite execution.
+
+
+## Stage 54: inductive slice cursors and indexed element references
+
+Slice iterators carry typed source identities and independent front/back parameters. Indexed
+references have their own parameters, preserving earlier elements when a cursor advances. Horn
+safety clauses check cursor ordering, source bounds and each indexed access. Fixed scalar arrays
+use conditional writes; byte slices retain exact SMT array stores. Helper bodies, checked contracts
+and independent entry snapshots follow indexed references through actual call transitions.
+
+Core-identified construction, next/next_back, nth/nth_back, length, size_hint, count, borrowed
+cursors
+and shared cloning are modeled. Host/ARM positives include retained aliases, mixed-end writes,
+skips, clones, count exhaustion, initialized local buffers, integer/Boolean arrays and indexed
+helper contracts/returned references. False pointer
+claims, writes, snapshots and bounds never pass. Native replay and finite unrolling cross-check
+small cases. Arbitrary non-byte slices, slice views and general adapters remain UNKNOWN.
+
+Model indentation is disabled without changing solver logic or response limits. The mixed-end
+fixture's complete model fell from 570,463 to 131,593 bytes, fitting the existing 256 KiB cap.
+Unsupported compiler-inlined pointer/formatting internals remain explicit UNKNOWN cases.

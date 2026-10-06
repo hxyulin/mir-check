@@ -83,10 +83,39 @@ impl<'tcx> Engine<'tcx> {
                     .collect::<Result<_, _>>()?,
                 is_option: *is_option,
             },
-            Value::Reference { .. } => {
-                flatten_value(value, &mut Vec::new())?;
-                value.clone()
-            }
+            Value::Reference {
+                allocation,
+                projection,
+                mutable,
+            } => Value::Reference {
+                allocation: *allocation,
+                mutable: *mutable,
+                projection: projection
+                    .iter()
+                    .map(|part| match part {
+                        MemoryProjection::Field(_) | MemoryProjection::Variant(_) => {
+                            Ok(part.clone())
+                        }
+                        MemoryProjection::Index(index) => Ok(MemoryProjection::Index(Box::new(
+                            self.loop_fresh_value(index)?,
+                        ))),
+                        MemoryProjection::Slice { .. } | MemoryProjection::Chunks { .. } => {
+                            Err("unsupported inductive reference view".into())
+                        }
+                    })
+                    .collect::<Result<_, String>>()?,
+            },
+            Value::SliceIterator {
+                source,
+                front,
+                back,
+                mutable,
+            } => Value::SliceIterator {
+                source: Box::new(self.loop_fresh_value(source)?),
+                front: Box::new(self.loop_fresh_value(front)?),
+                back: Box::new(self.loop_fresh_value(back)?),
+                mutable: *mutable,
+            },
             Value::MetadataPointer(length) => {
                 Value::MetadataPointer(Box::new(self.loop_fresh_value(length)?))
             }
@@ -94,7 +123,6 @@ impl<'tcx> Engine<'tcx> {
             other @ (Value::Float { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
-            | Value::SliceIterator { .. }
             | Value::StaticText
             | Value::FormatArguments
             | Value::Function) => {
@@ -133,7 +161,7 @@ impl<'tcx> Engine<'tcx> {
                 Some(self.loop_fresh_value(&arguments[local.as_usize() - 1])?)
             } else if local.as_usize() != 0 && !used.0.contains(&local.as_usize()) {
                 Some(Value::Unit)
-            } else if declaration.ty.is_ref() {
+            } else if self.loop_deferred_type(declaration.ty) {
                 None
             } else if matches!(declaration.ty.kind(), ty::RawPtr(..)) {
                 let bits = u32::from(self.tcx.sess.target.pointer_width);
@@ -170,7 +198,7 @@ impl<'tcx> Engine<'tcx> {
                     };
                     let (destination, rvalue) = assignment.as_ref();
                     if !destination.projection.is_empty()
-                        || !body.local_decls[destination.local].ty.is_ref()
+                        || !self.loop_deferred_type(body.local_decls[destination.local].ty)
                     {
                         continue;
                     }
@@ -182,19 +210,66 @@ impl<'tcx> Engine<'tcx> {
                                 matches!(rvalue, Rvalue::Ref(_, BorrowKind::Mut { .. }, _)),
                             )?,
                         Rvalue::Use(Operand::Copy(place) | Operand::Move(place), _) => {
-                            self.place(&state, *place).ok()
+                            self.loop_template_place(&state, *place)?
                         }
                         Rvalue::Cast(CastKind::PointerCoercion(..), operand, _) => match operand {
                             Operand::Copy(place) | Operand::Move(place) => {
-                                self.place(&state, *place).ok()
+                                self.loop_template_place(&state, *place)?
                             }
                             Operand::Constant(_) | Operand::RuntimeChecks(_) => None,
                         },
-                        _ => {
-                            return Err("inductive reference assignment has no stable model".into());
-                        }
+                        _ => continue,
                     };
                     if let Some(value) = value {
+                        let value = self.loop_fresh_value(&value)?;
+                        let local = destination.local.as_usize();
+                        if let Some(previous) = &state.locals[local] {
+                            same_shape(Some(previous), Some(&value))?;
+                        } else {
+                            state.locals[local] = Some(value.clone());
+                            if let Some(allocation) = state.addresses[local] {
+                                state.memory[allocation] = Some(value);
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+                if let TerminatorKind::Call {
+                    func,
+                    args,
+                    destination,
+                    ..
+                } = &block.terminator().kind
+                    && destination.projection.is_empty()
+                    && self.loop_deferred_type(body.local_decls[destination.local].ty)
+                    && let ty::FnDef(id, generics) = *func.ty(&body.local_decls, self.tcx).kind()
+                    && let Some(instance) = ty::Instance::try_resolve(
+                        self.tcx,
+                        ty::TypingEnv::fully_monomorphized(),
+                        id,
+                        generics.skip_binder(),
+                    )
+                    .map_err(|error| format!("iterator template resolution failed: {error:?}"))?
+                {
+                    let values = args
+                        .iter()
+                        .map(|arg| {
+                            self.loop_template_operand(
+                                body.source.def_id(),
+                                body,
+                                &state,
+                                &arg.node,
+                            )
+                        })
+                        .collect::<Result<Option<Vec<_>>, _>>()?;
+                    if let Some(values) = values
+                        && !values.iter().any(|value| {
+                            matches!(value, Value::Reference { allocation, .. }
+                            if state.memory.get(*allocation).and_then(Option::as_ref).is_none())
+                        })
+                        && let Some(value) = self.loop_call_template(instance, &values, &state)?
+                    {
+                        let value = self.loop_fresh_value(&value)?;
                         let local = destination.local.as_usize();
                         if let Some(previous) = &state.locals[local] {
                             same_shape(Some(previous), Some(&value))?;
@@ -258,14 +333,13 @@ impl<'tcx> Engine<'tcx> {
                     }
                     allocation = Some(*target);
                     projection = path.clone();
-                    value = state
-                        .memory
-                        .get(*target)
-                        .and_then(Option::as_ref)
-                        .cloned()
-                        .ok_or("inductive reference storage missing")?;
+                    let Some(stored) = state.memory.get(*target).and_then(Option::as_ref).cloned()
+                    else {
+                        return Ok(None);
+                    };
+                    value = stored;
                     for part in &projection {
-                        value = static_projection(value, part)?;
+                        value = self.loop_template_projection(value, part)?;
                     }
                 }
                 ProjectionElem::Field(field, _) => {
@@ -301,7 +375,19 @@ impl<'tcx> Engine<'tcx> {
                     value = static_projection(value, &MemoryProjection::Variant(index))?;
                     projection.push(MemoryProjection::Variant(index));
                 }
-                other => return Err(format!("inductive borrow needs static fields: {other:?}")),
+                ProjectionElem::Index(index) => {
+                    let index = self.local(state, index.as_usize())?;
+                    value = self.loop_template_projection(
+                        value,
+                        &MemoryProjection::Index(Box::new(index.clone())),
+                    )?;
+                    projection.push(MemoryProjection::Index(Box::new(index)));
+                }
+                other => {
+                    return Err(format!(
+                        "inductive borrow needs typed projections: {other:?}"
+                    ));
+                }
             }
         }
         Ok(allocation.map(|allocation| Value::Reference {
@@ -328,7 +414,11 @@ impl<'tcx> Engine<'tcx> {
             }
         }
         if !frame.entry.is_empty() {
-            for snapshot in self.snapshots(arguments, incoming, &[])? {
+            for snapshot in arguments
+                .iter()
+                .map(|value| self.loop_template_snapshot(value, &state))
+                .collect::<Result<Vec<_>, _>>()?
+            {
                 flatten_value(&snapshot, &mut captured)?;
             }
         }
@@ -379,7 +469,12 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
                 projection: e,
                 mutable: f,
             },
-        ) if a == d && c == f && b.len() == e.len() && b.iter().zip(e).all(|(a, b)| matches!((a, b), (MemoryProjection::Field(a), MemoryProjection::Field(b)) | (MemoryProjection::Variant(a), MemoryProjection::Variant(b)) if a == b)) => Ok(()),
+        ) if a == d && c == f && b.len() == e.len() => {
+            for (a, b) in b.iter().zip(e) {
+                projection_shape(a, b)?;
+            }
+            Ok(())
+        }
         (
             Value::Adt {
                 name: a,
@@ -412,19 +507,63 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             }
             Ok(())
         }
-        (Value::Enum { discriminant: a, variants: b, is_option: c },
-         Value::Enum { discriminant: d, variants: e, is_option: f })
-            if c == f && b.len() == e.len() => {
-                same_shape(Some(a), Some(d))?;
-                for (a, b) in b.iter().zip(e) { same_shape(Some(a), Some(b))?; }
-                Ok(())
+        (
+            Value::Enum {
+                discriminant: a,
+                variants: b,
+                is_option: c,
+            },
+            Value::Enum {
+                discriminant: d,
+                variants: e,
+                is_option: f,
+            },
+        ) if c == f && b.len() == e.len() => {
+            same_shape(Some(a), Some(d))?;
+            for (a, b) in b.iter().zip(e) {
+                same_shape(Some(a), Some(b))?;
             }
+            Ok(())
+        }
+        (
+            Value::SliceIterator {
+                source: a,
+                front: b,
+                back: c,
+                mutable: d,
+            },
+            Value::SliceIterator {
+                source: e,
+                front: f,
+                back: g,
+                mutable: h,
+            },
+        ) if d == h => {
+            same_shape(Some(a), Some(e))?;
+            same_shape(Some(b), Some(f))?;
+            same_shape(Some(c), Some(g))
+        }
         (Value::MetadataPointer(a), Value::MetadataPointer(b)) => same_shape(Some(a), Some(b)),
-(Value::Bool(_) | Value::Int { .. } | Value::Float { .. } | Value::Bytes { .. }
-        | Value::Adt { .. } | Value::Enum { .. } | Value::Cell { .. } | Value::Atomic { .. }
-        | Value::Reference { .. } | Value::SliceIterator { .. } | Value::Tuple(_)
-        | Value::Elements(_) | Value::MetadataPointer(_) | Value::StaticText
-        | Value::FormatArguments | Value::Function | Value::Unit, _) => Err("inductive value or reference identity changed".into()),
+        (
+            Value::Bool(_)
+            | Value::Int { .. }
+            | Value::Float { .. }
+            | Value::Bytes { .. }
+            | Value::Adt { .. }
+            | Value::Enum { .. }
+            | Value::Cell { .. }
+            | Value::Atomic { .. }
+            | Value::Reference { .. }
+            | Value::SliceIterator { .. }
+            | Value::Tuple(_)
+            | Value::Elements(_)
+            | Value::MetadataPointer(_)
+            | Value::StaticText
+            | Value::FormatArguments
+            | Value::Function
+            | Value::Unit,
+            _,
+        ) => Err("inductive value or reference identity changed".into()),
     }
 }
 
@@ -488,5 +627,25 @@ impl<'tcx> Visitor<'tcx> for UsedLocals {
         if context.is_use() {
             self.0.insert(local.as_usize());
         }
+    }
+}
+
+fn projection_shape(a: &MemoryProjection, b: &MemoryProjection) -> Result<(), String> {
+    match (a, b) {
+        (MemoryProjection::Field(a), MemoryProjection::Field(b))
+        | (MemoryProjection::Variant(a), MemoryProjection::Variant(b))
+            if a == b =>
+        {
+            Ok(())
+        }
+        (MemoryProjection::Index(a), MemoryProjection::Index(b)) => same_shape(Some(a), Some(b)),
+        (
+            MemoryProjection::Field(_)
+            | MemoryProjection::Variant(_)
+            | MemoryProjection::Index(_)
+            | MemoryProjection::Slice { .. }
+            | MemoryProjection::Chunks { .. },
+            _,
+        ) => Err("inductive reference projection identity changed".into()),
     }
 }

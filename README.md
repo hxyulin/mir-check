@@ -243,8 +243,9 @@ an iteration bound. It supports integer/Boolean state, tuples, fixed byte arrays
 callee MIR, checked preconditions/postconditions and typed shared/mutable storage. Caller state and
 entry snapshots are carried through actual callee transitions. Stable field references preserve
 aliases. Integer ranges, tagged enum state and supported custom iterators can use induction too.
-Slice iterator storage, changing reference targets, interior mutation, coroutines and recursion
-remain UNKNOWN in this mode. Raw reports retain
+Shared/mutable byte-slice iterators and fixed integer/Boolean arrays carry cursors and indexed
+references through loops. Changing allocation targets, slice views, arbitrary non-byte slices,
+interior mutation, coroutines and recursion remain UNKNOWN in this mode. Raw reports retain
 inferred models separately in `invariants`. A positive Horn result proves panic freedom rather
 than termination. Solver failures and detected Horn failures remain UNKNOWN until counterexample
 replay is available. See [loop proof details](docs/proofs.md#loops-and-limits).

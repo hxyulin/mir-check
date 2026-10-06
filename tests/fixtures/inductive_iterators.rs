@@ -53,7 +53,7 @@ pub fn a_late_range_panic() {
     }
 }
 
-pub fn unsupported_slice_iterator_storage(bytes: &[u8]) {
+pub fn a_slice_value_can_reach_255(bytes: &[u8]) {
     for value in bytes {
         assert!(*value < 255);
     }

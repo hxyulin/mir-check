@@ -5,7 +5,10 @@ use std::collections::BTreeSet;
 
 mod enums;
 mod ranges;
+mod slices;
 mod storage;
+mod templates;
+mod writes;
 use storage::same_shape;
 
 const MAX_BLOCKS: usize = 256;
@@ -197,6 +200,11 @@ impl<'tcx> Engine<'tcx> {
                     } else {
                         self.local(&state, 0)?
                     };
+                    for local in body.args_iter() {
+                        let value = self.local(&state, local.as_usize())?;
+                        self.loop_reference_bounds(&mut state, &value, &mut system, &premise)?;
+                    }
+                    self.loop_reference_bounds(&mut state, &result, &mut system, &premise)?;
                     self.loop_postconditions(&frame, &mut state, &result, &mut system, &premise)?;
                     if let Some(resume) = &frame.resume {
                         let target = resume
@@ -215,7 +223,7 @@ impl<'tcx> Engine<'tcx> {
                             &mut system,
                             &premise,
                         )?;
-                        self.write(&mut restored, resume.destination, result)?;
+                        self.loop_write(&mut restored, resume.destination, result)?;
                         self.loop_normalize(caller, &mut restored)?;
                         system.clauses.push(Clause {
                             premise: Some(premise.clone()),
@@ -280,7 +288,16 @@ impl<'tcx> Engine<'tcx> {
                         )?;
                         values.push(self.operand(id, body, &state, &argument.node)?);
                     }
-                    if let Some(results) = self.loop_range_call(callee, &values, &state)? {
+                    for value in &values {
+                        self.loop_reference_bounds(&mut state, value, &mut system, &premise)?;
+                    }
+                    let modeled =
+                        self.loop_slice_call(callee, &values, &mut state, &mut system, &premise)?;
+                    let modeled = match modeled {
+                        Some(results) => Some(results),
+                        None => self.loop_range_call(callee, &values, &state)?,
+                    };
+                    if let Some(results) = modeled {
                         let target = target.ok_or("inductive iterator call has no return edge")?;
                         for (mut continuation, value) in results {
                             self.loop_place_bounds(
@@ -289,7 +306,7 @@ impl<'tcx> Engine<'tcx> {
                                 &mut system,
                                 &premise,
                             )?;
-                            self.write(&mut continuation, *destination, value)?;
+                            self.loop_write(&mut continuation, *destination, value)?;
                             edges.push((target, continuation));
                         }
                     } else {
@@ -394,7 +411,14 @@ impl<'tcx> Engine<'tcx> {
         }
         let contracts = self.configured_contracts(instance)?;
         self.input_values = 0;
-        let state = self.loop_storage(&body, arguments, incoming_memory)?;
+        let state = self
+            .loop_storage(&body, arguments, incoming_memory)
+            .map_err(|reason| {
+                format!(
+                    "loop induction {}: {reason}",
+                    self.tcx.def_path_str(instance.def_id())
+                )
+            })?;
         let mut entry = Vec::new();
         if contracts
             .iter()
@@ -404,7 +428,10 @@ impl<'tcx> Engine<'tcx> {
                 .args_iter()
                 .map(|local| self.local(&state, local.as_usize()))
                 .collect::<Result<Vec<_>, _>>()?;
-            let snapshots = self.snapshots(&values, &state.memory, &[])?;
+            let snapshots = values
+                .iter()
+                .map(|value| self.loop_template_snapshot(value, &state))
+                .collect::<Result<Vec<_>, _>>()?;
             for snapshot in &snapshots {
                 entry.push(self.loop_fresh_value(snapshot)?);
             }
@@ -462,7 +489,10 @@ impl<'tcx> Engine<'tcx> {
             .args_iter()
             .map(|local| self.local(&frame.state, local.as_usize()))
             .collect::<Result<Vec<_>, _>>()?;
-        let snapshots = self.snapshots(&arguments, &frame.state.memory, &[])?;
+        let snapshots = arguments
+            .iter()
+            .map(|value| self.loop_template_snapshot(value, &frame.state))
+            .collect::<Result<Vec<_>, _>>()?;
         let bindings = self.configured_bindings(&frame.body, &snapshots, frame.instance)?;
         let mut post_bindings = bindings.clone();
         if frame
@@ -475,7 +505,11 @@ impl<'tcx> Engine<'tcx> {
             for (name, value) in &bindings {
                 post_bindings.insert(format!("final_{name}"), value.clone());
             }
-            post_bindings.insert("result".into(), self.local(&frame.state, 0)?);
+            let result = self.local(&frame.state, 0)?;
+            post_bindings.insert(
+                "result".into(),
+                self.loop_template_snapshot(&result, &frame.state)?,
+            );
         }
         for contract in frame.contracts.iter() {
             let values = match contract.kind {
@@ -514,7 +548,10 @@ impl<'tcx> Engine<'tcx> {
         if !needs_bindings {
             return Ok(());
         }
-        let snapshots = self.snapshots(arguments, &state.memory, &state.conditions)?;
+        let snapshots = arguments
+            .iter()
+            .map(|value| self.loop_template_snapshot(value, state))
+            .collect::<Result<Vec<_>, _>>()?;
         let bindings = self.configured_bindings(&frame.body, &snapshots, frame.instance)?;
         if frame
             .contracts
@@ -559,14 +596,14 @@ impl<'tcx> Engine<'tcx> {
             .args_iter()
             .map(|local| self.local(state, local.as_usize()))
             .collect::<Result<Vec<_>, _>>()?;
-        let snapshots = self.snapshots(&final_arguments, &state.memory, &state.conditions)?;
+        let snapshots = final_arguments
+            .iter()
+            .map(|value| self.loop_template_snapshot(value, state))
+            .collect::<Result<Vec<_>, _>>()?;
         for (name, value) in self.configured_bindings(&frame.body, &snapshots, frame.instance)? {
             bindings.insert(format!("final_{name}"), value);
         }
-        bindings.insert(
-            "result".into(),
-            self.snapshot(result, &state.memory, &state.conditions, 0)?,
-        );
+        bindings.insert("result".into(), self.loop_template_snapshot(result, state)?);
         for contract in frame.contracts.iter() {
             if matches!(contract.kind, ContractKind::Ensures) {
                 let predicate = contract
@@ -622,6 +659,22 @@ impl<'tcx> Engine<'tcx> {
                         Box::new(Sort::BitVec(8)),
                     )),
                 })
+            }
+            ty::Array(element, count) => {
+                let count = count
+                    .try_to_target_usize(self.tcx)
+                    .ok_or("unknown inductive scalar array length")?;
+                if count > 16 {
+                    return Err("inductive scalar arrays exceed 16 elements".into());
+                }
+                if self.integer_type(*element).is_none() && !element.is_bool() {
+                    return Err("inductive element arrays require integers or Booleans".into());
+                }
+                Ok(Value::Elements(
+                    (0..count)
+                        .map(|_| self.loop_input(*element, depth + 1))
+                        .collect::<Result<_, _>>()?,
+                ))
             }
             ty::Adt(def, args)
                 if def.is_struct()
@@ -695,41 +748,16 @@ impl<'tcx> Engine<'tcx> {
                         ..
                     } = reference
                     {
-                        let mut value = state
-                            .memory
-                            .get(allocation)
-                            .and_then(Option::as_ref)
-                            .cloned()
-                            .ok_or("inductive dereference storage missing")?;
-                        for part in projection {
-                            if let symbolic::MemoryProjection::Variant(index) = part
-                                && let Value::Enum {
-                                    discriminant,
-                                    variants,
-                                    ..
-                                } = &value
-                            {
-                                let Value::Adt {
-                                    discriminant: tag, ..
-                                } = variants
-                                    .get(index)
-                                    .ok_or("inductive reference variant missing")?
-                                else {
-                                    return Err("inductive reference payload needs an ADT".into());
-                                };
-                                let (_, bits, signed) = discriminant.integer()?;
-                                let safe = symbolic::binary(
-                                    &self.terms,
-                                    "eq",
-                                    (**discriminant).clone(),
-                                    symbolic::integer(&self.terms, *tag, bits, signed),
-                                )?
-                                .boolean()?;
-                                exclude_failure(system, premise, &state.conditions, &safe);
-                                state.conditions.push(safe);
-                            }
-                            value = storage::static_projection(value, &part)?;
-                        }
+                        self.loop_reference_bounds(
+                            state,
+                            &Value::Reference {
+                                allocation,
+                                projection,
+                                mutable: false,
+                            },
+                            system,
+                            premise,
+                        )?;
                     }
                 }
                 ProjectionElem::Field(..) | ProjectionElem::ConstantIndex { .. } => {}
@@ -770,14 +798,13 @@ impl<'tcx> Engine<'tcx> {
                         local: place.local,
                         projection: self.tcx.mk_place_elems(&place.projection[..position]),
                     };
-                    let Value::Bytes { length, .. } = self.place(state, prefix)? else {
-                        return Err("loop index requires a fixed byte array".into());
-                    };
+                    let storage = self.place(state, prefix)?;
+                    let length = self.loop_slice_length(&storage)?;
                     let safe = symbolic::binary(
                         &self.terms,
                         "lt",
                         self.local(state, index.as_usize())?,
-                        *length,
+                        length,
                     )?
                     .boolean()?;
                     let mut failure = state.conditions.clone();
@@ -816,7 +843,7 @@ impl<'tcx> Engine<'tcx> {
                         let reference = self
                             .loop_alias(state, *borrowed, mutable)?
                             .ok_or("inductive borrow has no stable target")?;
-                        return self.write(state, *place, reference);
+                        return self.loop_write(state, *place, reference);
                     }
                     Rvalue::RawPtr(rustc_middle::mir::RawPtrKind::FakeForPtrMetadata, borrowed) => {
                         self.loop_place_bounds(state, *borrowed, system, premise)?;
@@ -857,7 +884,8 @@ impl<'tcx> Engine<'tcx> {
                 }
                 // Whitelisted scalar operations cannot allocate, assume facts, or emit
                 // independent obligations. Panics are represented by terminator clauses.
-                self.statement(id, body, state, statement)
+                let value = self.rvalue(id, body, state, value)?;
+                self.loop_write(state, *place, value)
             }
             StatementKind::Nop
             | StatementKind::ConstEvalCounter
@@ -997,20 +1025,29 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
                 match part {
                     symbolic::MemoryProjection::Field(_)
                     | symbolic::MemoryProjection::Variant(_) => {}
-                    symbolic::MemoryProjection::Index(_)
-                    | symbolic::MemoryProjection::Slice { .. }
+                    symbolic::MemoryProjection::Index(index) => flatten_value(index, result)?,
+                    symbolic::MemoryProjection::Slice { .. }
                     | symbolic::MemoryProjection::Chunks { .. } => {
                         return Err("inductive reference projection is not a static field".into());
                     }
                 }
             }
         }
+        Value::SliceIterator {
+            source,
+            front,
+            back,
+            ..
+        } => {
+            flatten_value(source, result)?;
+            flatten_value(front, result)?;
+            flatten_value(back, result)?;
+        }
         Value::MetadataPointer(length) => flatten_value(length, result)?,
         Value::Unit => {}
         other @ (Value::Float { .. }
         | Value::Cell { .. }
         | Value::Atomic { .. }
-        | Value::SliceIterator { .. }
         | Value::StaticText
         | Value::FormatArguments
         | Value::Function) => return Err(format!("unsupported inductive value {other:?}")),

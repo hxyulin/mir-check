@@ -349,8 +349,9 @@ caller. A contract never replaces execution of the body.
 
 Concrete local, generic and retained dependency calls can contain loops. Typed allocations support
 structs, scalar/byte-array borrows and stable field references. Callee writes update caller storage;
-contract entry snapshots remain independent from those writes. Changing reference targets, dynamic
-indexed borrows, recursion, slice iterator storage, floats, trusted boundaries, interior mutation
+contract entry snapshots remain independent from those writes. Dynamic element indices are relation
+parameters; changing allocation targets, slice views, recursion, floats, trusted boundaries and
+interior mutation
 and coroutines remain UNKNOWN in this mode. Unavailable bodies and unsupported predicates remain
 UNKNOWN too.
 
@@ -375,9 +376,25 @@ carry a symbolic tag and every variant's typed payload through block relations; 
 clauses before access. Original fixtures cover signed and maximum endpoints, early breaks, tagged
 state and a custom iterator whose actual MIR body is translated. Bad ends, false assertions and a
 late panic never pass. Optimized MIR locals used only by debug information do not consume state.
-Slice iterators and their dynamically indexed element references still need inductive models. A
-supported 12,000-element range can time out during invariant inference, despite having no unrolling
-limit; supported syntax alone does not guarantee a proof.
+Slice iterators over byte slices and fixed integer/Boolean arrays support construction, identity,
+next/next_back, nth/nth_back, len, size_hint, count, by_ref and shared cursor cloning. Safety
+clauses
+check front <= back <= length and every indexed access. Each yielded reference has independent
+index parameters, so advancing the cursor preserves earlier references. Mutable byte writes use SMT
+array stores; fixed scalar-array writes conditionally update exactly the selected element. Helper
+bodies and their contracts remain checked, including entry snapshots of indexed pointees. Local
+integer/Boolean arrays have a 16-element shape limit; existing root and relation budgets still
+apply.
+Arbitrary-length non-byte slices, slice views, changing allocation targets and iterator adapters
+remain gaps. Compiler-inlined pointer internals also need models if a supported call is eliminated.
+
+Host/ARM fixtures cover retained shared/mutable references, mixed-end iteration, skips, cloned
+cursors, borrowed count exhaustion, scalar writes and indexed helper contracts. Bad bounds, stale
+reference claims, false writes and false snapshot contracts never pass. Native replay and complete
+finite unrolling cross-check the small cases. A supported 12,000-element range can still time out
+during invariant inference; supported syntax alone does not guarantee a proof. Horn models print
+without indentation to stay within the unchanged 256 KiB response cap. Solver strategies and time
+budgets are unchanged.
 
 A solver preprocessing experiment was rejected after a native-replayed late-panic mutation received
 a false safety answer. The checker retains the ordinary Spacer encoding, and scalar relational
