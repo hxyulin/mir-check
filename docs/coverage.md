@@ -17,6 +17,7 @@ completed a soundness audit. Every result is tied to its compiler, target, flags
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | One mutable root reference, field/byte writes, reborrows and call state propagation | Root pointees with reference fields, general aliasing, mutable returns/captures and partially initialized aggregates remain UNKNOWN |
+| Interior mutation | Scalar Cell aliases/calls and integer atomic load/store/add/sub/swap with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
@@ -102,3 +103,8 @@ entry/final-state postconditions and rejected aliases/returns. A vendored PID ex
 its original bodies: reset proves with a final-state assertion, a configured update with concrete
 inputs proves, invalid limits refute, and a reset-write mutation refutes. Universal symbolic PID
 update exploration remains expensive; the root execution budget bounds that work.
+
+Interior-mutation tests prove shared Cell writes through aliases, branches and array-map callbacks.
+Atomic tests prove wrapping counters and guarded orderings, refute invalid orderings/unchecked
+increments/history assumptions, and keep RefCell conflicts unknown on host/ARM. The fleet's
+unchanged validate::Site::fail and total also prove through ordinary ARM Cargo verification.

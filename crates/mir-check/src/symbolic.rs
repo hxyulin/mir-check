@@ -36,6 +36,13 @@ pub enum Value {
         variants: Vec<Value>,
         is_option: bool,
     },
+    Cell {
+        allocation: usize,
+    },
+    Atomic {
+        bits: u32,
+        signed: bool,
+    },
     Reference {
         allocation: usize,
         projection: Vec<MemoryProjection>,
@@ -58,7 +65,9 @@ impl Value {
     pub fn contains_mutable(&self) -> bool {
         match self {
             Self::MutableBytes { .. } | Self::Reference { mutable: true, .. } => true,
-            Self::Reference { mutable: false, .. } => false,
+            Self::Reference { mutable: false, .. } | Self::Cell { .. } | Self::Atomic { .. } => {
+                false
+            }
             Self::Adt { fields, .. } => fields.iter().any(|(_, value)| value.contains_mutable()),
             Self::Enum { variants, .. } => variants.iter().any(Self::contains_mutable),
             Self::Tuple(fields) | Self::Elements(fields) => {

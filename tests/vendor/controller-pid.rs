@@ -62,4 +62,3 @@ impl Pid {
         self.last_error = None;
     }
 }
-

@@ -153,10 +153,29 @@ This avoids assuming distinct locations for unresolved root aliases. Multiple re
 from known local storage can cross supported calls. General mutable-reference returns and
 captures remain unknown. Shared immutable byte views retain the earlier snapshot models.
 
-Postcondition parameter names refer to entry snapshots. The final_<parameter> binding refers to
+Postcondition parameter names refer to entry snapshots. The `final_<parameter>` binding refers to
 the argument's state at return, for example final_state.count or final_self.integral. Parameter
 names beginning final_ are reserved when a function declares postconditions. Compiler-generated
 metadata-only raw pointers support length extraction; they cannot be dereferenced as data pointers.
 Storage is limited to 512 allocations per path. A 30-second root budget is checked before solver
 queries; an in-flight query remains subject to the existing five/six-second solver/process limits.
 Exhaustion returns UNKNOWN, so expensive floating-point path exploration cannot run indefinitely.
+
+## Cells and atomic counters
+
+Compiler-identified scalar Cell models implement new/get/set/replace with allocation-backed
+contents. Supported aliases and calls share updates. One shared scalar Cell root is supported;
+multiple root locations with unresolved aliases remain unknown. RefCell guards/destructors and
+general UnsafeCell/raw-pointer operations remain gaps.
+
+Compiler-identified integer atomics support new/load/store/fetch_add/fetch_sub/swap. Their state is
+conservatively arbitrary at each access, including statics whose initializer is zero. RMW calls
+return an arbitrary old value; updates wrap and carry no arithmetic overflow panic. No subsequent
+access is correlated with the operation, allowing interference without modeling a full concurrent
+execution. Assertions about such relationships may refute in this abstraction; those assignments
+are not automatically reachable executions. Load/store ordering restrictions are panic obligations,
+including symbolic Ordering arguments. Unsupported operations and targets retain normal unknown
+boundaries. The models and their interference policy appear in reports.
+
+An atomic-only wrapper such as validate::Site can be represented without reading its mutable
+initializer as immutable data. Other interior-mutable constant references remain unsupported.

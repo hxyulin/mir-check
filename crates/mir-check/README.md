@@ -110,8 +110,16 @@ index refute; unions, interior mutation, unsupported transmutes and shape limits
 
 Mutable roots reject reference-containing pointees and multiple mutable root arguments. Each path
 carries independent typed storage through calls; dead/uninitialized reads and unsupported writes
-fail. Postconditions preserve entry names and expose final_<parameter> for updated arguments.
+fail. Postconditions preserve entry names and expose `final_<parameter>` for updated arguments.
 Storage has a 512-allocation limit and each root has a 30-second budget checked before queries.
 The PID fixture preserves the fleet bodies and verifies reset, concrete configured updates,
 invalid caller limits and a rejected reset-write mutation on host/ARM. Arbitrary symbolic update
 paths can still exceed the budget.
+
+Compiler-identified scalar Cell new/get/set/replace models share allocation-backed writes through
+supported aliases and calls. Integer atomic new/load/store/fetch_add/fetch_sub/swap models allow
+arbitrary current values and interference at each access. RMW operations return the old value and
+wrap on overflow. Load/store ordering restrictions are checked, including symbolic Ordering
+arguments. Atomic-only static wrappers are represented without freezing mutable initializers.
+Reports record these models; atomic history assertions can refute under the conservative
+abstraction. RefCell guards, general UnsafeCell operations and raw pointers remain unsupported.

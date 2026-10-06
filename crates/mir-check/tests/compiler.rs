@@ -2263,8 +2263,8 @@ fn aggregate_constants_preserve_variants_fields_and_initialized_memory_on_host_a
         ("uninitialized", ProofStatus::Unknown),
         ("inactive_uninitialized", ProofStatus::Proved),
         ("active_uninitialized", ProofStatus::Unknown),
-        ("interior_mutable", ProofStatus::Unknown),
-        ("mutable_static_storage", ProofStatus::Unknown),
+        ("interior_mutable", ProofStatus::Proved),
+        ("mutable_static_storage", ProofStatus::Refuted),
         ("initialized_union", ProofStatus::Unknown),
         ("raw_pointer", ProofStatus::Unknown),
         ("oversized_array", ProofStatus::Unknown),
@@ -2316,9 +2316,12 @@ fn aggregate_constants_preserve_variants_fields_and_initialized_memory_on_host_a
             .proof
             .as_ref()
             .unwrap();
-        assert!(mutable_static.obligations.iter().any(|o| {
-            o.status == ProofStatus::Unknown && o.detail.contains("interior mutable storage")
-        }));
+        assert!(
+            mutable_static
+                .obligations
+                .iter()
+                .any(|o| { o.status == ProofStatus::Refuted })
+        );
         let directory = Directory::new();
         let mutated = directory.0.join("mutated.rs");
         std::fs::write(
@@ -2860,4 +2863,63 @@ fn the_vendored_pid_updates_and_resets_preserve_writes_and_require_valid_limits_
             .status,
         ProofStatus::Refuted
     );
+}
+
+#[test]
+fn cells_preserve_alias_writes_and_atomics_check_orderings_without_assuming_history_on_host_and_arm()
+ {
+    let entries = [
+        ("cell_aliases", ProofStatus::Proved),
+        ("cell_callback", ProofStatus::Proved),
+        ("cell_calls", ProofStatus::Proved),
+        ("bad_cell", ProofStatus::Refuted),
+        ("cell_branches", ProofStatus::Proved),
+        ("two_cells", ProofStatus::Unknown),
+        ("site", ProofStatus::Proved),
+        ("Site::fail", ProofStatus::Proved),
+        ("counters", ProofStatus::Proved),
+        ("wrong_increment", ProofStatus::Refuted),
+        ("unsupported_history", ProofStatus::Refuted),
+        ("bad_load", ProofStatus::Refuted),
+        ("bad_store", ProofStatus::Refuted),
+        ("guarded_ordering", ProofStatus::Proved),
+        ("bad_ordering", ProofStatus::Refuted),
+        ("refcell_conflict", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("interior.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+        assert!(
+            report
+                .functions
+                .iter()
+                .find(|f| f.name == "site")
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap()
+                .models
+                .iter()
+                .any(|model| model.contains("possible interference"))
+        );
+    }
 }

@@ -327,7 +327,7 @@ dependencies changed.
 
 References to supported mutable storage carry allocation identities and projections. Per-path
 storage crosses calls and preserves writes through reborrows. Entry snapshots remain available in
-postconditions, with final_<parameter> exposing updated arguments. Root analysis accepts one
+postconditions, with `final_<parameter>` exposing updated arguments. Root analysis accepts one
 mutable reference whose pointee contains no references. General aliases, mutable returns/captures,
 partially initialized aggregates and ambiguous non-byte writes remain unknown.
 
@@ -336,3 +336,16 @@ contracts. The vendored PID bodies prove reset and a concrete configured update;
 and a reset-write mutation refute. Arbitrary floating-point update paths remain expensive.
 A root budget of 30 seconds is checked before queries, and storage has at most 512 allocations
 per path. There are 57 compiler integration tests and one metadata test.
+
+## Stage 18: scalar cells and conservative atomic counters
+
+Compiler-identified Cell models preserve scalar storage through aliases, branches and callbacks.
+Integer atomic models check load/store orderings and support wrapping add/sub/swap operations over
+arbitrary current values. Each access permits interference; mutable static initializers are never
+frozen. Atomic-only wrappers preserve their structure without reading runtime counter contents.
+
+Host/ARM tests cover positive, refuted and unknown cases. Cell alias/callback updates prove;
+unchecked counter arithmetic, invalid ordering and unsupported history assertions refute.
+RefCell guards and general raw-pointer operations remain unknown. Ordinary Cargo verification
+also proves the unchanged fleet validate::Site::fail and total on ARM. There are 58 compiler
+integration tests and one metadata test.

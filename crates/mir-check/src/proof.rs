@@ -23,6 +23,7 @@ const MAX_ROOT_SECONDS: u64 = 30;
 mod aggregates;
 mod builtins;
 mod constants;
+mod interior;
 mod library;
 mod memory;
 
@@ -120,6 +121,18 @@ impl<'tcx> Engine<'tcx> {
                     projection: Vec::new(),
                     mutable: true,
                 });
+            } else if let ty::Ref(_, element, _) = ty.kind()
+                && let Some(inner) = self.cell_element(*element)
+            {
+                if !memory.is_empty() {
+                    return Err(
+                        "multiple interior/mutable root locations need alias constraints"
+                            .to_owned(),
+                    );
+                }
+                let value = self.argument(id, inner, &mut conditions)?;
+                memory.push(Some(value));
+                arguments.push(Value::Cell { allocation: 0 });
             } else {
                 arguments.push(self.argument(id, ty, &mut conditions)?);
             }
@@ -171,6 +184,10 @@ impl<'tcx> Engine<'tcx> {
                     self.input_binding(&format!("{name}.variant{index}"), variant)?;
                 }
                 return Ok(());
+            }
+            Value::Cell { allocation } => format!("Cell allocation {allocation}; mutable contents"),
+            Value::Atomic { bits, signed } => {
+                format!("shared atomic {bits}-bit signed={signed}; arbitrary per access")
             }
             Value::Unit => "()".to_owned(),
             Value::Elements(elements) => {
@@ -273,6 +290,9 @@ impl<'tcx> Engine<'tcx> {
         ty: Ty<'tcx>,
         conditions: &mut Vec<String>,
     ) -> Result<Value, String> {
+        if let Some(value) = self.atomic_shape(ty) {
+            return Ok(value);
+        }
         if let Some((bits, signed)) = self.integer_type(ty) {
             return Ok(Value::Int {
                 expression: self.fresh(&format!("(_ BitVec {bits})")),
@@ -723,6 +743,17 @@ impl<'tcx> Engine<'tcx> {
                     let callee = instance.def_id();
                     let modeled_values =
                         self.snapshots(&values, &state.memory, &state.conditions)?;
+                    if let Some(value) = self.interior_call(
+                        instance,
+                        &modeled_values,
+                        &mut state,
+                        (id, terminator.source_info.span),
+                    )? {
+                        self.write(&mut state, *destination, value)?;
+                        let target = target.ok_or("interior call has no return edge")?;
+                        queue.push_back((target, state));
+                        continue;
+                    }
                     if let Some(results) = self.library_call(
                         instance,
                         &modeled_values,
@@ -866,7 +897,9 @@ impl<'tcx> Engine<'tcx> {
                     | Value::Unit
                     | Value::Int { .. }
                     | Value::Float { .. }
-                    | Value::Bool(_)),
+                    | Value::Bool(_)
+                    | Value::Cell { .. }
+                    | Value::Atomic { .. }),
                 ) => value,
                 (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
                     .get(field.as_usize())

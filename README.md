@@ -163,6 +163,7 @@ containing a shared byte slice.
 | Inputs | Integers, f32/f64, bool, unit, byte slices/arrays, tuples, nested local/dependency structs and enums, shared references and small arrays |
 | Constants | Evaluated structs, tuples, active enum variants, bounded arrays/slices and immutable promoted/static references |
 | Arithmetic | Exact integer operations; IEEE f32/f64 arithmetic, comparisons and saturating casts |
+| Interior mutation | Scalar Cell aliases/calls and conservative integer atomic counters with checked orderings |
 | Mutable storage | One mutable root receiver, projected writes, reborrows and state propagation through calls |
 | Calls | Concrete generics, static traits, available dependency MIR, function items and read-only closures |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |

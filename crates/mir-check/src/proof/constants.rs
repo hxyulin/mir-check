@@ -17,6 +17,15 @@ impl<'tcx> Engine<'tcx> {
         let value = constant
             .eval(self.tcx, typing_env, span)
             .map_err(|error| format!("unsupported MIR constant evaluation: {error:?}"))?;
+        if let ty::Ref(_, element, mutability) = constant.ty().kind()
+            && !mutability.is_mut()
+            && let Some(value) = self.atomic_container(*element, 0)
+        {
+            return Ok(value);
+        }
+        if let Some(value) = self.atomic_shape(constant.ty()) {
+            return Ok(value);
+        }
         let (ecx, operand) =
             mk_eval_cx_for_const_val(self.tcx.at(span), typing_env, value, constant.ty())
                 .ok_or("unsupported constant layout")?;
@@ -38,6 +47,9 @@ impl<'tcx> Engine<'tcx> {
             ty::Pat(base, _) => *base,
             _ => operand.layout.ty,
         };
+        if let Some(value) = self.atomic_shape(ty) {
+            return Ok(value);
+        }
         if matches!(ty.kind(), ty::Ref(_, _, mutability) if !mutability.is_mut()) {
             let pointee = ecx
                 .deref_pointer(operand)

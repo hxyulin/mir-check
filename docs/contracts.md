@@ -27,7 +27,7 @@ against a caller violating the domain. Panic checking itself does not require an
 See the [contract example](examples.md#contracts-and-nested-inputs) and
 [proof execution](proofs.md) for caller obligations and the trusted components.
 
-Postconditions can inspect supported updated arguments through final_<parameter>, while ordinary
+Postconditions can inspect supported updated arguments through `final_<parameter>`, while ordinary
 parameter names retain entry snapshots:
 
 ```rust
