@@ -32,11 +32,18 @@ pub struct Query {
 
 impl Query {
     pub fn new(declarations: &[String], conditions: &[String], failure: &str) -> Self {
+        Self::from_assertions(
+            declarations,
+            conditions.iter().map(String::as_str).chain([failure]),
+        )
+    }
+
+    fn from_assertions<'a>(
+        declarations: &[String],
+        assertions: impl Iterator<Item = &'a str>,
+    ) -> Self {
         let mut seen = std::collections::HashSet::new();
-        let assertions = conditions
-            .iter()
-            .map(String::as_str)
-            .chain([failure])
+        let assertions = assertions
             .filter(|assertion| *assertion != "true" && seen.insert(*assertion))
             .map(str::to_owned)
             .collect();
@@ -62,6 +69,9 @@ impl Query {
         failure: &str,
         bindings: &std::collections::BTreeMap<String, String>,
     ) -> Self {
+        if bindings.is_empty() {
+            return Self::new(declarations, conditions, failure);
+        }
         let mut pending: Vec<&str> = conditions
             .iter()
             .map(String::as_str)
@@ -70,12 +80,14 @@ impl Query {
         let mut included = std::collections::BTreeSet::new();
         while let Some(expression) = pending.pop() {
             let Some(symbols) = expression_symbols(expression) else {
-                let conditions: Vec<String> = conditions
-                    .iter()
-                    .chain(bindings.values())
-                    .cloned()
-                    .collect();
-                return Self::new(declarations, &conditions, failure);
+                return Self::from_assertions(
+                    declarations,
+                    conditions
+                        .iter()
+                        .chain(bindings.values())
+                        .map(String::as_str)
+                        .chain([failure]),
+                );
             };
             for symbol in symbols {
                 if let Some(constraint) = bindings.get(symbol)
@@ -85,12 +97,14 @@ impl Query {
                 }
             }
         }
-        let conditions: Vec<String> = conditions
-            .iter()
-            .cloned()
-            .chain(included.into_iter().map(|symbol| bindings[symbol].clone()))
-            .collect();
-        Self::new(declarations, &conditions, failure)
+        Self::from_assertions(
+            declarations,
+            conditions
+                .iter()
+                .map(String::as_str)
+                .chain(included.into_iter().map(|symbol| bindings[symbol].as_str()))
+                .chain([failure]),
+        )
     }
 
     pub fn text(&self) -> &str {
@@ -282,19 +296,18 @@ impl Solver {
         {
             commands.push_str("(reset)\n");
             commands.push_str(prelude());
+            // Symbols outlive assertion scopes, so adding one does not discard the
+            // shared prefix. Standalone queries retain their ordinary declarations.
+            commands.push_str("(set-option :global-decls true)\n");
             self.context = Some(Context::default());
         }
         let context = self.context.as_mut().unwrap();
-        let common = if query.declarations.len() != context.declarations.len() {
-            0
-        } else {
-            context
-                .assertions
-                .iter()
-                .zip(&query.assertions)
-                .take_while(|(left, right)| left == right)
-                .count()
-        };
+        let common = context
+            .assertions
+            .iter()
+            .zip(&query.assertions)
+            .take_while(|(left, right)| left == right)
+            .count();
         let pop = context.assertions.len() - common;
         if pop > 0 {
             commands.push_str(&format!("(pop {pop})\n"));
@@ -707,6 +720,44 @@ mod incremental_tests {
     }
 
     #[test]
+    fn declarations_added_under_a_shared_prefix_survive_popping_that_prefix() {
+        let mut solver = Solver {
+            custom: false,
+            ..Solver::default()
+        };
+        let mut declarations = vec!["(declare-const v0 Bool)".to_owned()];
+        let initial = Query::new(&declarations, &["v0".into()], "true");
+        assert!(solver.feasible_query(&initial).unwrap());
+        let process = solver.session.as_ref().unwrap().child.id();
+        declarations.push("(declare-const v1 (_ BitVec 8))".into());
+        let extended = Query::new(&declarations, &["v0".into()], "(= v1 (_ bv29 8))");
+        assert!(solver.feasible_query(&extended).unwrap());
+        let other_branch = Query::new(&declarations, &["(not v0)".into()], "(= v1 (_ bv73 8))");
+        match solver.check_query(&other_branch) {
+            Answer::Sat(model) => {
+                assert!(model.contains("bv73") && model.contains("false"));
+            }
+            Answer::Unsat => panic!("new branch inherited the old prefix"),
+            Answer::Unknown(error) => panic!("global declaration was lost: {error}"),
+        }
+        assert_eq!(solver.session.as_ref().unwrap().child.id(), process);
+        let impossible = Query::new(&declarations, &["v0".into()], "(not v0)");
+        assert!(matches!(solver.check_query(&impossible), Answer::Unsat));
+        let malformed = Query::new(&declarations, &[], "missing");
+        assert!(matches!(solver.check_query(&malformed), Answer::Unknown(_)));
+        assert!(solver.context.is_none());
+        assert!(solver.feasible_query(&extended).unwrap());
+        for query in [&initial, &extended, &other_branch, &impossible] {
+            let standalone = run(&solver.executable, query.text()).unwrap();
+            assert_eq!(
+                solver.feasible_query(query).unwrap(),
+                standalone.trim() == "sat"
+            );
+            assert!(!query.text().contains("global-decls"));
+        }
+    }
+
+    #[test]
     fn structured_queries_reset_incompatible_namespaces_and_keep_models_current() {
         let mut solver = Solver {
             custom: false,
@@ -747,6 +798,26 @@ mod encoding_tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn absent_latent_encodings_preserve_queries_and_do_not_validate_unsupported_syntax() {
+        let declarations = ["(declare-const v0 Bool)".to_owned()];
+        let conditions = ["true".to_owned(), "v0".to_owned(), "v0".to_owned()];
+        for failure in ["(not v0)", "(= |v0| v0)", "missing", "(not v0"] {
+            let plain = Query::new(&declarations, &conditions, failure);
+            let deferred =
+                Query::with_bindings(&declarations, &conditions, failure, &BTreeMap::new());
+            assert_eq!(plain.text(), deferred.text());
+            assert_eq!(plain.assertions, deferred.assertions);
+        }
+        let mut solver = Solver {
+            custom: false,
+            ..Solver::default()
+        };
+        let invalid = Query::with_bindings(&declarations, &[], "missing", &BTreeMap::new());
+        assert!(matches!(solver.check_query(&invalid), Answer::Unknown(_)));
+        assert!(solver.decisions.is_empty());
+    }
+
+    #[test]
     fn latent_encodings_follow_exact_symbol_dependencies_without_matching_prefixes() {
         let declarations = [
             "(declare-const v1 (_ BitVec 8))".to_owned(),
@@ -759,6 +830,15 @@ mod encoding_tests {
             ("v10".to_owned(), "(= v10 (_ bv77 8))".to_owned()),
         ]);
         let query = Query::with_bindings(&declarations, &[], "(distinct v2 (_ bv42 8))", &bindings);
+        assert_eq!(
+            query.text(),
+            Query::new(
+                &declarations,
+                &[bindings["v1"].clone(), bindings["v2"].clone()],
+                "(distinct v2 (_ bv42 8))",
+            )
+            .text()
+        );
         assert!(
             query
                 .assertions

@@ -729,3 +729,13 @@ diagnostics distinguish omitted prebuilt core bodies from genuine foreign declar
 -Zbuild-std=core Cargo path retains core MIR and saved reports can replay it; unsupported pointer
 operations remain UNKNOWN after those bodies become available. No foreign bodies are assumed
 panic-free. Host/ARM, native boundary cases, mutations and captured replay cover this work.
+
+## Stage 41: retain solver prefixes across declaration growth
+
+Live Z3 sessions use global declarations so newly introduced symbols survive scope pops without
+rebuilding shared assertions. Incompatible namespaces and protocol errors still reset the session.
+Standalone report query text remains unchanged. Empty deferred-encoding maps skip dependency lexing,
+and construction borrows condition strings instead of cloning an intermediate list. Scope-survival,
+model-freshness and replay regressions verify answers; removing the global option breaks the new
+test. Synthetic optimized workloads improved from 698 to 47.5 ms for 256 growing queries, and from
+187 to 99 ms for constructing 5,000 queries, using six alternating samples.

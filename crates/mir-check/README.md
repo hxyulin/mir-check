@@ -290,3 +290,6 @@ lengths and unresolved aliases remain UNKNOWN.
 Function-item callbacks resolve concrete trait implementations before requesting MIR. Exact core
 integer endian encoding is modeled, and missing-body diagnostics distinguish foreign declarations
 from omitted prebuilt core bodies. Cargo -Zbuild-std=core can capture rebuilt core MIR.
+
+Live solver declarations survive scope pops, retaining common assertion prefixes as symbols grow.
+Incompatible namespaces still reset. Query construction skips unused deferred-encoding scans.
