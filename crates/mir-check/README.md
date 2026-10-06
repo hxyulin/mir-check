@@ -189,3 +189,11 @@ returns, captured mutable references and ambiguous composite writes remain unsup
 Borrowed fixed arrays and slices implement IntoIterator through the same tracked cursor models.
 Primitive core f32/f64 finiteness uses exact NaN/infinity classification, reducing the MIR steps
 needed by numeric iterator predicates without weakening their conditions.
+
+The default solver keeps one lazily started Z3 process per root, resetting its state before each
+query. Feasibility checks omit unused counterexample models. Refutations obtain their model in
+the same query context. Exact-query decisions are cached within a root, with at most 1,024 entries
+or two MiB of query text; unknown responses are never cached. A six-second host deadline covers
+pipe writes and reads, and failures discard the session. MIR_CHECK_Z3 keeps the existing custom
+one-shot protocol, which relies on the executable's -T:6 timeout option. No proofs are reused
+across compiler invocations.

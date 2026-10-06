@@ -1,5 +1,5 @@
 use super::contracts;
-use super::solver::{self, Answer};
+use super::solver::{Answer, Solver};
 use super::symbolic::{self, Value};
 use mir_check::{Contract, ContractKind, Obligation, ObligationKind, Proof, ProofStatus};
 use rustc_attr_ir::{HasAttrs, LangItem};
@@ -54,6 +54,7 @@ struct Engine<'tcx> {
     proof: Proof,
     config: mir_check::ContractConfig,
     resolved_contracts: BTreeMap<String, DefId>,
+    solver: std::cell::RefCell<Solver>,
 }
 
 pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) -> Proof {
@@ -67,6 +68,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) ->
         started: std::time::Instant::now(),
         config: config.clone(),
         resolved_contracts: BTreeMap::new(),
+        solver: std::cell::RefCell::new(Solver::default()),
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
@@ -428,11 +430,9 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn feasible(&self, conditions: &[String]) -> Result<bool, String> {
-        match solver::check(&self.query(conditions, "true")?) {
-            Answer::Unsat => Ok(false),
-            Answer::Sat(_) => Ok(true),
-            Answer::Unknown(reason) => Err(reason),
-        }
+        self.solver
+            .borrow_mut()
+            .feasible(&self.query(conditions, "true")?)
     }
 
     fn require(
@@ -445,7 +445,7 @@ impl<'tcx> Engine<'tcx> {
         detail: String,
     ) -> Result<(), String> {
         let query = self.query(conditions, &symbolic::not(safe))?;
-        let (status, model, detail) = match solver::check(&query) {
+        let (status, model, detail) = match self.solver.borrow_mut().check(&query) {
             Answer::Unsat => (ProofStatus::Proved, None, detail),
             Answer::Sat(model) => (ProofStatus::Refuted, Some(model), detail),
             Answer::Unknown(reason) => (ProofStatus::Unknown, None, format!("{detail}: {reason}")),

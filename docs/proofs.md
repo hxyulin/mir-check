@@ -72,10 +72,22 @@ and infeasible queued branches. Truncating unfinished paths would be unsound; re
 returns unknown. Infinite loops and larger finite loops can therefore remain unknown even when
 they do not panic. Recursive calls and depths beyond eight also remain unknown.
 
-Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and six-second
-process limit. Reaching these limits is a verification failure. The prototype starts solver
-processes for separate queries and does not merge states or cache verified function summaries,
-so branches and loop iterations can make it expensive.
+Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a six-second
+host deadline per solver request. Reaching these limits is a verification failure. A root lazily
+starts one Z3 process and resets its declarations and assertions before each query. Feasibility
+checks request a decision; a refuted obligation requests its model from the same query context.
+Malformed output, missing response markers, closed pipes and timeouts discard the session and
+return UNKNOWN. The host deadline covers writes as well as reads.
+
+An exact-query decision cache is local to the root and holds at most 1,024 entries or two MiB of
+query text. Undecided responses are never cached. A cached satisfiable decision can answer a
+feasibility check, but cannot supply a counterexample model. There is no disk proof cache, state
+merging or cache of verified function summaries. Branch growth and complex solver queries can
+therefore remain expensive.
+
+Setting MIR_CHECK_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
+existing -T:6 process option. This compatibility path relies on the executable honoring that
+option; the default persistent backend enforces the host deadline independently.
 
 ## What is trusted and missing
 

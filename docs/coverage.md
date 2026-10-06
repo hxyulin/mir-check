@@ -54,7 +54,9 @@ at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaus
 
 The execution budget is 256 dequeued blocks per root, including callees and infeasible queued
 branches. Call depth is eight; recursion is unsupported. Queries have at most 200,000 bytes, a
-five-second solver timeout and a six-second process limit. Exceeding a limit returns UNKNOWN.
+five-second solver timeout and a six-second host deadline per default solver request. Exceeding a
+limit returns UNKNOWN. Root-local solver sessions reset before each query; bounded exact-query
+caching avoids repeated decisions without reusing function proofs or unchecked summaries.
 
 Explicit core models implement byte lengths/ranges/copies, shared slice-to-array conversion,
 lossless integer conversion, endian decoding, fixed-array map and opaque formatting arguments from

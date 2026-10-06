@@ -466,3 +466,30 @@ unknown. There are 80 compiler integration tests and one metadata test.
 Borrowed array/slice IntoIterator factories use the same cursor models. Exact primitive float
 finiteness classification reduces helper-call steps in numeric predicates, with host/ARM cases
 covering NaN, infinities, signed zero and an unconstrained assertion that must refute.
+
+## Stage 26: persistent root-local solver sessions
+
+Feasibility checks request SAT/UNSAT without an unused model. The default backend lazily starts
+one Z3 process per root, resets before each query and fetches counterexample models in the same
+query context. A root-local exact-query cache holds at most 1,024 entries or two MiB of query
+text. Undecided responses never enter the cache. The compatibility executable override retains
+its one-shot protocol.
+
+Protocol tests verify declaration/assertion isolation, cache keys and limits, current-context
+models, malformed responses, EOF and a stalled writer killed by the six-second host deadline.
+The existing compiler, negative, unknown and mutation suites continue to pass.
+
+A local host benchmark used the old and new release binaries, normal Z3 without a profiling
+wrapper, one warmup and five alternating measured runs per binary. Median direct analysis times
+for the synthetic slice fixture were:
+
+| Root | Before | Persistent session and decision cache |
+| --- | ---: | ---: |
+| units | 0.359 s | 0.071 s |
+| enumerate | 0.957 s | 0.129 s |
+| floats | 1.047 s | 0.121 s |
+
+All three roots remained PROVED. These measurements use Apple Silicon, Z3 4.15.4 and the pinned
+nightly's host library configuration; they are not a general speed guarantee. Resource limits,
+unsupported behavior and the proof domain are unchanged. There is no cross-invocation proof
+cache or precomputed standard-library summary store.
