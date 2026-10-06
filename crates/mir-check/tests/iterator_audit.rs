@@ -63,7 +63,7 @@ fn iterator_models_keep_skip_bounds_storage_aliases_and_unknown_views_on_host_an
         ("separated_writes", ProofStatus::Proved),
         ("wrong_alias_claim", ProofStatus::Refuted),
         ("unavailable_view", ProofStatus::Unknown),
-        ("owned_mutable_environment", ProofStatus::Unknown),
+        ("owned_mutable_environment", ProofStatus::Refuted),
     ];
     let entries: Vec<_> = expected.iter().map(|(name, _)| *name).collect();
     for target in [None, Some("thumbv7em-none-eabihf")] {

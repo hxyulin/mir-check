@@ -1676,7 +1676,7 @@ pub fn mutable_capture(value: u16) -> u16 {
             proof.status,
             match entry {
                 "invalid_generic" => ProofStatus::Refuted,
-                "mutable_capture" => ProofStatus::Unknown,
+                "mutable_capture" => ProofStatus::Proved,
                 _ => ProofStatus::Proved,
             },
             "{entry}: {:?}",
@@ -2550,7 +2550,7 @@ fn mutable_slice_iterators_preserve_source_writes_and_disjoint_elements_on_host_
         ("bad_alias", ProofStatus::Refuted),
         ("bad_overflow", ProofStatus::Refuted),
         ("ambiguous", ProofStatus::Unknown),
-        ("escaping", ProofStatus::Unknown),
+        ("escaping", ProofStatus::Proved),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let args = target
@@ -3199,7 +3199,7 @@ fn mutable_storage_preserves_call_writes_branch_states_and_entry_snapshots_on_ho
         ("bad_bytes", ProofStatus::Refuted),
         ("two_mutable", ProofStatus::Unknown),
         ("nested_reference", ProofStatus::Unknown),
-        ("escaping_reference", ProofStatus::Unknown),
+        ("escaping_reference", ProofStatus::Proved),
         ("ambiguous_array", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {

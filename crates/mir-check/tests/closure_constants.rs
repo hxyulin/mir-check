@@ -71,7 +71,7 @@ fn evaluated_closures_execute_real_callbacks_and_reject_captured_constant_enviro
         ("rejected_constant_callback", ProofStatus::Refuted),
         ("captured_constant", ProofStatus::Unknown),
         ("captured_zero_sized_constant", ProofStatus::Unknown),
-        ("mutable_environment", ProofStatus::Unknown),
+        ("mutable_environment", ProofStatus::Proved),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();

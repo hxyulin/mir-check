@@ -239,3 +239,10 @@ add/subtract, defined-zero leading/trailing zero counts, byte swapping and bit r
 signatures and modeled widths/signs gate each model. Saturation uses one extra SMT bit, including
 129-bit intermediates for 128-bit inputs. Scoped let bindings preserve operand expressions without
 raising query limits. Unsafe nonzero-only count intrinsics remain unsupported.
+
+Tracked mutable references can be stored in supported structs, tuples, enums and iterator
+adapters. References into incoming storage can return; graph checks reject local or dangling
+borrows escaping, including references hidden in caller storage. FnMut callback environments
+preserve owned capture state and external writes across calls. General root aliasing and legacy
+mutable byte captures remain unknown. Synthetic host/ARM tests cover Zip/Flatten, reference
+returns, stateful callbacks and rejected mutations.

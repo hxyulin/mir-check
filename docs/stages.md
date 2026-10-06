@@ -590,3 +590,23 @@ cover all 65,536 operand pairs for both unsigned and signed eight-bit properties
 inputs for independent zero-count oracles, 128-bit boundaries and direct byte layout checks.
 Three failing mutations are independently replayed. The combined suite has 94 compiler
 integration tests, 13 solver/contract unit tests and one metadata integration test.
+
+## Stage 32: tracked aggregate borrows and callback environments
+
+Mutable references retain their allocation IDs and projections inside tuples, structs, enums,
+closures and supported iterator adapters. Returns preserve incoming storage references; graph
+checks reject callee-local/dead borrows, including references hidden in caller storage. General
+root aliasing, legacy mutable byte captures and ambiguous non-byte writes remain unknown.
+Core Zip/Flatten bodies can now proceed through tracked mutable aggregate storage.
+
+FnMut calls borrow their actual environment. Map/from_fn, predicates and folds allocate one
+tracked environment per modeled invocation, carry owned capture updates and external writes
+between callbacks, and retire the environment on completion. Callback destructors remain unknown.
+Map preserves reference-valued input elements. Existing false assertions that callback state
+resets between calls now refute; borrowing external counters can prove.
+
+The synthetic aggregate fixture checks 19 roots on host/ARM: 13 prove, three refute and three remain
+unknown. Native tests exercise 700 bounded calls, stateful callback cases and negative panic
+catches. A struct-field swap mutation refutes, and four internal graph regressions cover hidden
+local escapes, dead storage, nested incoming references and untracked byte views. These tests are
+regression evidence rather than a completed alias/lifetime audit.

@@ -73,6 +73,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         instance: ty::Instance<'tcx>,
         values: &[Value],
+        raw_values: &[Value],
         state: &State,
         stack: &[DefId],
         site: (DefId, Span),
@@ -98,7 +99,7 @@ impl<'tcx> Engine<'tcx> {
             .map_err(|error| format!("call signature normalization failed: {error:?}"))?
             .skip_binder();
         if self.core_array_from_fn() == Some(callee) {
-            return self.array_from_fn(instance, signature, values, state, stack, site);
+            return self.array_from_fn(instance, signature, raw_values, state, stack, site);
         }
         let parent = self.tcx.parent(callee);
         let name = self.tcx.item_name(callee);
@@ -221,7 +222,7 @@ impl<'tcx> Engine<'tcx> {
                 ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
                 _ => return Ok(None),
             };
-            let [array, closure] = values else {
+            let [array, closure] = raw_values else {
                 return Err("array map arity mismatch".to_owned());
             };
             let elements = self.array_values(array, signature.inputs()[0])?;
@@ -229,7 +230,15 @@ impl<'tcx> Engine<'tcx> {
                 callee,
                 "fixed array map; callable bodies executed in index order",
             );
-            let mut pending = vec![(Vec::new(), state.conditions.clone(), state.memory.clone())];
+            if signature.inputs()[1].needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+                return Err("array map callback destructors are not modeled".to_owned());
+            }
+            let (closure, memory) = if has_environment {
+                self.callback_environment(closure, state)?
+            } else {
+                (closure.clone(), state.memory.clone())
+            };
+            let mut pending = vec![(Vec::new(), state.conditions.clone(), memory)];
             for element in elements {
                 let mut next = Vec::new();
                 for (collected, conditions, memory) in pending {
@@ -279,6 +288,9 @@ impl<'tcx> Engine<'tcx> {
                     conditions,
                     memory,
                 });
+            }
+            if has_environment {
+                self.retire_callback_environment(&closure, &mut results);
             }
             return Ok(Some(results));
         }
@@ -337,19 +349,16 @@ impl<'tcx> Engine<'tcx> {
             ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
             _ => return Err("array from_fn requires a concrete callback body".to_owned()),
         };
-        if callback.contains_mutable() {
-            return Err("array from_fn mutable captures are not modeled".to_owned());
-        }
+        let (callback, memory) = if has_environment {
+            self.callback_environment(callback, state)?
+        } else {
+            (callback.clone(), state.memory.clone())
+        };
         self.record_model(
             instance.def_id(),
             "fixed array from_fn; owned results and callable effects in ascending index order",
         );
-        let mut pending = vec![(
-            Vec::new(),
-            1_usize,
-            state.conditions.clone(),
-            state.memory.clone(),
-        )];
+        let mut pending = vec![(Vec::new(), 1_usize, state.conditions.clone(), memory)];
         for index in 0..count {
             let mut next = Vec::new();
             for (collected, size, conditions, memory) in pending {
@@ -407,6 +416,9 @@ impl<'tcx> Engine<'tcx> {
                 conditions,
                 memory,
             });
+        }
+        if has_environment {
+            self.retire_callback_environment(&callback, &mut results);
         }
         Ok(Some(results))
     }

@@ -402,6 +402,119 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
+    pub(super) fn callback_environment(
+        &self,
+        callback: &Value,
+        state: &State,
+    ) -> Result<(Value, Vec<Option<Value>>), String> {
+        self.validate_tracked_value(callback, state)?;
+        if state.memory.len() >= MAX_ALLOCATIONS {
+            return Err("memory allocation budget reached".to_owned());
+        }
+        let mut memory = state.memory.clone();
+        let allocation = memory.len();
+        memory.push(Some(callback.clone()));
+        Ok((
+            Value::Reference {
+                allocation,
+                projection: Vec::new(),
+                mutable: true,
+            },
+            memory,
+        ))
+    }
+
+    pub(super) fn retire_callback_environment(&self, callback: &Value, results: &mut [Return]) {
+        if let Value::Reference { allocation, .. } = callback {
+            for result in results {
+                result.memory[*allocation] = None;
+            }
+        }
+    }
+
+    pub(super) fn validate_tracked_value(
+        &self,
+        value: &Value,
+        state: &State,
+    ) -> Result<(), String> {
+        Self::validate_reference_graph(value, state, None, &mut Vec::new())
+    }
+
+    pub(super) fn validate_frame_escape(
+        &self,
+        value: &Value,
+        state: &State,
+        incoming: usize,
+    ) -> Result<(), String> {
+        self.return_value(value.clone(), state, incoming)?;
+        for value in state.memory[..incoming].iter().flatten() {
+            Self::validate_reference_graph(value, state, Some(incoming), &mut Vec::new())?;
+        }
+        Ok(())
+    }
+
+    fn validate_reference_graph(
+        value: &Value,
+        state: &State,
+        incoming: Option<usize>,
+        visited: &mut Vec<usize>,
+    ) -> Result<(), String> {
+        match value {
+            Value::Reference { allocation, .. } | Value::Cell { allocation } => {
+                if matches!(value, Value::Reference { .. })
+                    && incoming.is_some_and(|limit| *allocation >= limit)
+                {
+                    return Err(
+                        "reference to frame-owned storage cannot escape its frame".to_owned()
+                    );
+                }
+                let stored = state
+                    .memory
+                    .get(*allocation)
+                    .and_then(Option::as_ref)
+                    .ok_or("reference points to dead or uninitialized storage")?;
+                if !visited.contains(allocation) {
+                    visited.push(*allocation);
+                    Self::validate_reference_graph(stored, state, incoming, visited)?;
+                }
+                Ok(())
+            }
+            Value::MutableBytes { .. } => {
+                Err("untracked mutable byte view cannot be stored in an aggregate".to_owned())
+            }
+            Value::Adt { fields, .. } => {
+                for (_, value) in fields {
+                    Self::validate_reference_graph(value, state, incoming, visited)?;
+                }
+                Ok(())
+            }
+            Value::Enum { variants, .. } => {
+                for value in variants {
+                    Self::validate_reference_graph(value, state, incoming, visited)?;
+                }
+                Ok(())
+            }
+            Value::Tuple(fields) | Value::Elements(fields) => {
+                for value in fields {
+                    Self::validate_reference_graph(value, state, incoming, visited)?;
+                }
+                Ok(())
+            }
+            Value::SliceIterator { source, .. } | Value::MetadataPointer(source) => {
+                Self::validate_reference_graph(source, state, incoming, visited)
+            }
+            Value::Bool(_)
+            | Value::Int { .. }
+            | Value::Float { .. }
+            | Value::Bytes { .. }
+            | Value::Atomic { .. }
+            | Value::StaticText
+            | Value::FormatArguments
+            | Value::Function
+            | Value::Unit => Ok(()),
+        }
+    }
+
     pub(super) fn return_value(
         &self,
         value: Value,
@@ -420,8 +533,23 @@ impl<'tcx> Engine<'tcx> {
                 back,
                 mutable,
             }),
-            Value::Reference { allocation, .. } if allocation >= incoming => {
-                self.snapshot(&value, &state.memory, &state.conditions, 0)
+            Value::Reference {
+                allocation,
+                mutable,
+                ..
+            } if allocation >= incoming => {
+                if mutable {
+                    return Err("mutable local borrows cannot escape their frame".to_owned());
+                }
+                let referent = self.reference_value(&value, &state.memory, &state.conditions)?;
+                self.return_value(referent, state, incoming)
+            }
+            value @ (Value::Reference { .. } | Value::Cell { .. }) => {
+                Self::validate_reference_graph(&value, state, Some(incoming), &mut Vec::new())?;
+                Ok(value)
+            }
+            Value::MutableBytes { .. } => {
+                Err("mutable local borrows cannot escape their frame".to_owned())
             }
             Value::Adt {
                 name,
@@ -439,6 +567,21 @@ impl<'tcx> Engine<'tcx> {
                     .map(|(name, value)| Ok((name, self.return_value(value, state, incoming)?)))
                     .collect::<Result<_, String>>()?,
             }),
+            Value::Enum {
+                discriminant,
+                variants,
+                is_option,
+            } => Ok(Value::Enum {
+                discriminant,
+                variants: variants
+                    .into_iter()
+                    .map(|value| self.return_value(value, state, incoming))
+                    .collect::<Result<_, _>>()?,
+                is_option,
+            }),
+            Value::MetadataPointer(value) => Ok(Value::MetadataPointer(Box::new(
+                self.return_value(*value, state, incoming)?,
+            ))),
             Value::Tuple(fields) => Ok(Value::Tuple(
                 fields
                     .into_iter()
@@ -453,5 +596,72 @@ impl<'tcx> Engine<'tcx> {
             )),
             other => Ok(other),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(memory: Vec<Option<Value>>) -> State {
+        State {
+            locals: Vec::new(),
+            addresses: Vec::new(),
+            conditions: Vec::new(),
+            memory,
+        }
+    }
+
+    fn reference(allocation: usize, mutable: bool) -> Value {
+        Value::Reference {
+            allocation,
+            projection: Vec::new(),
+            mutable,
+        }
+    }
+
+    #[test]
+    fn a_frame_borrow_hidden_inside_caller_storage_cannot_escape() {
+        let caller = Value::Tuple(vec![reference(1, true)]);
+        let state = state(vec![Some(caller), Some(symbolic::integer(7, 16, false))]);
+        let error = Engine::validate_reference_graph(
+            &reference(0, false),
+            &state,
+            Some(1),
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(error.contains("frame-owned"));
+    }
+
+    #[test]
+    fn dead_borrows_are_rejected_inside_aggregates() {
+        let borrowed = Value::Tuple(vec![reference(0, true)]);
+        let state = state(vec![None]);
+        let error =
+            Engine::validate_reference_graph(&borrowed, &state, None, &mut Vec::new()).unwrap_err();
+        assert!(error.contains("dead or uninitialized"));
+    }
+
+    #[test]
+    fn nested_incoming_references_keep_their_storage_identity() {
+        let borrowed = Value::Tuple(vec![reference(0, true), reference(1, false)]);
+        let state = state(vec![
+            Some(symbolic::integer(7, 16, false)),
+            Some(Value::Tuple(vec![reference(0, false)])),
+        ]);
+        Engine::validate_reference_graph(&borrowed, &state, Some(2), &mut Vec::new()).unwrap();
+    }
+
+    #[test]
+    fn untracked_byte_views_do_not_gain_an_allocation_by_being_nested() {
+        let borrowed = Value::Tuple(vec![Value::MutableBytes {
+            owner: 0,
+            length: Box::new(symbolic::integer(2, 64, false)),
+        }]);
+        let state = state(Vec::new());
+        assert!(
+            Engine::validate_reference_graph(&borrowed, &state, None, &mut Vec::new()).is_err()
+        );
     }
 }

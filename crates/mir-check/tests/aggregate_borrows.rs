@@ -13,7 +13,7 @@ impl Directory {
     fn new() -> Self {
         let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "mir-check-owned-iterator-{}-{id}",
+            "mir-check-aggregate-borrow-{}-{id}",
             std::process::id()
         ));
         std::fs::create_dir_all(&path).unwrap();
@@ -28,7 +28,7 @@ impl Drop for Directory {
 }
 
 fn fixture() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/owned_iterators.rs")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/aggregate_borrows.rs")
 }
 
 fn contract_library() -> PathBuf {
@@ -81,37 +81,27 @@ fn verify(path: &Path, names: &[&str], target: Option<&str>) -> (Output, Report)
 }
 
 #[test]
-fn owned_iterator_order_effects_failures_and_boundaries_are_checked_on_host_and_arm() {
+fn tracked_aggregate_borrows_preserve_writes_on_host_and_arm() {
     let entries = [
-        ("station_labels", ProofStatus::Proved),
-        ("parcel_ends", ProofStatus::Proved),
-        ("byte_count", ProofStatus::Proved),
-        ("empty", ProofStatus::Proved),
-        ("unit_moves", ProofStatus::Proved),
-        ("owned_structs", ProofStatus::Proved),
-        ("predicate_effects", ProofStatus::Proved),
-        ("predicate_call_bounds", ProofStatus::Proved),
-        ("ordered_fold", ProofStatus::Proved),
-        ("last_and_adapters", ProofStatus::Proved),
-        ("wrapped_iterator_drop", ProofStatus::Proved),
-        ("borrowed_consuming_methods", ProofStatus::Proved),
-        ("borrowed_shared_count", ProofStatus::Proved),
-        ("callback_panic", ProofStatus::Refuted),
-        ("bad_call_bound", ProofStatus::Refuted),
-        ("wrong_order", ProofStatus::Refuted),
-        ("bad_fold", ProofStatus::Refuted),
-        ("bad_borrowed_count", ProofStatus::Refuted),
-        ("bad_borrowed_shared_count", ProofStatus::Refuted),
-        ("bad_borrowed_last", ProofStatus::Refuted),
-        ("bad_borrowed_passthrough", ProofStatus::Refuted),
-        ("identity_elements", ProofStatus::Unknown),
-        ("element_destructor", ProofStatus::Unknown),
-        ("enclosing_destructor", ProofStatus::Unknown),
-        ("borrowed_element", ProofStatus::Unknown),
-        ("mutable_capture", ProofStatus::Proved),
-        ("unsupported_view", ProofStatus::Unknown),
-        ("unsupported_clone", ProofStatus::Unknown),
-        ("same_named_user_iterator", ProofStatus::Refuted),
+        ("parcel_pair", ProofStatus::Proved),
+        ("tuple_reborrow", ProofStatus::Proved),
+        ("captured_counter", ProofStatus::Proved),
+        ("returned_capture", ProofStatus::Proved),
+        ("optional_borrow", ProofStatus::Proved),
+        ("zipped_labels", ProofStatus::Proved),
+        ("flattened_bins", ProofStatus::Proved),
+        ("wrong_pair", ProofStatus::Refuted),
+        ("wrong_capture", ProofStatus::Refuted),
+        ("owned_capture_state", ProofStatus::Proved),
+        ("wrong_owned_capture_state", ProofStatus::Refuted),
+        ("generated_capture_state", ProofStatus::Proved),
+        ("mapped_capture_state", ProofStatus::Proved),
+        ("mapped_reference_elements", ProofStatus::Proved),
+        ("predicate_capture_state", ProofStatus::Proved),
+        ("folded_capture_state", ProofStatus::Proved),
+        ("byte_capture_boundary", ProofStatus::Unknown),
+        ("multiple_mutable_inputs", ProofStatus::Unknown),
+        ("ambiguous_write", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
@@ -136,36 +126,28 @@ fn owned_iterator_order_effects_failures_and_boundaries_are_checked_on_host_and_
                     .map(|o| (&o.status, &o.detail))
                     .collect::<Vec<_>>()
             );
-            if expected == ProofStatus::Proved && name != "borrowed_shared_count" {
-                assert!(
-                    proof
-                        .models
-                        .iter()
-                        .any(|model| model.contains("owned array iterator"))
-                );
-            }
         }
     }
 }
 
 #[test]
-fn reversing_the_expected_station_label_refutes_the_unchanged_cursor() {
+fn swapped_aggregate_field_mutation_is_refuted() {
     let source = std::fs::read_to_string(fixture()).unwrap();
-    let original = "pending.next().unwrap() == offset";
-    assert!(source.contains(original));
+    let original = "Pair { left, right }";
+    assert_eq!(source.matches(original).count(), 1);
     let directory = Directory::new();
-    let path = directory.0.join("owned_iterators.rs");
+    let path = directory.0.join("aggregate_borrows.rs");
     std::fs::write(
         &path,
-        source.replace(original, "pending.next().unwrap() == offset + 6"),
+        source.replace(original, "Pair { left: right, right: left }"),
     )
     .unwrap();
-    let (output, report) = verify(&path, &["station_labels"], None);
+    let (output, report) = verify(&path, &["parcel_pair"], None);
     assert!(!output.status.success());
     let proof = report
         .functions
         .iter()
-        .find(|f| f.name == "station_labels")
+        .find(|f| f.name == "parcel_pair")
         .unwrap()
         .proof
         .as_ref()
@@ -178,11 +160,10 @@ fn reversing_the_expected_station_label_refutes_the_unchanged_cursor() {
     );
     assert!(proof.obligations.iter().any(|o| o.model.is_some()));
 }
-
 #[test]
-fn owned_iterators_match_native_positions_and_callback_effects() {
+fn aggregate_borrows_match_native_writes() {
     let directory = Directory::new();
-    let executable = directory.0.join("owned-iterator-tests");
+    let executable = directory.0.join("aggregate-borrow-tests");
     let output = Command::new("rustc")
         .args(["--test", "--edition=2024", "-Coverflow-checks=yes"])
         .arg(fixture())

@@ -196,13 +196,8 @@ impl<'tcx> Engine<'tcx> {
                 1
             };
             let callback_ty = signature.inputs()[callback_index];
-            if values[callback_index].contains_mutable()
-                || callback_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
-            {
-                return Err(
-                    "owned iterator mutable captures or callback destructors are unmodeled"
-                        .to_owned(),
-                );
+            if callback_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+                return Err("owned iterator callback destructors are unmodeled".to_owned());
             }
             if matches!(name.as_str(), "all" | "any") {
                 return self
@@ -340,24 +335,25 @@ impl<'tcx> Engine<'tcx> {
             return Err("iterator fold callback arity mismatch".to_owned());
         }
         let callback_ty = signature.inputs()[2];
-        if values[2].contains_mutable()
-            || callback_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
-        {
-            return Err(
-                "iterator fold mutable captures or callback destructors are unmodeled".to_owned(),
-            );
+        if callback_ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+            return Err("iterator fold callback destructors are unmodeled".to_owned());
         }
         let (callable, has_environment) = match callback_ty.kind() {
             ty::Closure(id, args) => (ty::Instance::new_raw(*id, args), true),
             ty::FnDef(id, args) => (ty::Instance::new_raw(*id, args.skip_binder()), false),
             _ => return Err("iterator fold requires a concrete callback body".to_owned()),
         };
+        let (callback, memory) = if has_environment {
+            self.callback_environment(&values[2], state)?
+        } else {
+            (values[2].clone(), state.memory.clone())
+        };
         let reverse = self.tcx.item_name(instance.def_id()) == Symbol::intern("rfold");
         let mut pending = vec![(
             iterator,
             values[1].clone(),
             state.conditions.clone(),
-            state.memory.clone(),
+            memory,
         )];
         let mut returns = Vec::new();
         while let Some((iterator, accumulator, conditions, memory)) = pending.pop() {
@@ -387,7 +383,7 @@ impl<'tcx> Engine<'tcx> {
                 };
                 let mut arguments = vec![accumulator.clone(), item];
                 if has_environment {
-                    arguments.insert(0, values[2].clone());
+                    arguments.insert(0, callback.clone());
                 }
                 for result in self.call_instance(
                     callable,
@@ -405,6 +401,9 @@ impl<'tcx> Engine<'tcx> {
                     ));
                 }
             }
+        }
+        if has_environment {
+            self.retire_callback_environment(&callback, &mut returns);
         }
         Ok(returns)
     }

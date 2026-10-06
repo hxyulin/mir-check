@@ -615,8 +615,16 @@ impl<'tcx> Engine<'tcx> {
             _ => return Err("iterator predicate requires a concrete callable body".to_owned()),
         };
         let predicate = values.get(1).ok_or("iterator predicate is missing")?;
+        if signature.inputs()[1].needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+            return Err("iterator predicate callback destructors are not modeled".to_owned());
+        }
+        let (predicate, memory) = if environment {
+            self.callback_environment(predicate, state)?
+        } else {
+            (predicate.clone(), state.memory.clone())
+        };
         let all = self.tcx.item_name(instance.def_id()) == Symbol::intern("all");
-        let mut pending = vec![(iterator, state.conditions.clone(), state.memory.clone())];
+        let mut pending = vec![(iterator, state.conditions.clone(), memory)];
         let mut returns = Vec::new();
         while let Some((iterator, conditions, memory)) = pending.pop() {
             for iteration in
@@ -666,6 +674,9 @@ impl<'tcx> Engine<'tcx> {
                     }
                 }
             }
+        }
+        if environment {
+            self.retire_callback_environment(&predicate, &mut returns);
         }
         Ok(returns)
     }

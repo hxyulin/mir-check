@@ -631,9 +631,7 @@ impl<'tcx> Engine<'tcx> {
                 }
                 TerminatorKind::Return => {
                     let value = self.local(&state, 0)?;
-                    if value.contains_mutable() {
-                        return Err("mutable local borrows cannot escape their frame".to_owned());
-                    }
+                    self.validate_frame_escape(&value, &state, incoming_allocations)?;
                     let mut post_bindings = bindings.clone();
                     let uses_post_state = contracts
                         .iter()
@@ -836,6 +834,7 @@ impl<'tcx> Engine<'tcx> {
                         && let Some(results) = self.library_call(
                             instance,
                             &modeled_values,
+                            &values,
                             &state,
                             &stack,
                             (id, terminator.source_info.span),
@@ -1111,14 +1110,6 @@ impl<'tcx> Engine<'tcx> {
         match value {
             Rvalue::Use(operand, _) => self.operand(id, body, state, operand),
             Rvalue::Ref(_, BorrowKind::Shared, place) => self.borrow(state, *place, false),
-            Rvalue::Ref(_, BorrowKind::Mut { .. }, place)
-                if matches!(
-                    place.ty(&body.local_decls, self.tcx).ty.kind(),
-                    ty::Closure(..)
-                ) =>
-            {
-                self.place(state, *place)
-            }
             Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => {
                 if matches!(self.place(state, *place)?, Value::MutableBytes { .. })
                     || (place.projection.is_empty()

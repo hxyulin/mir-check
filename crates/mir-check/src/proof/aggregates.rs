@@ -136,8 +136,8 @@ impl<'tcx> Engine<'tcx> {
             .iter()
             .map(|value| self.operand(id, body, state, value))
             .collect::<Result<Vec<_>, _>>()?;
-        if values.iter().any(Value::contains_mutable) {
-            return Err("mutable borrows cannot be stored in aggregates".to_owned());
+        for value in &values {
+            self.validate_tracked_value(value, state)?;
         }
         match kind {
             AggregateKind::Array(element) if *element == self.tcx.types.u8 => {

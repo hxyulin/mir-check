@@ -96,8 +96,8 @@ fn generated_arrays_execute_callbacks_in_order_and_keep_failures_and_limits_on_h
         ("bad_callback", ProofStatus::Refuted),
         ("bad_overflow", ProofStatus::Refuted),
         ("bad_call_bound", ProofStatus::Refuted),
-        ("mutable_capture", ProofStatus::Unknown),
-        ("owned_mutable_capture", ProofStatus::Unknown),
+        ("mutable_capture", ProofStatus::Proved),
+        ("owned_mutable_capture", ProofStatus::Refuted),
         ("identity_elements", ProofStatus::Unknown),
         ("element_limit", ProofStatus::Unknown),
         ("value_budget_boundary", ProofStatus::Proved),
@@ -136,7 +136,7 @@ fn generated_arrays_execute_callbacks_in_order_and_keep_failures_and_limits_on_h
                     proof
                         .obligations
                         .iter()
-                        .any(|o| o.detail.contains("write through a shared snapshot"))
+                        .any(|o| o.status == ProofStatus::Refuted && o.model.is_some())
                 ),
                 "element_limit" => assert!(
                     proof
