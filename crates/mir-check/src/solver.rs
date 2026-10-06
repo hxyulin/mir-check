@@ -84,21 +84,24 @@ impl Query {
         use mir_check::smt::{Constant, Sort};
         let mut pending: Vec<_> = conditions.iter().chain([failure]).collect();
         let mut included = std::collections::BTreeSet::new();
-        if !bindings.is_empty() {
-            while let Some(term) = pending.pop() {
-                for symbol in term.symbols() {
-                    if let Some(binding) = bindings.get(&symbol)
-                        && included.insert(symbol)
-                    {
-                        pending.push(binding);
-                    }
+        let mut symbols = std::collections::BTreeSet::new();
+        while let Some(term) = pending.pop() {
+            if term.sort() != &Sort::Bool || !term.belongs_to(context) {
+                return Err("query requires Boolean terms from its analysis context".to_owned());
+            }
+            for symbol in term.symbols() {
+                symbols.insert(symbol);
+                if let Some(binding) = bindings.get(&symbol)
+                    && included.insert(symbol)
+                {
+                    pending.push(binding);
                 }
             }
         }
         let mut seen = std::collections::HashSet::new();
         let mut ground = Some(true);
         let mut assertions = Vec::new();
-        let declarations = context.declarations();
+        let declarations = context.declarations_for(&symbols)?;
         let mut bytes = prelude().len()
             + "(check-sat)\n".len()
             + declarations
@@ -917,6 +920,13 @@ mod encoding_tests {
             .unwrap();
         let failure = context.apply(Op::Not, &[equal]).unwrap();
         let query = Query::from_terms(&context, &[], &failure, &bindings).unwrap();
+        assert_eq!(
+            query.declarations,
+            [
+                "(declare-const v1 (_ BitVec 8))",
+                "(declare-const v2 (_ BitVec 8))"
+            ]
+        );
         assert!(query.assertions.contains(&first.smt(200_000).unwrap()));
         assert!(query.assertions.contains(&second.smt(200_000).unwrap()));
         assert!(!query.assertions.contains(&third.smt(200_000).unwrap()));
@@ -931,6 +941,7 @@ mod encoding_tests {
         assert_eq!(query.assertions.len(), 1);
         let unused = Query::from_terms(&context, &[], &context.boolean(true), &bindings).unwrap();
         assert!(unused.assertions.is_empty());
+        assert!(unused.declarations.is_empty());
     }
 
     #[test]
@@ -969,11 +980,90 @@ mod encoding_tests {
             Solver::default().check_query(&query),
             Answer::Unsat
         ));
-        for index in 1..8000 {
-            context.symbol(index, Sort::Bool).unwrap();
-        }
+        let conditions: Vec<_> = (1..8000)
+            .map(|index| context.symbol(index, Sort::Bool).unwrap())
+            .collect();
         assert!(
-            Query::from_terms(&context, &[], &context.boolean(true), &BTreeMap::new()).is_err()
+            Query::from_terms(
+                &context,
+                &conditions,
+                &context.boolean(true),
+                &BTreeMap::new()
+            )
+            .is_err()
         );
+        assert!(Query::from_terms(&context, &[], &context.boolean(true), &BTreeMap::new()).is_ok());
+    }
+
+    #[test]
+    fn unreachable_float_storage_symbols_do_not_change_a_query_or_its_cache_key() {
+        let context = Context::default();
+        let condition = context.symbol(0, Sort::Bool).unwrap();
+        let initial = Query::from_terms(
+            &context,
+            std::slice::from_ref(&condition),
+            &context.boolean(true),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut solver = Solver::default();
+        assert!(solver.feasible_query(&initial).unwrap());
+        let cached = solver.decisions.len();
+        for index in 1..8000 {
+            context.symbol(index, Sort::BitVec(32)).unwrap();
+        }
+        let extended = Query::from_terms(
+            &context,
+            &[condition],
+            &context.boolean(true),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(initial.text(), extended.text());
+        assert!(solver.feasible_query(&extended).unwrap());
+        assert_eq!(solver.decisions.len(), cached);
+    }
+
+    #[test]
+    fn sparse_declarations_reset_branch_scopes_without_changing_answers() {
+        let context = Context::default();
+        let left = context.symbol(0, Sort::Bool).unwrap();
+        let right = context.symbol(1, Sort::Bool).unwrap();
+        let shared = context.symbol(2, Sort::Bool).unwrap();
+        let first = Query::from_terms(
+            &context,
+            &[left, shared.clone()],
+            &context.boolean(true),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let second = Query::from_terms(
+            &context,
+            &[right, shared.clone()],
+            &context.boolean(true),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let contradiction = Query::from_terms(
+            &context,
+            std::slice::from_ref(&shared),
+            &context
+                .apply(Op::Not, std::slice::from_ref(&shared))
+                .unwrap(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let mut solver = Solver::default();
+        assert!(solver.feasible_query(&first).unwrap());
+        assert!(solver.feasible_query(&second).unwrap());
+        assert!(matches!(solver.check_query(&contradiction), Answer::Unsat));
+        match solver.check_query(&first) {
+            Answer::Sat(model) => {
+                assert!(model.contains("v0") && model.contains("v2"));
+                assert!(!model.contains("false"));
+            }
+            Answer::Unsat => panic!("sparse branch scopes leaked into the restored query"),
+            Answer::Unknown(error) => panic!("{error}"),
+        }
     }
 }

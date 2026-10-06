@@ -296,10 +296,16 @@ helpers execute ordinary MIR. Literal messages can cross shared reborrows; strin
 operations remain UNKNOWN.
 
 Computed float encodings keep stable symbols, but their numeric/bit relations are deferred until
-a query references those symbols. Query construction follows exact symbol tokens transitively
-and includes all relations if tokenization is uncertain. Numeric float expressions and ordinary
+a query references those symbols. Query construction follows typed symbol identities transitively.
+Numeric float expressions and ordinary
 path conditions remain unchanged; exported queries include every required relation. This avoids
 solving unused representation constraints during numeric-only path exploration.
+
+Queries declare only symbols reachable from their assertions and required encoding relations.
+Unobserved arithmetic storage therefore does not enlarge the script or change an otherwise
+identical query's cache key. Sparse declaration sets still use the checked session reset path when
+the existing declaration prefix cannot be reused. Counterexample models may omit unused,
+unconstrained inputs; the report's input mapping still records the full modeled root domain.
 
 Evaluated static string literals can pass through shared dereferences, reborrows, arguments and
 returns as opaque immutable values. This reaches Option expect panic boundaries without modeling
@@ -315,8 +321,8 @@ Root construction supports bounded integer pattern ranges and alternatives, vali
 scalars, and the compiler-identified NonZero getter. It does not infer constructor invariants for
 other structs. Non-null pointer patterns and unresolved generics remain UNKNOWN.
 
-Query construction skips encoding dependency scans when there are no deferred encodings and borrows
-condition strings rather than cloning an intermediate list. Byte views and endian conversion use
+Query construction traverses typed assertion dependencies before printing. Byte views and endian
+conversion use
 scoped SMT bindings to share source expressions, with the usual size budgets still enforced.
 
 Refuted roots stop after their first counterexample by default; remaining selected roots still

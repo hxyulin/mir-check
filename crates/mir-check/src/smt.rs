@@ -257,6 +257,20 @@ impl Context {
             .collect()
     }
 
+    /// Prints only structurally reachable symbols, preserving numeric symbol order.
+    pub fn declarations_for(&self, symbols: &BTreeSet<u32>) -> Result<Vec<String>, String> {
+        let pool = self.0.borrow();
+        symbols
+            .iter()
+            .map(|index| {
+                pool.symbols
+                    .get(index)
+                    .map(|sort| printer::declaration(*index, sort))
+                    .ok_or_else(|| format!("unknown term symbol v{index}"))
+            })
+            .collect()
+    }
+
     fn intern(&self, sort: Sort, kind: Kind) -> Term {
         let key = Key {
             sort: sort.clone(),
