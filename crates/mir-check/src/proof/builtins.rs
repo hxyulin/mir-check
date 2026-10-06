@@ -151,6 +151,9 @@ impl<'tcx> Engine<'tcx> {
         if let Some(value) = self.integer_intrinsic(callee, signature, values)? {
             return Ok(Some(value));
         }
+        if let Some(value) = self.floating_intrinsic(callee, signature, values)? {
+            return Ok(Some(value));
+        }
         if self.tcx.is_intrinsic(callee, Symbol::intern("ctpop"))
             && signature.inputs().len() == 1
             && self.integer_type(signature.inputs()[0]).is_some()

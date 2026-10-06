@@ -128,7 +128,13 @@ separate qualified roots from same-named unsupported functions and reject missin
 
 Floating-point tests cover NaN comparisons, signed zero, rounding, infinities, Rust's saturating
 float-to-integer casts and float-dependent caller bounds on host/ARM. Arithmetic uses nearest-even
-rounding. Float storage encodings support to_bits/from_bits and same-width integer/float
+rounding. Compiler-identified floor, ceil, trunc, round, round_ties_even, sqrt and fused mul_add
+intrinsics use exact IEEE terms with explicit rounding modes. This includes the pinned compiler's
+experimental no_std core_float_math functions; user functions with similar names retain their MIR.
+The rounding models distinguish ties away from zero and ties to even. Square root handles negative
+inputs as NaN, and fused multiply-add rounds once. These models do not summarize arbitrary libm
+functions or enable floating-point state in induction. Float storage encodings support
+to_bits/from_bits and same-width integer/float
 transmutes. Inputs, constants, moves, negation, abs and clamp preserve the selected bits. Numeric
 arithmetic results receive one stable storage encoding; all NaN payloads/signs, including signaling
 encodings, are allowed conservatively. Such NaN counterexamples may not replay on the target.

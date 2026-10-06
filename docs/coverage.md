@@ -253,6 +253,19 @@ kinds of NaN for f32/f64, plus 1,024 integer-cast/arithmetic inputs. Checked sid
 core to_bits/from_bits bodies through typed transmutes and retain the same outcomes without
 library summaries. Remainder and wider floating-point formats remain unsupported.
 
+Compiler-identified binary32/binary64 floor, ceil, trunc, round, round_ties_even, sqrt and fused
+multiply-add intrinsics now have typed IEEE models. Directional rounding uses RTN, RTP and RTZ;
+round uses nearest ties away from zero, while round_ties_even, sqrt and mul_add use RNE. Returned
+numeric results retain stable storage encodings with the existing conservative NaN payload rules.
+This applies to the pinned compiler's experimental no_std core_float_math wrappers. It does not
+replace user functions with matching names or summarize a dependency's math implementation.
+
+The intrinsic fixture checks 14 roots on host/ARM: eight prove, five refute and remainder stays
+unknown. Cases cover positive/negative rounding ties, signed zeros, infinities, NaNs, subnormals,
+invalid square roots and a fused result differing from separate multiply/add. Native tests replay
+the positive cases and all five failing mutations. Floating-point induction remains unsupported;
+adding ordinary intrinsic models does not extend the loop-state encoding.
+
 ## Larger evaluated tables and numeric-only float exploration
 
 Evaluated constants now allow up to 128 elements, with the same 256-value total and eight-level

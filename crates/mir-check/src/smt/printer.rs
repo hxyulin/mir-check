@@ -146,6 +146,9 @@ fn literal(value: Constant, sort: &Sort) -> String {
             format!("(_ bv{value} {bits})")
         }
         Constant::Rounding(Rounding::NearestEven) => "RNE".to_owned(),
+        Constant::Rounding(Rounding::NearestAway) => "RNA".to_owned(),
+        Constant::Rounding(Rounding::TowardPositive) => "RTP".to_owned(),
+        Constant::Rounding(Rounding::TowardNegative) => "RTN".to_owned(),
         Constant::Rounding(Rounding::TowardZero) => "RTZ".to_owned(),
     }
 }
@@ -221,6 +224,9 @@ fn operator(op: Op, result_sort: &Sort) -> String {
         Op::FpSub => "fp.sub",
         Op::FpMul => "fp.mul",
         Op::FpDiv => "fp.div",
+        Op::FpRoundToIntegral => "fp.roundToIntegral",
+        Op::FpSqrt => "fp.sqrt",
+        Op::FpFma => "fp.fma",
         Op::FloatFromBits {
             exponent,
             significand,

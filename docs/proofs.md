@@ -178,6 +178,12 @@ coroutines,
 float state and trusted boundaries still need inductive models. Unsupported behavior is never
 omitted.
 
+A [floating-point solver spike](floating-point-spike.md) found that Spacer can prove small exact
+IEEE loops using the ALL logic and an explicit Horn tactic. It also hit the five-second budget on
+a small late-failure counter. This is feasibility evidence, not implemented floating-point
+induction: the current checker still rejects float loop state and does not emit that second logic
+encoding. Ordinary float intrinsics use exact SMT terms independently of this experiment.
+
 Supported enums have separate tag and payload parameters. Construction updates the selected payload
 and tag, retaining a typed representation for inactive variants. Reading a downcast payload adds a
 failure clause for the wrong tag and a success guard before access, including through static field
@@ -278,7 +284,9 @@ of the analyzer.
 
 Trusted models implement slice length, byte prefix ranges, lossless integer conversions, endian
 decoding, shared byte-slice-to-array conversion, fixed-array map/from_fn, exact owned byte-array
-copies, opaque formatting arguments from evaluated static strings, and float abs/min/max.
+copies, opaque formatting arguments from evaluated static strings, and float abs/min/max. Exact
+compiler-identified float intrinsics model floor, ceil, trunc, both rounding tie modes, sqrt and
+fused multiply-add with explicit IEEE rounding.
 Min/max ignores one NaN and permits either operand on equal numeric inputs, including signed-zero
 ties. Numeric NaN outputs permit all storage encodings rather than selecting an assumed payload.
 Array map executes each actual callable body; the model supplies array traversal and storage.

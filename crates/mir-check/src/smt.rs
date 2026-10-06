@@ -51,6 +51,9 @@ impl Sort {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Rounding {
     NearestEven,
+    NearestAway,
+    TowardPositive,
+    TowardNegative,
     TowardZero,
 }
 
@@ -106,6 +109,9 @@ pub enum Op {
     FpSub,
     FpMul,
     FpDiv,
+    FpRoundToIntegral,
+    FpSqrt,
+    FpFma,
     FloatFromBits { exponent: u32, significand: u32 },
     SignedToFloat { exponent: u32, significand: u32 },
     UnsignedToFloat { exponent: u32, significand: u32 },
@@ -462,6 +468,18 @@ fn result_sort(op: Op, args: &[Term]) -> Result<Sort, String> {
         Op::FpAdd | Op::FpSub | Op::FpMul | Op::FpDiv => match sorts.as_slice() {
             [Sort::RoundingMode, left, right] if left == right && float(left) => {
                 Some((*left).clone())
+            }
+            _ => None,
+        },
+        Op::FpRoundToIntegral | Op::FpSqrt => match sorts.as_slice() {
+            [Sort::RoundingMode, value] if float(value) => Some((*value).clone()),
+            _ => None,
+        },
+        Op::FpFma => match sorts.as_slice() {
+            [Sort::RoundingMode, first, second, third]
+                if first == second && first == third && float(first) =>
+            {
+                Some((*first).clone())
             }
             _ => None,
         },

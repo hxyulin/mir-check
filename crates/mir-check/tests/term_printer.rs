@@ -180,7 +180,30 @@ fn every_operator_prints_a_formula_equivalent_to_its_independent_smt_encoding() 
             format!("({name} RNE v4 v5)"),
         ));
     }
-    assert_eq!(cases.len(), 57);
+    for (rounding, name) in [
+        (Rounding::NearestEven, "RNE"),
+        (Rounding::NearestAway, "RNA"),
+        (Rounding::TowardPositive, "RTP"),
+        (Rounding::TowardNegative, "RTN"),
+        (Rounding::TowardZero, "RTZ"),
+    ] {
+        cases.push((
+            Op::FpRoundToIntegral,
+            vec![context.rounding(rounding), f.clone()],
+            format!("(fp.roundToIntegral {name} v4)"),
+        ));
+    }
+    cases.push((
+        Op::FpSqrt,
+        vec![rne.clone(), f.clone()],
+        "(fp.sqrt RNE v4)".to_owned(),
+    ));
+    cases.push((
+        Op::FpFma,
+        vec![rne, f.clone(), g.clone(), f],
+        "(fp.fma RNE v4 v5 v4)".to_owned(),
+    ));
+    assert_eq!(cases.len(), 64);
     let mut script = String::from("(set-logic ALL)\n(set-option :timeout 5000)\n");
     for (index, sort) in [
         (0, "(_ BitVec 8)"),

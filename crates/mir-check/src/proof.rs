@@ -24,6 +24,7 @@ mod aggregates;
 mod builtins;
 mod constants;
 mod external;
+mod floating_intrinsics;
 mod induction;
 mod inputs;
 mod integer_intrinsics;
