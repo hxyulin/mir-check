@@ -350,9 +350,9 @@ caller. A contract never replaces execution of the body.
 Concrete local, generic and retained dependency calls can contain loops. Typed allocations support
 structs, scalar/byte-array borrows and stable field references. Callee writes update caller storage;
 contract entry snapshots remain independent from those writes. Changing reference targets, dynamic
-indexed borrows, recursion, iterator storage, enums, floats, trusted boundaries and interior mutation
-and coroutines
-remain UNKNOWN in this mode. Unavailable bodies and unsupported predicates remain UNKNOWN too.
+indexed borrows, recursion, slice iterator storage, floats, trusted boundaries, interior mutation
+and coroutines remain UNKNOWN in this mode. Unavailable bodies and unsupported predicates remain
+UNKNOWN too.
 
 The encoding has 256 total call-context blocks, 512 parameters per relation, 16 call frames and
 200,000-byte script limits, with five-second Z3
@@ -368,8 +368,16 @@ snapshots of owned bytes, call domains and root/callee postconditions. Changed w
 domains, false contracts, recursive calls and unsupported predicates never pass. Existing 256- and
 1,024-iteration scalar fixtures also prove through induction. Host/ARM storage fixtures cover
 persistent structs, shared array reads, borrowed byte writes and mutable callee snapshots. Mutated
-writes and false snapshot claims never pass. Iterator loops still need their state models; a fully
-supported loop can still exhaust the solver's inference budget.
+writes and false snapshot claims never pass.
+
+Integer `Range` loops have exact, compiler-identified `into_iter` and `next` models. Supported enums
+carry a symbolic tag and every variant's typed payload through block relations; downcasts add safety
+clauses before access. Original fixtures cover signed and maximum endpoints, early breaks, tagged
+state and a custom iterator whose actual MIR body is translated. Bad ends, false assertions and a
+late panic never pass. Optimized MIR locals used only by debug information do not consume state.
+Slice iterators and their dynamically indexed element references still need inductive models. A
+supported 12,000-element range can time out during invariant inference, despite having no unrolling
+limit; supported syntax alone does not guarantee a proof.
 
 A solver preprocessing experiment was rejected after a native-replayed late-panic mutation received
 a false safety answer. The checker retains the ordinary Spacer encoding, and scalar relational

@@ -3,6 +3,8 @@ use mir_check::smt::horn::{Atom, Clause, System};
 use rustc_middle::mir::BasicBlock;
 use std::collections::BTreeSet;
 
+mod enums;
+mod ranges;
 mod storage;
 use storage::same_shape;
 
@@ -127,6 +129,7 @@ impl<'tcx> Engine<'tcx> {
                         )
                     })?;
             }
+            self.loop_normalize(&frame, &mut state)?;
             let terminator = body.basic_blocks[block].terminator();
             let mut edges = Vec::new();
             match &terminator.kind {
@@ -213,6 +216,7 @@ impl<'tcx> Engine<'tcx> {
                             &premise,
                         )?;
                         self.write(&mut restored, resume.destination, result)?;
+                        self.loop_normalize(caller, &mut restored)?;
                         system.clauses.push(Clause {
                             premise: Some(premise.clone()),
                             conditions: restored.conditions.clone(),
@@ -276,30 +280,51 @@ impl<'tcx> Engine<'tcx> {
                         )?;
                         values.push(self.operand(id, body, &state, &argument.node)?);
                     }
-                    let inherited = frame.captured(&frame.state)?;
-                    let child = self.loop_frame(
-                        callee,
-                        inherited,
-                        Some(Resume {
-                            caller: frame_index,
-                            target: *target,
-                            destination: *destination,
-                        }),
-                        &mut system,
-                        &values,
-                        &state.memory,
-                    )?;
-                    self.loop_preconditions(&child, &values, &mut state, &mut system, &premise)?;
-                    let captured = frame.captured(&state)?;
-                    let entry = self.loop_entry_atom(&child, &values, &state.memory, captured)?;
-                    system.clauses.push(Clause {
-                        premise: Some(premise.clone()),
-                        conditions: state.conditions,
-                        conclusion: Some(entry),
-                    });
-                    let child_index = frames.len();
-                    frames.push(child);
-                    pending.push((child_index, START_BLOCK));
+                    if let Some(results) = self.loop_range_call(callee, &values, &state)? {
+                        let target = target.ok_or("inductive iterator call has no return edge")?;
+                        for (mut continuation, value) in results {
+                            self.loop_place_bounds(
+                                &mut continuation,
+                                *destination,
+                                &mut system,
+                                &premise,
+                            )?;
+                            self.write(&mut continuation, *destination, value)?;
+                            edges.push((target, continuation));
+                        }
+                    } else {
+                        let inherited = frame.captured(&frame.state)?;
+                        let child = self.loop_frame(
+                            callee,
+                            inherited,
+                            Some(Resume {
+                                caller: frame_index,
+                                target: *target,
+                                destination: *destination,
+                            }),
+                            &mut system,
+                            &values,
+                            &state.memory,
+                        )?;
+                        self.loop_preconditions(
+                            &child,
+                            &values,
+                            &mut state,
+                            &mut system,
+                            &premise,
+                        )?;
+                        let captured = frame.captured(&state)?;
+                        let entry =
+                            self.loop_entry_atom(&child, &values, &state.memory, captured)?;
+                        system.clauses.push(Clause {
+                            premise: Some(premise.clone()),
+                            conditions: state.conditions,
+                            conclusion: Some(entry),
+                        });
+                        let child_index = frames.len();
+                        frames.push(child);
+                        pending.push((child_index, START_BLOCK));
+                    }
                 }
                 TerminatorKind::Unreachable => exclude_failure(
                     &mut system,
@@ -309,7 +334,8 @@ impl<'tcx> Engine<'tcx> {
                 ),
                 other => return Err(format!("loop induction unsupported terminator {other:?}")),
             }
-            for (target, state) in edges {
+            for (target, mut state) in edges {
+                self.loop_normalize(&frame, &mut state)?;
                 system.clauses.push(Clause {
                     premise: Some(premise.clone()),
                     conditions: state.conditions.clone(),
@@ -367,6 +393,7 @@ impl<'tcx> Engine<'tcx> {
             );
         }
         let contracts = self.configured_contracts(instance)?;
+        self.input_values = 0;
         let state = self.loop_storage(&body, arguments, incoming_memory)?;
         let mut entry = Vec::new();
         if contracts
@@ -555,6 +582,10 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn loop_input(&mut self, ty: Ty<'tcx>, depth: usize) -> Result<Value, String> {
+        self.input_values += 1;
+        if self.input_values > MAX_STATE_VALUES {
+            return Err("loop state exceeds its 512-node type shape budget".into());
+        }
         if depth >= MAX_INPUT_DEPTH {
             return Err("loop state type nesting limit reached".into());
         }
@@ -616,6 +647,13 @@ impl<'tcx> Engine<'tcx> {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.constructed(ty, 0, fields)
             }
+            ty::Adt(def, _)
+                if def.is_enum()
+                    && ty.is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized())
+                    && !ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) =>
+            {
+                self.loop_enum(ty, depth)
+            }
             // Other representations need their own inductive memory/validity model.
             other => Err(format!("loop induction unsupported state type {other:?}")),
         }
@@ -645,8 +683,88 @@ impl<'tcx> Engine<'tcx> {
     ) -> Result<(), String> {
         for (position, projection) in place.projection.iter().enumerate() {
             match projection {
-                ProjectionElem::Deref => {}
+                ProjectionElem::Deref => {
+                    let prefix = Place {
+                        local: place.local,
+                        projection: self.tcx.mk_place_elems(&place.projection[..position]),
+                    };
+                    let reference = self.place(state, prefix)?;
+                    if let Value::Reference {
+                        allocation,
+                        projection,
+                        ..
+                    } = reference
+                    {
+                        let mut value = state
+                            .memory
+                            .get(allocation)
+                            .and_then(Option::as_ref)
+                            .cloned()
+                            .ok_or("inductive dereference storage missing")?;
+                        for part in projection {
+                            if let symbolic::MemoryProjection::Variant(index) = part
+                                && let Value::Enum {
+                                    discriminant,
+                                    variants,
+                                    ..
+                                } = &value
+                            {
+                                let Value::Adt {
+                                    discriminant: tag, ..
+                                } = variants
+                                    .get(index)
+                                    .ok_or("inductive reference variant missing")?
+                                else {
+                                    return Err("inductive reference payload needs an ADT".into());
+                                };
+                                let (_, bits, signed) = discriminant.integer()?;
+                                let safe = symbolic::binary(
+                                    &self.terms,
+                                    "eq",
+                                    (**discriminant).clone(),
+                                    symbolic::integer(&self.terms, *tag, bits, signed),
+                                )?
+                                .boolean()?;
+                                exclude_failure(system, premise, &state.conditions, &safe);
+                                state.conditions.push(safe);
+                            }
+                            value = storage::static_projection(value, &part)?;
+                        }
+                    }
+                }
                 ProjectionElem::Field(..) | ProjectionElem::ConstantIndex { .. } => {}
+                ProjectionElem::Downcast(_, expected) => {
+                    let prefix = Place {
+                        local: place.local,
+                        projection: self.tcx.mk_place_elems(&place.projection[..position]),
+                    };
+                    let value = self.place(state, prefix)?;
+                    if let Value::Enum {
+                        discriminant,
+                        variants,
+                        ..
+                    } = value
+                    {
+                        let Value::Adt {
+                            discriminant: tag, ..
+                        } = variants
+                            .get(expected.as_usize())
+                            .ok_or("loop enum payload missing")?
+                        else {
+                            return Err("loop enum payload needs an ADT".into());
+                        };
+                        let (_, bits, signed) = discriminant.integer()?;
+                        let safe = symbolic::binary(
+                            &self.terms,
+                            "eq",
+                            *discriminant,
+                            symbolic::integer(&self.terms, *tag, bits, signed),
+                        )?
+                        .boolean()?;
+                        exclude_failure(system, premise, &state.conditions, &safe);
+                        state.conditions.push(safe);
+                    }
+                }
                 ProjectionElem::Index(index) => {
                     let prefix = Place {
                         local: place.local,
@@ -711,6 +829,9 @@ impl<'tcx> Engine<'tcx> {
                     | Rvalue::UnaryOp(UnOp::Not | UnOp::Neg | UnOp::PtrMetadata, operand)
                     | Rvalue::Repeat(operand, _) => {
                         self.loop_operand_bounds(state, operand, system, premise)?;
+                    }
+                    Rvalue::Discriminant(place) => {
+                        self.loop_place_bounds(state, *place, system, premise)?;
                     }
                     Rvalue::Aggregate(_, operands) => {
                         for operand in operands {
@@ -851,6 +972,16 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
             flatten_value(length, result)?;
             result.push(data.clone());
         }
+        Value::Enum {
+            discriminant,
+            variants,
+            ..
+        } => {
+            flatten_value(discriminant, result)?;
+            for variant in variants {
+                flatten_value(variant, result)?;
+            }
+        }
         Value::Adt { fields, .. } => {
             for (_, field) in fields {
                 flatten_value(field, result)?;
@@ -863,15 +994,20 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
         }
         Value::Reference { projection, .. } => {
             for part in projection {
-                if !matches!(part, symbolic::MemoryProjection::Field(_)) {
-                    return Err("inductive reference projection is not a static field".into());
+                match part {
+                    symbolic::MemoryProjection::Field(_)
+                    | symbolic::MemoryProjection::Variant(_) => {}
+                    symbolic::MemoryProjection::Index(_)
+                    | symbolic::MemoryProjection::Slice { .. }
+                    | symbolic::MemoryProjection::Chunks { .. } => {
+                        return Err("inductive reference projection is not a static field".into());
+                    }
                 }
             }
         }
         Value::MetadataPointer(length) => flatten_value(length, result)?,
         Value::Unit => {}
         other @ (Value::Float { .. }
-        | Value::Enum { .. }
         | Value::Cell { .. }
         | Value::Atomic { .. }
         | Value::SliceIterator { .. }

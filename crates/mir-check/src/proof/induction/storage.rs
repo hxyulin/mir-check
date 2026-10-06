@@ -1,4 +1,5 @@
 use super::*;
+use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use symbolic::MemoryProjection;
 
 impl<'tcx> Engine<'tcx> {
@@ -70,6 +71,18 @@ impl<'tcx> Engine<'tcx> {
                     .map(|value| self.loop_fresh_value(value))
                     .collect::<Result<_, _>>()?,
             ),
+            Value::Enum {
+                discriminant,
+                variants,
+                is_option,
+            } => Value::Enum {
+                discriminant: Box::new(self.loop_fresh_value(discriminant)?),
+                variants: variants
+                    .iter()
+                    .map(|value| self.loop_fresh_value(value))
+                    .collect::<Result<_, _>>()?,
+                is_option: *is_option,
+            },
             Value::Reference { .. } => {
                 flatten_value(value, &mut Vec::new())?;
                 value.clone()
@@ -79,7 +92,6 @@ impl<'tcx> Engine<'tcx> {
             }
             Value::Unit => Value::Unit,
             other @ (Value::Float { .. }
-            | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
             | Value::SliceIterator { .. }
@@ -100,6 +112,8 @@ impl<'tcx> Engine<'tcx> {
         if arguments.len() != body.arg_count {
             return Err("inductive arguments do not match MIR".into());
         }
+        let mut used = UsedLocals(BTreeSet::new());
+        used.visit_body(body);
         let mut state = State {
             locals: Vec::new(),
             conditions: Vec::new(),
@@ -117,6 +131,8 @@ impl<'tcx> Engine<'tcx> {
         for (local, declaration) in body.local_decls.iter_enumerated() {
             let value = if local.as_usize() > 0 && local.as_usize() <= arguments.len() {
                 Some(self.loop_fresh_value(&arguments[local.as_usize() - 1])?)
+            } else if local.as_usize() != 0 && !used.0.contains(&local.as_usize()) {
+                Some(Value::Unit)
             } else if declaration.ty.is_ref() {
                 None
             } else if matches!(declaration.ty.kind(), ty::RawPtr(..)) {
@@ -196,8 +212,21 @@ impl<'tcx> Engine<'tcx> {
                 break;
             }
         }
+        if state.memory.len() > 512 {
+            return Err("inductive memory exceeds its 512-allocation budget".into());
+        }
         if state.locals.iter().any(Option::is_none) || state.memory.iter().any(Option::is_none) {
-            return Err("inductive reference target could not be determined".into());
+            let missing = state
+                .locals
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| value.is_none())
+                .map(|(index, _)| format!("_{index}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "inductive reference target could not be determined: {missing}"
+            ));
         }
         Ok(state)
     }
@@ -229,7 +258,15 @@ impl<'tcx> Engine<'tcx> {
                     }
                     allocation = Some(*target);
                     projection = path.clone();
-                    value = self.reference_value(&value, &state.memory, &[])?;
+                    value = state
+                        .memory
+                        .get(*target)
+                        .and_then(Option::as_ref)
+                        .cloned()
+                        .ok_or("inductive reference storage missing")?;
+                    for part in &projection {
+                        value = static_projection(value, part)?;
+                    }
                 }
                 ProjectionElem::Field(field, _) => {
                     let index = field.as_usize();
@@ -238,10 +275,31 @@ impl<'tcx> Engine<'tcx> {
                         Value::Adt { fields, .. } => {
                             fields.get(index).map(|(_, value)| value.clone())
                         }
-                        _ => return Err("inductive borrow field has unsupported storage".into()),
+                        Value::Bool(_)
+                        | Value::Int { .. }
+                        | Value::Float { .. }
+                        | Value::Bytes { .. }
+                        | Value::Enum { .. }
+                        | Value::Cell { .. }
+                        | Value::Atomic { .. }
+                        | Value::Reference { .. }
+                        | Value::SliceIterator { .. }
+                        | Value::Elements(_)
+                        | Value::MetadataPointer(_)
+                        | Value::StaticText
+                        | Value::FormatArguments
+                        | Value::Function
+                        | Value::Unit => {
+                            return Err("inductive borrow field has unsupported storage".into());
+                        }
                     }
                     .ok_or("inductive borrowed field missing")?;
                     projection.push(MemoryProjection::Field(index));
+                }
+                ProjectionElem::Downcast(_, variant) => {
+                    let index = variant.as_usize();
+                    value = static_projection(value, &MemoryProjection::Variant(index))?;
+                    projection.push(MemoryProjection::Variant(index));
                 }
                 other => return Err(format!("inductive borrow needs static fields: {other:?}")),
             }
@@ -274,6 +332,7 @@ impl<'tcx> Engine<'tcx> {
                 flatten_value(&snapshot, &mut captured)?;
             }
         }
+        self.loop_normalize(frame, &mut state)?;
         let mut entry = frame.clone();
         entry.ghosts = captured;
         entry.atom(START_BLOCK, &state)
@@ -320,7 +379,7 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
                 projection: e,
                 mutable: f,
             },
-        ) if a == d && c == f && b.len() == e.len() && b.iter().zip(e).all(|(a, b)| matches!((a, b), (MemoryProjection::Field(a), MemoryProjection::Field(b)) if a == b)) => Ok(()),
+        ) if a == d && c == f && b.len() == e.len() && b.iter().zip(e).all(|(a, b)| matches!((a, b), (MemoryProjection::Field(a), MemoryProjection::Field(b)) | (MemoryProjection::Variant(a), MemoryProjection::Variant(b)) if a == b)) => Ok(()),
         (
             Value::Adt {
                 name: a,
@@ -353,7 +412,81 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             }
             Ok(())
         }
+        (Value::Enum { discriminant: a, variants: b, is_option: c },
+         Value::Enum { discriminant: d, variants: e, is_option: f })
+            if c == f && b.len() == e.len() => {
+                same_shape(Some(a), Some(d))?;
+                for (a, b) in b.iter().zip(e) { same_shape(Some(a), Some(b))?; }
+                Ok(())
+            }
         (Value::MetadataPointer(a), Value::MetadataPointer(b)) => same_shape(Some(a), Some(b)),
-        _ => Err("inductive value or reference identity changed".into()),
+(Value::Bool(_) | Value::Int { .. } | Value::Float { .. } | Value::Bytes { .. }
+        | Value::Adt { .. } | Value::Enum { .. } | Value::Cell { .. } | Value::Atomic { .. }
+        | Value::Reference { .. } | Value::SliceIterator { .. } | Value::Tuple(_)
+        | Value::Elements(_) | Value::MetadataPointer(_) | Value::StaticText
+        | Value::FormatArguments | Value::Function | Value::Unit, _) => Err("inductive value or reference identity changed".into()),
+    }
+}
+
+pub(super) fn static_projection(value: Value, part: &MemoryProjection) -> Result<Value, String> {
+    match (part, value) {
+        (MemoryProjection::Field(index), Value::Tuple(fields)) => fields
+            .get(*index)
+            .cloned()
+            .ok_or("inductive tuple field missing".into()),
+        (MemoryProjection::Field(index), Value::Adt { fields, .. }) => fields
+            .get(*index)
+            .map(|(_, value)| value.clone())
+            .ok_or("inductive field missing".into()),
+        (MemoryProjection::Variant(index), Value::Enum { variants, .. }) => variants
+            .get(*index)
+            .cloned()
+            .ok_or("inductive variant missing".into()),
+        (MemoryProjection::Variant(index), value @ Value::Adt { .. }) => {
+            if matches!(&value, Value::Adt { variant, .. } if variant == index) {
+                Ok(value)
+            } else {
+                Err("inductive variant identity changed".into())
+            }
+        }
+        (
+            MemoryProjection::Field(_)
+            | MemoryProjection::Variant(_)
+            | MemoryProjection::Index(_)
+            | MemoryProjection::Slice { .. }
+            | MemoryProjection::Chunks { .. },
+            Value::Bool(_)
+            | Value::Int { .. }
+            | Value::Float { .. }
+            | Value::Bytes { .. }
+            | Value::Adt { .. }
+            | Value::Enum { .. }
+            | Value::Cell { .. }
+            | Value::Atomic { .. }
+            | Value::Reference { .. }
+            | Value::SliceIterator { .. }
+            | Value::Tuple(_)
+            | Value::Elements(_)
+            | Value::MetadataPointer(_)
+            | Value::StaticText
+            | Value::FormatArguments
+            | Value::Function
+            | Value::Unit,
+        ) => Err("unsupported inductive reference projection".into()),
+    }
+}
+
+struct UsedLocals(BTreeSet<usize>);
+
+impl<'tcx> Visitor<'tcx> for UsedLocals {
+    fn visit_local(
+        &mut self,
+        local: rustc_middle::mir::Local,
+        context: PlaceContext,
+        _location: rustc_middle::mir::Location,
+    ) {
+        if context.is_use() {
+            self.0.insert(local.as_usize());
+        }
     }
 }

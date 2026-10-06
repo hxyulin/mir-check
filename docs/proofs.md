@@ -138,16 +138,33 @@ proof. Without a discovered cycle, roots use ordinary interpretation. Without `-
 roots retain the existing bounded interpreter. Cargo forwards the option explicitly and clears an
 inherited induction setting when the option is absent.
 
+A release-mode comparison on the local ARM64 host used the same fixture, flags and JSON output,
+with one warm-up and five sequential samples per mode. These medians include compiler and CLI time;
+the test suite was not running alongside the measurements.
+
+| Fixture | Unrolling | Induction | Result |
+| --- | ---: | ---: | --- |
+| 256 completed iterations | 31 ms | 44 ms | Both PROVED |
+| 1,024 completed iterations | 35 ms | 45 ms | Both PROVED |
+| 20 symbolic doublings | 36 ms | 2,630 ms | Both PROVED |
+| Endless wrapping counter | 39 ms | 44 ms | Unrolling UNKNOWN; induction PROVED |
+
+Induction reduces repeated obligations but is not a universal speed improvement. Constant folding
+makes these finite unrolled cases inexpensive, while Spacer must discover or reconstruct an
+invariant. The endless case demonstrates added proof coverage, not a faster equivalent proof.
+The opt-in setting preserves a choice between finite execution and inductive inference.
+
 Each call site receives its own callee block relations. They carry immutable copies of the caller's
 state as additional parameters, initialize the callee with the actual argument values, and return
-actual results to the caller's destination. Nested callees preserve every ancestor's state. Stable typed allocations carry borrowed storage as
+actual results to the caller's destination. Nested callees preserve every ancestor's state. Stable
+typed allocations carry borrowed storage as
 mutable relation parameters. Addressed locals live in that storage, so aliases see the same writes.
 Caller locals and entry snapshots are frozen separately; memory is carried through the actual
 callee transitions and restored on return. Every edge checks allocation and reference identities
 against the frame layout. Changing targets and indexed borrows remain UNKNOWN, and references to
 interior-mutable storage are rejected. Struct fields and byte-array storage require no byte-level
-raw-pointer model. Callee
-loops use the same transition encoding as root loops. Available local, concrete generic and retained
+raw-pointer model. Callee loops use the same transition encoding as root loops. Available local,
+concrete generic and retained
 dependency MIR is translated; a callee contract never replaces its body with a summary.
 
 Root requires restrict the initial domain. Callee requires add both a failure clause at the call
@@ -155,9 +172,26 @@ site and a success constraint on entry. Ensures add a failure clause on each act
 arguments have independent snapshot parameters when ensures are present; original and mutated
 arguments therefore remain distinguishable. final_ names refer to the current argument values.
 Declared predicates are checked for supported syntax even when a function never returns.
-Unsupported predicates and invalid aliases remain UNKNOWN. Recursive call contexts, references,
-interior mutation, iterator storage, coroutines, float/enum state and trusted boundaries still need
-inductive models. Unsupported behavior is never omitted.
+Unsupported predicates and invalid aliases remain UNKNOWN. Recursive call contexts, changing
+references, interior mutation, slice iterator storage, coroutines, float state and trusted
+boundaries
+still need inductive models. Unsupported behavior is never omitted.
+
+Supported enums have separate tag and payload parameters. Construction updates the selected payload
+and tag, retaining a typed representation for inactive variants. Reading a downcast payload adds a
+failure clause for the wrong tag and a success guard before access, including through static field
+references. The shape budget is 512 type nodes and at most 16 variants per enum; payloads need the
+same inductive representations as other state. Rustc's MIR visitor identifies executable local uses;
+a local retained only for debug information has no proof state or executable operation to omit.
+
+Integer ranges use exact library models identified by core crate, language item, trait and concrete
+signature. `into_iter` returns the same range. `next` branches on `start < end`: the successful
+branch
+returns `Some(start)` and increments start; the exhausted branch returns `None` without changing
+storage. The strict comparison guarantees increment cannot overflow for primitive signed or unsigned
+integers. Custom iterators use their actual available MIR rather than this range model. Configured
+contracts cannot be bypassed by the model. Slice iterator storage and indexed reference identities
+remain separate unsupported cases.
 
 The 256-block budget now includes every translated call context, and each relation's 512-parameter
 budget includes captured caller state and contract snapshots. The call depth remains 16 frames.
@@ -251,7 +285,8 @@ Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work
 floats and booleans; enum/struct elements need a uniquely determined index. Array/slice patterns
 prove their minimum length and index bounds before applying constant start/end offsets. Generic
 roots with unresolved type parameters remain unsupported. Experimental loop induction supports
-scalar/tuple state and fixed byte arrays. Automatic type invariants, dedicated termination checks
+scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges. Automatic type
+invariants, dedicated termination checks
 and verified general effects remain unsupported.
 
 The unchanged DR16 Raw::parse fixture exercises concrete core Result/Option bodies, question-mark

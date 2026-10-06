@@ -913,3 +913,25 @@ Host/ARM no_std fixtures prove persistent structs, mutable helper calls, shared 
 borrowed byte writes. Bad wraps, off-by-one writes and false snapshot contracts never pass; native
 tests replay the mutations. Changing reference targets, indexed borrows and interior-mutable inputs
 remain UNKNOWN. Iterator state is the next independent coverage step.
+
+
+## Stage 53: integer range loops, enum state and concrete custom iterators
+
+Inductive enums carry a tag and typed payloads for every supported variant. Constructors update the
+active variant; downcasts require explicit Horn safety guards, including through field references.
+Core integer Range into_iter/next models use compiler identities and concrete signatures. Advancing
+under start < end cannot overflow; exhausted ranges preserve storage. Custom iterators use actual
+callee MIR and receive no range shortcut. Debug-only locals are excluded using rustc's MIR visitor.
+
+Host/ARM positives cover range writes through a borrowed array, signed/maximum endpoints, breaks,
+tagged state and a concrete custom iterator. Changed ends, false tag assertions, custom iterator
+mutations and a panic beyond the old execution limit never pass. Native replay checks boundaries and
+mutations. Slice iterators remain UNKNOWN, as do supported queries that exceed Spacer's inference
+budget; a 12,000-element range still reaches that limit on the pinned solver.
+
+
+Same-fixture release measurements found no speedup on the cheap finite cases: unrolling took
+31–36 ms; induction took 44–45 ms for counters and 2.63 seconds for 20 symbolic doublings.
+The endless counter proved in 44 ms with induction while bounded interpretation returned UNKNOWN.
+Measurements used a warm-up and five sequential samples with identical build flags and JSON output.
+Induction remains opt-in because invariant inference can cost more than complete finite execution.
