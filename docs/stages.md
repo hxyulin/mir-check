@@ -493,3 +493,23 @@ All three roots remained PROVED. These measurements use Apple Silicon, Z3 4.15.4
 nightly's host library configuration; they are not a general speed guarantee. Resource limits,
 unsupported behavior and the proof domain are unchanged. There is no cross-invocation proof
 cache or precomputed standard-library summary store.
+
+## Stage 27: ordered array generation and iterator regression coverage
+
+The core::array::from_fn model runs actual concrete callback bodies in ascending index order,
+propagates memory effects and conditions, and checks callable contracts. Empty arrays never invoke
+callbacks. Generated results must be owned and fit the existing 128-element/256-value budgets;
+destructors, storage identities and unsupported mutable captures remain UNKNOWN. Core identity
+and the normalized signature gate the model; a same-named application function runs its own MIR.
+
+Synthetic ticket, parcel and label cases exercise 23 roots on host and ARM: 12 prove, four refute
+and seven remain unknown. Tests cover callback order, Cell effects, function items, floats,
+zero length and exact shape boundaries. Invalid assertions, arithmetic and call bounds refute,
+as does a label-offset mutation. Native tests independently replay 512 inputs and callback effects.
+
+Iterator audit regressions cover mixed forward/reverse skips, usize::MAX exhaustion, zero-sized
+mutable elements, skipped byte storage, shared Cell callbacks and disjoint projections. False
+alias assertions and an exhaustion mutation refute; unsupported views and owned mutable callback
+environments remain unknown. Native execution checks 1,792 bounded cases. The review found no
+new reproducible false proof in these paths; the interpreter has not completed a soundness audit.
+There are 86 compiler integration tests and one metadata integration test.

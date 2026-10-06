@@ -47,6 +47,7 @@ at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaus
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Read-only captures and supported generic Fn/FnOnce calls | Mutable captures and function pointers are unsupported |
 | Array map | Explicit traversal model, executing each actual callable body in index order | At most 16 elements; general iterators remain gaps |
+| Array from_fn | Execute actual callbacks in ascending index order, with conditions and tracked effects | At most 128 owned elements and 256 values; drops, identity-bearing results and mutable captures remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, comparisons, casts, boolean casts, bit operations and shifts | Optional overflow checks depend on build settings |
 | Float operations | Nearest-even add/subtract/multiply/divide, negation, comparisons and saturating casts | NaN, infinities and signed zero are preserved numerically; raw NaN payloads are not modeled |
 | Drop | Skip a concrete value only if rustc says it needs no drop | Destructor execution remains UNKNOWN |
@@ -89,6 +90,8 @@ and grouped unknown reasons. An empty inventory or zero selected roots establish
 | DR16 parser | Unchanged 42-block body, exact length and decoded bounds on host/ARM without entry assumptions | Bad index and channel mask are refuted; 4,608 sample frames use independent formulas |
 | Generic/dependency calls | Concrete bodies/static traits; non-inline transitive dependencies on host/ARM, with configuration and encoded flags preserved | Dependency precondition violations and overflow refute; opt-out calls and unsupported retained operations stay UNKNOWN |
 | Read-only callbacks | Captured closures, function items, map and question-mark payload propagation | Mutable captures remain UNKNOWN |
+| Generated arrays | Synthetic ticket/parcel/label cases, function items, zero length, 18/128-element arrays and exact value-budget boundary on host/ARM | Bad callback assertions, overflows, call bounds and label mutations refute; drops, storage identities and larger shapes remain UNKNOWN |
+| Iterator audit regressions | Mixed forward/reverse skips, usize::MAX exhaustion, zero-sized elements, skipped byte storage and shared Cell aliases on host/ARM; 1,792 native cases | Wrong alias and exhaustion mutation refute; unsupported views and owned mutable callback environments remain UNKNOWN |
 | Aggregate inputs | Nested/generic structs, tuples, shared byte fields and fixed struct arrays on host/ARM | An off-by-one nested call guard is refuted; mutable/recursive/oversized shapes are UNKNOWN |
 | Floats | Host/ARM tests for NaN, zero signs, rounding, saturation and caller bounds | Bad NaN/zero/index/call assertions are refuted; remainder and raw bits remain UNKNOWN |
 | Symbolic enums | Signed tags, Option/Result payloads, foreign nested inputs and entry snapshots on host/ARM | Variant/payload/off-by-one call mutations are refuted; unsupported payloads stay UNKNOWN |

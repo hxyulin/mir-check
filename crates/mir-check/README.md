@@ -197,3 +197,14 @@ or two MiB of query text; unknown responses are never cached. A six-second host 
 pipe writes and reads, and failures discard the session. MIR_CHECK_Z3 keeps the existing custom
 one-shot protocol, which relies on the executable's -T:6 timeout option. No proofs are reused
 across compiler invocations.
+
+Compiler-identified core::array::from_fn executes actual callback bodies in ascending index order,
+including checked call bounds and tracked Cell effects. Empty arrays do not invoke the callback.
+Generated owned results have at most 128 elements and 256 modeled values, including containers.
+Drop-bearing callbacks/elements, storage identities in generated elements and mutable captures
+remain unknown. This model does not permit general MaybeUninit or partially initialized storage.
+
+Synthetic array-generation and iterator regressions exercise the relevant Rust features with
+independent ticket, parcel, score and tally examples. Host/ARM proofs, rejected mutations and
+bounded native execution check callback order, skips, exhaustion, zero-sized elements and aliases;
+these cases do not constitute a completed soundness audit.

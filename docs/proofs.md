@@ -98,7 +98,7 @@ Mutation tests and runtime replays check representative semantics; they do not e
 of the analyzer.
 
 Trusted models implement slice length, byte prefix ranges, lossless integer conversions, endian
-decoding, shared byte-slice-to-array conversion, fixed-array map, exact copies into owned byte
+decoding, shared byte-slice-to-array conversion, fixed-array map/from_fn, exact copies into owned byte
 arrays, opaque formatting arguments from evaluated static strings, and float abs/min/max.
 Min/max ignores one NaN and permits either operand on equal numeric inputs, including signed-zero
 ties. Raw NaN payload/sign observation is unsupported. Array map executes each

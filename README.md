@@ -192,7 +192,7 @@ containing a shared byte slice.
 | Mutable storage | One mutable root receiver, projected writes, reborrows and state propagation through calls |
 | Calls | Concrete generics, static traits, available dependency MIR, function items and read-only closures |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |
-| Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map, float abs/min/max/clamp and static formatting arguments |
+| Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map/from_fn, float abs/min/max/clamp and static formatting arguments |
 | Slice iteration | Ordered reads/writes, forward/reverse cursors, skipping, lengths, shared clones and checked all/any callbacks |
 | Contracts | Caller bounds, entry preconditions and postconditions on actual returns |
 
