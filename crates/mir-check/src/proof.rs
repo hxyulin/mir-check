@@ -24,6 +24,7 @@ mod aggregates;
 mod builtins;
 mod constants;
 mod external;
+mod integer_intrinsics;
 mod interior;
 mod iterators;
 mod library;

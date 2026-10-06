@@ -574,3 +574,19 @@ The closure fixture checks 15 roots: eight prove, four refute and three remain u
 replay, failing callback/call bounds, element-order and fold-seed mutations exercise these models;
 the closure suite checks 1,024 inputs and independently replays four panics. Unsupported views,
 captured constant environments, destructors and stateful owned callback captures stay unknown.
+
+## Stage 31: integer primitive intrinsic coverage
+
+Exact compiler identities and normalized integer signatures select min/max, saturating add/sub,
+leading/trailing zero counts, byte swapping and bit reversal. Signedness and width are checked
+against modeled operands. Saturation uses one extra SMT bit; zero counts return the input width
+at zero. Bit rearrangements use exact extracts and concatenation. Scoped operand bindings keep
+chained 128-bit operations within existing query limits. Unsafe nonzero-only intrinsics remain
+unsupported; no resource caps were increased.
+
+Host/ARM tests check 21 roots: 17 prove, three refute and one remains unknown. All 12 scalar
+integer types are exercised, and reports confirm all eight intrinsic models ran. Native tests
+cover all 65,536 operand pairs for both unsigned and signed eight-bit properties, all 256 byte
+inputs for independent zero-count oracles, 128-bit boundaries and direct byte layout checks.
+Three failing mutations are independently replayed. The combined suite has 94 compiler
+integration tests, 13 solver/contract unit tests and one metadata integration test.

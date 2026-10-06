@@ -233,3 +233,9 @@ including zero-sized captures, remain unknown. Iterator by_ref/IntoIterator pres
 cursor references; consuming methods update the original cursor. Wrapper drop glue is harmless
 only when it has no own destructor and all drop-requiring fields are harmless owned iterators.
 Owned element Clone, iterator views and user destructors remain unknown.
+
+Exact compiler intrinsic models implement primitive signed/unsigned integer min/max, saturating
+add/subtract, defined-zero leading/trailing zero counts, byte swapping and bit reversal. Normalized
+signatures and modeled widths/signs gate each model. Saturation uses one extra SMT bit, including
+129-bit intermediates for 128-bit inputs. Scoped let bindings preserve operand expressions without
+raising query limits. Unsafe nonzero-only count intrinsics remain unsupported.
