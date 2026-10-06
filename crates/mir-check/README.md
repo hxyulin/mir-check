@@ -168,3 +168,13 @@ limit. Storage identities (Cell, atomics, tracked references and mutable byte vi
 by the repeat model. Accessing repeated inline-constant interior mutable storage remains unknown.
 Composite indices still require a unique value on each path; this stage does not extend alias or
 iterator semantics.
+
+Compiler-identified shared slice iterators retain a source and front/back cursors. Models cover
+construction, next/next_back, nth/nth_back, len/count/size_hint, clone and all/any. Advancing
+updates
+typed iterator storage; adapters such as enumerate, copied and rev execute their actual MIR.
+Predicate callbacks execute actual bodies in order, preserve memory effects and stop immediately
+at the deciding element. Symbolic byte slices work when paths finish within the execution budget;
+unbounded loops, unsupported iterator views and raw pointer operations remain unknown.
+Compiler layouts supply constant tags for single-variant enum representations, including the
+uninhabited residual optimized by core's question-mark implementation.

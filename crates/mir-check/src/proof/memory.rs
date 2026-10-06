@@ -409,6 +409,17 @@ impl<'tcx> Engine<'tcx> {
         incoming: usize,
     ) -> Result<Value, String> {
         match value {
+            Value::SliceIterator {
+                source,
+                front,
+                back,
+                mutable,
+            } => Ok(Value::SliceIterator {
+                source: Box::new(self.return_value(*source, state, incoming)?),
+                front,
+                back,
+                mutable,
+            }),
             Value::Reference { allocation, .. } if allocation >= incoming => {
                 self.snapshot(&value, &state.memory, &state.conditions, 0)
             }

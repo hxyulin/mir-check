@@ -145,3 +145,24 @@ scalar/enum arrays, 128-element generated arrays and byte writes inside nested t
 copy assertion and a mutation that writes the wrong matrix row refute. Ambiguous composite indices,
 excessive shapes and operations on repeated interior mutable storage remain UNKNOWN. Root input
 budgets and general aliasing limits are unchanged.
+
+## Shared slice iteration
+
+Shared slice iterator identity comes from the compiler's SliceIter diagnostic item. The model
+tracks a source and front/back cursors, advances typed iterator storage and yields original
+references where allocation identity is available. Byte snapshots yield their exact symbolic
+contents. Forward/reverse next, symbolic nth/nth_back, length/count/size_hint and independent
+cloned cursors are modeled. Counts and skips use the cursor directly, without unrolling discarded
+items. Generic enumerate/copied/rev adapters execute actual core MIR.
+
+all/any execute concrete callback bodies in element order and preserve memory effects, including
+Cell updates. A deciding callback stops traversal immediately and leaves the remaining cursor
+intact. Iteration consumes the existing step/time budget; unfinished paths remain UNKNOWN.
+Mutable iteration and iterator slice views are not part of this stage.
+
+Host/ARM compiler tests cover integers, floats, units, tuples, bounded symbolic byte slices,
+clones, mixed-direction traversal, huge skip counts, short-circuiting and shared Cell identities.
+Wrong element assertions and reachable callback panics refute. Order/short-circuit mutations
+refute, and 4,096 host cases agree with direct array formulas. Unbounded loops and unsupported
+views remain UNKNOWN. Compiler-layout-derived singleton tags let optimized residual enums finish
+without inventing initialized payloads; ordinary unavailable storage reads still fail.

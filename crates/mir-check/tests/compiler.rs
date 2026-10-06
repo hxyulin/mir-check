@@ -2409,6 +2409,123 @@ fn changed_population_bounds_and_reversed_clamp_guards_are_rejected() {
 }
 
 #[test]
+fn slice_iterators_preserve_order_cursors_and_predicate_calls_on_host_and_arm() {
+    let entries = [
+        ("ordered", ProofStatus::Proved),
+        ("skips", ProofStatus::Proved),
+        ("clone_cursor", ProofStatus::Proved),
+        ("enumerate", ProofStatus::Proved),
+        ("adapters", ProofStatus::Proved),
+        ("bounded_bytes", ProofStatus::Proved),
+        ("all_any", ProofStatus::Proved),
+        ("short_circuit", ProofStatus::Proved),
+        ("no_callback_after_stopping", ProofStatus::Proved),
+        ("predicate_effects", ProofStatus::Proved),
+        ("shared_cells", ProofStatus::Proved),
+        ("floats", ProofStatus::Proved),
+        ("composite", ProofStatus::Proved),
+        ("units", ProofStatus::Proved),
+        ("bad_order", ProofStatus::Refuted),
+        ("bad_callback", ProofStatus::Refuted),
+        ("exhausted", ProofStatus::Refuted),
+        ("unbounded", ProofStatus::Unknown),
+        ("unsupported_view", ProofStatus::Unknown),
+        ("user_method", ProofStatus::Refuted),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("slice_iterators.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+            if name == "user_method" {
+                assert!(
+                    !proof
+                        .models
+                        .iter()
+                        .any(|model| model.contains("tracked cursor"))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn changing_iterator_order_or_short_circuit_behavior_refutes_the_passing_roots() {
+    let source = std::fs::read_to_string(fixture("slice_iterators.rs")).unwrap();
+    let directory = Directory::new();
+    for (entry, original, mutation) in [
+        ("ordered", "== values[0]", "== values[1]"),
+        (
+            "no_callback_after_stopping",
+            "        false\n",
+            "        true\n",
+        ),
+    ] {
+        assert!(source.contains(original));
+        let path = directory.0.join("slice_iterators.rs");
+        std::fs::write(&path, source.replace(original, mutation)).unwrap();
+        let (output, report) = verify_vendored(&path, &[entry], &[]);
+        assert!(!output.status.success());
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted);
+        assert!(proof.obligations.iter().any(|o| o.model.is_some()));
+    }
+}
+
+#[test]
+fn slice_iterator_proofs_agree_with_exhaustive_host_cases() {
+    let directory = Directory::new();
+    let binary = directory.0.join("slice-iterator-tests");
+    let build = Command::new("rustup")
+        .args([
+            "run",
+            "nightly-2026-09-22",
+            "rustc",
+            "--edition=2024",
+            "--test",
+        ])
+        .arg(fixture("slice_iterators.rs"))
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let run = Command::new(binary).output().unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stdout)
+    );
+}
+
+#[test]
 fn owned_aggregate_repeats_preserve_independent_copies_and_keep_storage_limits_on_host_and_arm() {
     let entries = [
         ("matrix", ProofStatus::Proved),

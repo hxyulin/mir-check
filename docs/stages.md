@@ -434,3 +434,18 @@ Host/ARM compiler tests cover six-by-six float matrices, diagonal initialization
 copies, larger generated arrays and nested byte-array writes. Wrong copy assertions and a wrong-row
 write mutation refute. Large repeats, ambiguous composite indices and repeated interior-storage
 accesses remain unknown. There are 75 compiler integration tests and one metadata test.
+
+## Stage 24: shared slice cursors and checked predicate callbacks
+
+Compiler-identified slice iterators retain their source and front/back positions. Models advance
+actual iterator storage, yield source elements and support forward/reverse traversal, symbolic
+skips, lengths, count, size hints and independent clones. Generic enumeration, copied and reverse
+adapters execute core MIR. all/any execute actual concrete callable bodies, propagate memory
+updates and stop at the deciding element. Existing execution budgets bound unfinished loops.
+
+Compiler layouts supply constant discriminants for enum representations with one variant,
+including the uninhabited residual used by optimized question-mark MIR. Host/ARM tests cover
+ordinary/zero-sized/composite values, bounded byte slices, cursor exhaustion and Cell effects.
+Incorrect assertions/callbacks and order/short-circuit mutations refute; 4,096 host cases agree
+with direct formulas. Unsupported views and unbounded loops stay unknown. There are 78 compiler
+integration tests and one metadata test.

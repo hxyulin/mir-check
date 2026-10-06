@@ -54,6 +54,12 @@ pub enum Value {
         owner: usize,
         length: Box<Value>,
     },
+    SliceIterator {
+        source: Box<Value>,
+        front: Box<Value>,
+        back: Box<Value>,
+        mutable: bool,
+    },
     Tuple(Vec<Value>),
     Elements(Vec<Value>),
     MetadataPointer(Box<Value>),
@@ -95,6 +101,7 @@ impl Value {
             | Self::Atomic { .. }
             | Self::Reference { .. }
             | Self::MutableBytes { .. }
+            | Self::SliceIterator { .. }
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
@@ -105,6 +112,9 @@ impl Value {
     pub fn contains_mutable(&self) -> bool {
         match self {
             Self::MutableBytes { .. } | Self::Reference { mutable: true, .. } => true,
+            Self::SliceIterator {
+                mutable, source, ..
+            } => *mutable || source.contains_mutable(),
             Self::Reference { mutable: false, .. } | Self::Cell { .. } | Self::Atomic { .. } => {
                 false
             }

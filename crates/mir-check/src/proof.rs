@@ -25,6 +25,7 @@ mod builtins;
 mod constants;
 mod external;
 mod interior;
+mod iterators;
 mod library;
 mod memory;
 
@@ -213,6 +214,7 @@ impl<'tcx> Engine<'tcx> {
             }
             Value::Reference { .. }
             | Value::MutableBytes { .. }
+            | Value::SliceIterator { .. }
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
@@ -782,6 +784,25 @@ impl<'tcx> Engine<'tcx> {
                         continue;
                     }
                     let configured = self.specification(instance)?.is_some();
+                    if !configured
+                        && let Some(results) = self.iterator_call(
+                            instance,
+                            &values,
+                            &mut state,
+                            &stack,
+                            (id, terminator.source_info.span),
+                        )?
+                    {
+                        let target = target.ok_or("iterator call has no return edge")?;
+                        for result in results {
+                            let mut continuation = state.clone();
+                            continuation.conditions = result.conditions;
+                            continuation.memory = result.memory;
+                            self.write(&mut continuation, *destination, result.value)?;
+                            queue.push_back((target, continuation));
+                        }
+                        continue;
+                    }
                     let modeled_values =
                         self.snapshots(&values, &state.memory, &state.conditions)?;
                     if !configured
@@ -946,7 +967,8 @@ impl<'tcx> Engine<'tcx> {
                     | Value::Float { .. }
                     | Value::Bool(_)
                     | Value::Cell { .. }
-                    | Value::Atomic { .. }),
+                    | Value::Atomic { .. }
+                    | Value::SliceIterator { .. }),
                 ) => value,
                 (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
                     .get(field.as_usize())
@@ -1113,10 +1135,25 @@ impl<'tcx> Engine<'tcx> {
                 self.repeated_array(id, body, state, operand, *length)
             }
             Rvalue::Discriminant(place) => {
-                let modeled = self.place(state, *place)?;
                 let (bits, signed) = self
                     .integer_type(value.ty(&body.local_decls, self.tcx))
                     .ok_or("unsupported discriminant type")?;
+                let ty = place.ty(&body.local_decls, self.tcx).ty;
+                if let ty::Adt(def, _) = ty.kind()
+                    && def.is_enum()
+                    && let Ok(layout) = self
+                        .tcx
+                        .layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(ty))
+                    && let rustc_abi::Variants::Single { index } = layout.variants
+                    && index.as_usize() < def.variants().len()
+                {
+                    return Ok(symbolic::integer(
+                        def.discriminant_for_variant(self.tcx, index).val,
+                        bits,
+                        signed,
+                    ));
+                }
+                let modeled = self.place(state, *place)?;
                 match modeled {
                     Value::Adt { discriminant, .. } => {
                         Ok(symbolic::integer(discriminant, bits, signed))
