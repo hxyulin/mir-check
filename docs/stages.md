@@ -653,3 +653,16 @@ UNKNOWN at the old step limit (0.871 seconds) to PROVED (0.048 seconds); its lat
 went from UNKNOWN (0.901 seconds) to REFUTED (0.048 seconds). A twelve-helper call chain went from
 UNKNOWN (0.035 seconds) to PROVED (0.040 seconds). These small synthetic cases demonstrate lower
 expression overhead and completed exploration, rather than a general speed guarantee.
+
+## Stage 35: optimized unit returns and Option panic boundaries
+
+Unit-returning MIR may leave the return local unassigned; execution now returns the unit value
+while preserving tracked memory effects. Missing non-unit return locals still remain UNKNOWN.
+Option unwrap/expect panic helpers are identified by the actual Option module, exact function
+names and never-returning signatures, then checked as panic entry points before operand decoding.
+The model is pinned to the compiler; same-named application functions receive no special behavior.
+
+Original host/ARM cases check successful/guarded Options, reachable unwrap failures,
+application-name collisions, primitive AddAssign effects and unknown function-pointer calls.
+String reborrows before some expect calls remain UNKNOWN. Native cases and a changed increment
+verify that unit-returning calls preserve their writes.

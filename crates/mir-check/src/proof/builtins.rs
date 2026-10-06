@@ -2,6 +2,29 @@ use super::*;
 use rustc_span::Symbol;
 
 impl<'tcx> Engine<'tcx> {
+    pub(super) fn is_core_panic_helper(&self, callee: DefId) -> bool {
+        let Some(option) = self.tcx.lang_items().get(LangItem::Option) else {
+            return false;
+        };
+        if self.tcx.def_kind(callee) != DefKind::Fn
+            || self.tcx.parent(callee) != self.tcx.parent(option)
+        {
+            return false;
+        }
+        let signature = self.tcx.fn_sig(callee).instantiate_identity().skip_binder();
+        if !signature.output().is_never() {
+            return false;
+        }
+        let name = self.tcx.item_name(callee);
+        if name == Symbol::intern("unwrap_failed") {
+            return signature.inputs().is_empty();
+        }
+        name == Symbol::intern("expect_failed")
+            && matches!(signature.inputs(), [input]
+                if matches!(input.kind(), ty::Ref(_, element, mutability)
+                    if element.is_str() && !mutability.is_mut()))
+    }
+
     pub(super) fn materialize_float(&mut self, value: Value, state: &mut State) -> Value {
         let Value::Float {
             expression,

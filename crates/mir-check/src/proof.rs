@@ -633,7 +633,11 @@ impl<'tcx> Engine<'tcx> {
                     queue.push_back((*target, state));
                 }
                 TerminatorKind::Return => {
-                    let value = self.local(&state, 0)?;
+                    let value = if body.return_ty().is_unit() {
+                        Value::Unit
+                    } else {
+                        self.local(&state, 0)?
+                    };
                     self.validate_frame_escape(&value, &state, incoming_allocations)?;
                     let mut post_bindings = bindings.clone();
                     let uses_post_state = contracts
@@ -704,7 +708,9 @@ impl<'tcx> Engine<'tcx> {
                     else {
                         return Err("unresolved indirect call".to_owned());
                     };
-                    if super::identity::is_panic_call(self.tcx, callee) {
+                    if super::identity::is_panic_call(self.tcx, callee)
+                        || self.is_core_panic_helper(callee)
+                    {
                         self.require(
                             id,
                             terminator.source_info.span,

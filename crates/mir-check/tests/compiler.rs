@@ -807,13 +807,13 @@ fn proofs_use_the_target_width_and_record_the_actual_overflow_configuration() {
 }
 
 #[test]
-fn unknown_memory_and_dispatch_boundaries_fail_verification() {
-    for name in [
-        "unwrap_option",
-        "dynamic",
-        "generic",
-        "indirect",
-        "destructor",
+fn panicking_options_and_unknown_dispatch_boundaries_fail_verification() {
+    for (name, expected) in [
+        ("unwrap_option", ProofStatus::Refuted),
+        ("dynamic", ProofStatus::Unknown),
+        ("generic", ProofStatus::Unknown),
+        ("indirect", ProofStatus::Unknown),
+        ("destructor", ProofStatus::Unknown),
     ] {
         let directory = Directory::new();
         let output = analyze_from(
@@ -832,7 +832,7 @@ fn unknown_memory_and_dispatch_boundaries_fail_verification() {
             .proof
             .as_ref()
             .unwrap();
-        assert_eq!(proof.status, ProofStatus::Unknown, "{name}");
+        assert_eq!(proof.status, expected, "{name}");
     }
 }
 

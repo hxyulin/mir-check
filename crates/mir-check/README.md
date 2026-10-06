@@ -263,3 +263,9 @@ Exact Boolean/bit-vector folding simplifies closed MIR expressions before buildi
 A root-local cache stores up to 128 normalized instantiated bodies, keyed by the full compiler
 Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes
 or cross-invocation compiler objects.
+
+Optimized dependency MIR may return unit without assigning the return local; unit returns preserve
+tracked effects without requiring that assignment. Core Option unwrap/expect panic helpers use the
+actual Option module identity, exact helper names and never-returning signatures. Reachable helper
+calls produce panic obligations even when their MIR body is unavailable. Same-named application
+helpers execute ordinary MIR. String reborrows before some expect calls remain UNKNOWN.
