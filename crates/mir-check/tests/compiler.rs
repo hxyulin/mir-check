@@ -111,7 +111,7 @@ fn overflow_configuration_disables_optional_checks_but_preserves_division_failur
 }
 
 #[test]
-fn unresolved_calls_and_destructors_are_explicit_unknown_boundaries() {
+fn inventories_record_dispatch_and_drop_boundaries_without_claiming_proof() {
     let directory = Directory::new();
     let report = report(analyze(&fixture("panics.rs"), &directory, &[]));
     for (function, kind) in [
@@ -843,7 +843,8 @@ fn panicking_options_and_unknown_dispatch_boundaries_fail_verification() {
         ("dynamic", ProofStatus::Unknown),
         ("generic", ProofStatus::Unknown),
         ("indirect", ProofStatus::Unknown),
-        ("destructor", ProofStatus::Unknown),
+        ("destructor", ProofStatus::Refuted),
+        ("implicit_destructor", ProofStatus::Refuted),
     ] {
         let directory = Directory::new();
         let output = analyze_from(

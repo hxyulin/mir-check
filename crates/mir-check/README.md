@@ -274,7 +274,15 @@ uses typed noncapturing closure constants and the cursor fold model. Captured co
 including zero-sized captures, remain unknown. Iterator by_ref/IntoIterator preserve writable
 cursor references; consuming methods update the original cursor. Wrapper drop glue is harmless
 only when it has no own destructor and all drop-requiring fields are harmless owned iterators.
-Owned element Clone, iterator views and user destructors remain unknown.
+Owned element Clone, iterator views and drop-bearing owned iterator elements remain unknown.
+
+Ordinary MIR Drop terminators execute rustc's concrete synchronous DropGlue shim. The compiler
+orders the actual Drop::drop call and subsequent field drops, including active enum variants and
+partially moved aggregate fields. Normal-return conditions and memory effects reach the caller;
+panics inside destructors become ordinary panic obligations. Whole-local storage is retired after
+its drop returns. No destructor is replaced by a no-panic summary. Unsupported glue operations,
+missing destructor MIR, coroutine drops and unwinding remain UNKNOWN. Pointer-based array/slice
+drop glue is currently unsupported, and experimental induction still rejects drop-bearing state.
 
 Exact compiler intrinsic models implement primitive signed/unsigned integer min/max, saturating
 add/subtract, defined-zero leading/trailing zero counts, byte swapping and bit reversal. Normalized

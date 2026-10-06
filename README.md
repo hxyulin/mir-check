@@ -225,7 +225,9 @@ payloads and signs, including signaling encodings. A bit-level counterexample in
 arithmetic NaN therefore may not replay on the target.
 
 Enum/struct slices, unresolved generic inputs, float remainder, dynamic dispatch, function pointers,
-destructor execution, some constant shapes and broader iterator machinery remain gaps. Limits and
+pointer-based drop glue, some constant shapes and broader iterator machinery remain gaps. Concrete
+synchronous destructors execute through rustc's drop glue, preserving effects and field order.
+Experimental induction still rejects drop-bearing values. Limits and
 unsupported
 operations produce UNKNOWN. A selected-root proof also does not establish absence of undefined
 behavior, allocation failure, stack exhaustion, interrupt races or hardware timing failures.

@@ -131,6 +131,12 @@ scalar Cell references can also be listed. `final_<alias>` reads the resulting m
 Unsupported effect shapes yield UNKNOWN. These frames do not verify general concurrent memory
 or arbitrary raw-pointer effects.
 
+Concrete synchronous guard destructors execute in the ordinary interpreter. A guard that invokes
+a configured restoration leaf therefore checks that leaf's preconditions and records its trusted
+contract, just like an explicit call. The callback and destructor body are still checked. Such
+leaf assumptions establish only the reported conditional panic-freedom claim; they do not verify
+interrupt exclusion or concurrent access. Unsupported drop glue remains UNKNOWN.
+
 Trusted generic calls require an exact instance string, copied from the report's compiler
 instance arguments, such as "[u8]". Matching uses the pinned compiler's representation and rejects
 overlapping selectors. Trait resolution must still identify an ordinary concrete function;

@@ -576,10 +576,15 @@ impl<'tcx> Engine<'tcx> {
         if let Some(body) = self.bodies.borrow().get(&instance) {
             return Ok(body.clone());
         }
-        if !matches!(instance.def, ty::InstanceKind::Item(_)) {
+        if !matches!(
+            instance.def,
+            ty::InstanceKind::Item(_) | ty::InstanceKind::Shim(ty::ShimKind::DropGlue(_, _))
+        ) {
             return Err(format!("unmodeled call adapter {:?}", instance.def));
         }
-        if !self.tcx.is_mir_available(instance.def_id()) {
+        if matches!(instance.def, ty::InstanceKind::Item(_))
+            && !self.tcx.is_mir_available(instance.def_id())
+        {
             return Err(self.missing_body_reason(instance.def_id()));
         }
         let body = instance
@@ -1015,7 +1020,31 @@ impl<'tcx> Engine<'tcx> {
                     if ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
                         && !self.is_owned_no_drop_iterator(ty)
                     {
-                        return Err("destructor behavior is unmodeled".to_owned());
+                        let argument = self.borrow(&mut state, *place, true)?;
+                        let instance = ty::Instance::resolve_drop_glue(self.tcx, ty);
+                        let results = self.call_instance(
+                            instance,
+                            vec![argument],
+                            state.conditions.clone(),
+                            state.memory.clone(),
+                            &stack,
+                            (id, terminator.source_info.span),
+                        )?;
+                        for result in results {
+                            let mut continuation = state.clone();
+                            continuation.conditions = result.conditions;
+                            continuation.memory = result.memory;
+                            if place.projection.is_empty() {
+                                if let Some(allocation) =
+                                    continuation.addresses[place.local.as_usize()].take()
+                                {
+                                    continuation.memory[allocation] = None;
+                                }
+                                continuation.locals[place.local.as_usize()] = None;
+                            }
+                            queue.push_back((*target, continuation));
+                        }
+                        continue;
                     }
                     queue.push_back((*target, state));
                 }

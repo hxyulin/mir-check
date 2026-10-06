@@ -317,12 +317,15 @@ trusted translation boundary; it does not execute arbitrary runtime calls in rus
 
 Coverage remains limited by enum/struct slices, general aliasing, interior-mutable root
 combinations, unresolved generic inputs, float remainder, trait objects, function pointers and
-general iterator machinery, destructors and several MIR operations/constants, including some
-constant shapes. Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work
-for integers, floats and booleans; enum/struct elements need a uniquely determined index.
-Array/slice patterns prove their minimum length and index bounds before applying constant start/end
-offsets. Generic roots with unresolved type parameters remain unsupported. Experimental loop
-induction supports scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges.
+general iterator machinery, pointer-based drop glue and several MIR operations/constants,
+including some constant shapes. Ordinary synchronous destructors execute through rustc's concrete
+DropGlue MIR. Their normal-return effects and ordered field drops are checked; unwinding remains
+unsupported.
+Non-byte input arrays are limited to 256 elements. Symbolic bounded indices work for integers,
+floats and booleans; enum/struct elements need a uniquely determined index. Array/slice patterns
+prove their minimum length and index bounds before applying constant start/end offsets. Generic
+roots with unresolved type parameters remain unsupported. Experimental loop induction supports
+scalar/tuple/enum state, fixed byte arrays, typed storage and integer ranges.
 Byte-slice/scalar-array iterators support indexed references. Automatic type invariants, dedicated
 termination checks and verified general effects remain unsupported.
 

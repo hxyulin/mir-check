@@ -59,7 +59,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Evaluated closure constants | Typed noncapturing, zero-field, zero-sized closure values | Captured constants, including zero-sized captures, remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, min/max, saturating add/subtract, zero counts, byte/bit reversal, comparisons, casts, bit operations and shifts | Optional overflow checks depend on build settings; unsafe nonzero count intrinsics remain unsupported |
 | Float operations | Numeric IEEE operations, exact input/from_bits encodings, moves, negation, abs, clamp and to_bits | Arithmetic NaN encodings allow every payload/sign, including signaling NaNs; counterexamples may not replay |
-| Drop | No-drop values and harmless owned-iterator wrapper glue | User destructors and broader drop execution remain UNKNOWN |
+| Drop | Concrete synchronous rustc drop glue executes user destructors and ordered aggregate field drops | Pointer-based array/slice glue, coroutine drops, unwinding and induction drops remain UNKNOWN |
 | MIR assume | Prove its predicate as a validity obligation | Never turn it into an unchecked assumption |
 
 The execution budget is 8,192 steps per root, including callees, iterator model steps and infeasible
@@ -218,8 +218,9 @@ passthrough preserve its reference. Owned iterator clone stays unknown because e
 implementations may execute user code.
 
 Harmless owned iterator drop glue is recognized only when elements need no drop and every
-drop-requiring field of a wrapper is itself harmless. A wrapper with its own destructor remains
-unknown. Evaluated noncapturing closures require compiler-confirmed empty upvars, zero fields
+drop-requiring field of a wrapper is itself harmless. Other ordinary drops execute rustc's concrete
+glue, including a wrapper's actual user destructor. Unsupported glue remains UNKNOWN. Evaluated
+noncapturing closures require compiler-confirmed empty upvars, zero fields
 and zero-sized layout. Captured constant environments are not fabricated, even when zero-sized.
 
 ## Aggregate references and callback state

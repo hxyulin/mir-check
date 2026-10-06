@@ -106,7 +106,7 @@ fn owned_iterator_order_effects_failures_and_boundaries_are_checked_on_host_and_
         ("bad_borrowed_passthrough", ProofStatus::Refuted),
         ("identity_elements", ProofStatus::Unknown),
         ("element_destructor", ProofStatus::Unknown),
-        ("enclosing_destructor", ProofStatus::Unknown),
+        ("enclosing_destructor", ProofStatus::Refuted),
         ("borrowed_element", ProofStatus::Unknown),
         ("mutable_capture", ProofStatus::Proved),
         ("unsupported_view", ProofStatus::Unknown),
