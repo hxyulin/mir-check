@@ -36,10 +36,11 @@ do not need rustc internals. Inventory remains separate from the opt-in proof en
 Proof mode interprets a restricted subset of typed MIR, uses exact SMT bit-vectors for integers and
 SMT floating-point operations for f32/f64 and follows actual arguments and return values through
 concrete local and available dependency calls. Z3 runs as a subprocess. Every reachable panic
-condition must be unsatisfiable; unsupported behavior, recursion and resource limits remain unknown
+condition must be unsatisfiable; unsupported behavior and exhausted resource limits remain unknown
 and cause verification failure. Finite loops are unrolled until every feasible path completes;
 unfinished paths never become a passing result. Concrete generics, static trait implementations,
-function items and read-only closures resolve to instantiated MIR bodies. Available dependency MIR
+function items and supported mutable closures resolve to instantiated MIR bodies. Available
+dependency MIR
 is interpreted; unavailable bodies and unsupported shims remain unknown. Explicit core models cover
 slice lengths/ranges, lossless integer conversion, integer endian decoding, shared
 byte-slice-to-array conversion, fixed-array map, owned byte-array copies, exact integer population
@@ -48,7 +49,8 @@ executes actual callable bodies in order.
 Reports list interpreted bodies and trusted models separately. MIR assume becomes a checked validity
 obligation. Typed allocations support one mutable root receiver, projected writes, reborrows and
 call state
-propagation. General aliasing and writes through captured references remain unsupported. Structs,
+propagation. Tracked references in aggregates and captures preserve writes to their allocations.
+General aliasing and multiple mutable root references remain unsupported. Structs,
 symbolic input enums and constructed variants preserve tags, fields and return facts. Small
 integer/bool/float arrays support symbolic bounded indices and pattern projections; other elements
 require uniquely determined indices. Struct inputs do not acquire implicit invariants.
@@ -102,7 +104,11 @@ separate qualified roots from same-named unsupported functions and reject missin
 
 Floating-point tests cover NaN comparisons, signed zero, rounding, infinities, Rust's saturating
 float-to-integer casts and float-dependent caller bounds on host/ARM. Arithmetic uses nearest-even
-rounding. Float remainder and raw bit observation stay unknown. Min/max permits either operand
+rounding. Float storage encodings support to_bits/from_bits and same-width integer/float
+transmutes. Inputs, constants, moves, negation, abs and clamp preserve the selected bits. Numeric
+arithmetic results receive one stable storage encoding; all NaN payloads/signs, including signaling
+encodings, are allowed conservatively. Such NaN counterexamples may not replay on the target.
+Float remainder remains unknown. Min/max permits either operand
 for equal numeric inputs, including signed-zero ties. Enum tests cover explicit signed tags,
 payload bounds, symbolic Option contracts, entry snapshots and foreign nested types. Array
 pattern tests check start/end offsets and minimum lengths, including a refuted payload assertion.
@@ -183,16 +189,20 @@ Mutable slice iterators yield projected references into typed source storage, in
 byte arrays, bounded byte-slice roots and composite array elements. Mutable enumeration preserves
 that storage and checks the counter under the active overflow policy. Known Some payloads retain
 tracked mutable references when unwrapped. Legacy byte-copy views read and update addressed
-storage, so iteration followed by copy_from_slice preserves the latest data. General mutable
-returns, captured mutable references and ambiguous composite writes remain unsupported.
+storage, so iteration followed by copy_from_slice preserves the latest data. Mutable references
+into incoming storage can return inside aggregates and iterators; reference graphs reject local
+or dead storage escaping. Ambiguous composite writes remain unsupported.
 
 Borrowed fixed arrays and slices implement IntoIterator through the same tracked cursor models.
 Primitive core f32/f64 finiteness uses exact NaN/infinity classification, reducing the MIR steps
 needed by numeric iterator predicates without weakening their conditions.
 
-The default solver keeps one lazily started Z3 process per root, resetting its state before each
-query. Feasibility checks omit unused counterexample models. Refutations obtain their model in
-the same query context. Exact-query decisions are cached within a root, with at most 1,024 entries
+The default solver keeps one lazily started Z3 process per root. Structured queries retain common
+assertion prefixes and use push/pop to replace branch suffixes. New declarations are installed
+outside assertion scopes; incompatible declaration namespaces reset the session. Full standalone
+SMT scripts remain in reports. Feasibility checks omit unused counterexample models. Refutations
+obtain their model in the same query context. Exact-query decisions are cached within a root,
+with at most 1,024 entries
 or two MiB of query text; unknown responses are never cached. A six-second host deadline covers
 pipe writes and reads, and failures discard the session. MIR_CHECK_Z3 keeps the existing custom
 one-shot protocol, which relies on the executable's -T:6 timeout option. No proofs are reused
@@ -208,8 +218,9 @@ The evaluator is part of the trusted implementation, with boundary and different
 Compiler-identified core::array::from_fn executes actual callback bodies in ascending index order,
 including checked call bounds and tracked Cell effects. Empty arrays do not invoke the callback.
 Generated owned results have at most 128 elements and 256 modeled values, including containers.
-Drop-bearing callbacks/elements, storage identities in generated elements and mutable captures
-remain unknown. This model does not permit general MaybeUninit or partially initialized storage.
+Drop-bearing callbacks/elements and storage identities in generated elements remain unknown.
+Tracked callback environments preserve mutable captures and owned FnMut state in index order. This
+model does not permit general MaybeUninit or partially initialized storage.
 
 Synthetic array-generation and iterator regressions exercise the relevant Rust features with
 independent ticket, parcel, score and tally examples. Host/ARM proofs, rejected mutations and
@@ -240,15 +251,15 @@ signatures and modeled widths/signs gate each model. Saturation uses one extra S
 129-bit intermediates for 128-bit inputs. Scoped let bindings preserve operand expressions without
 raising query limits. Unsafe nonzero-only count intrinsics remain unsupported.
 
-Tracked mutable references can be stored in supported structs, tuples, enums and iterator
-adapters. References into incoming storage can return; graph checks reject local or dangling
-borrows escaping, including references hidden in caller storage. FnMut callback environments
-preserve owned capture state and external writes across calls. General root aliasing and legacy
-mutable byte captures remain unknown. Synthetic host/ARM tests cover Zip/Flatten, reference
-returns, stateful callbacks and rejected mutations.
+FnMut callbacks use one allocation-backed environment per modeled invocation. Map/from_fn,
+all/any and fold/rfold execute actual bodies, carrying owned capture updates and external writes
+between calls. Callback environments are retired after traversal. Ordinary mutable closure calls
+also borrow their actual environment. Typed aggregate references allow supported Zip/Flatten MIR
+and user structs/tuples to preserve reference identity without new assumed summaries.
 
-Float inputs, constants and from_bits retain exact storage encodings. Moves, selection, negation,
-abs and clamp preserve those bits; to_bits and same-width integer/float transmutes observe them.
-Computed arithmetic/cast results get a stable encoding constrained to their numeric value. NaN
-arithmetic outputs conservatively permit every encoding, including signaling payloads; bit-level
-counterexamples may not replay on the target. Float remainder remains unknown.
+Execution defaults are 2,048 steps and 16 active call frames, including bounded recursive calls.
+Incomplete loops/recursion return UNKNOWN; the 30-second root and 200,000-byte query limits remain.
+Exact Boolean/bit-vector folding simplifies closed MIR expressions before building longer terms.
+A root-local cache stores up to 128 normalized instantiated bodies, keyed by the full compiler
+Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes
+or cross-invocation compiler objects.

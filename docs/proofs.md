@@ -23,7 +23,12 @@ queries exceed the analysis limits.
 Each selected root gets symbolic inputs. Integers are bit-vectors with the target's exact widths
 and signedness. f32/f64 use SMT floating-point sorts with nearest-even arithmetic and numeric
 NaN/infinity/signed-zero semantics. Float-to-integer casts truncate and saturate as Rust does,
-including NaN-to-zero. Float remainder and raw bit observation remain unknown.
+including NaN-to-zero. Inputs/constants and from_bits values also retain their raw encodings,
+including NaN signs/payloads. Moves, negation, abs and clamp preserve the selected encoding;
+to_bits and same-width integer/float transmutes expose it. Each numeric arithmetic result gets
+one stable encoding constrained to its IEEE value. For NaN, this permits every payload/sign,
+including signaling encodings. This overapproximation makes proofs conservative, while bit-level
+NaN counterexamples may not replay on the target. Float remainder remains unknown.
 Booleans are SMT booleans. Byte contents are SMT arrays; slice lengths satisfy
 valid-reference bounds. Struct fields are independent inputs, including private fields. No
 constructor invariant is inferred for an arbitrary struct parameter.
@@ -44,7 +49,7 @@ payloads for each variant. The engine proves the tag before reading a downcast p
 The root's requires predicates restrict the input domain. The engine first checks that the domain
 is satisfiable, refusing inconsistent preconditions as unknown. It then interprets each MIR block,
 maintaining symbolic local values and path conditions. A branch adds its condition or its negation;
-infeasible branches are removed only after Z3 answers unsat.
+infeasible branches are removed only after an exact constant decision or Z3 answers unsat.
 
 ## Obligations
 
@@ -80,15 +85,19 @@ counts, not runtime coverage or whole-crate safety percentages.
 
 Loops repeat the interpreter over successive states. This can prove small finite domains, such
 as the fixed three-device CAN configurations, without a loop invariant. Every feasible iteration
-must finish. The global execution budget is 256 dequeued blocks per root, including local calls
+must finish. The execution budget is 2,048 steps per root, including dequeued blocks, local calls
 and infeasible queued branches. Truncating unfinished paths would be unsound; reaching the budget
 returns unknown. Infinite loops and larger finite loops can therefore remain unknown even when
-they do not panic. Recursive calls and depths beyond eight also remain unknown.
+they do not panic. Calls, including recursion, can use at most 16 active frames. Finite recursion
+can complete within those bounds; an unfinished recursive path returns unknown.
 
 Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a six-second
 host deadline per solver request. Reaching these limits is a verification failure. A root lazily
-starts one Z3 process and resets its declarations and assertions before each query. Feasibility
-checks request a decision; a refuted obligation requests its model from the same query context.
+starts one Z3 process. Structured queries retain common assertion prefixes, pop the old branch
+suffix and push new assertions. Declarations are installed outside assertion scopes. A changed
+or incompatible declaration namespace resets the session; extending it rebuilds assertion scopes
+around the new declarations. Feasibility checks request a decision; a refuted obligation requests
+its model from the same query context. Reports still contain full standalone SMT scripts.
 Malformed output, missing response markers, closed pipes and timeouts discard the session and
 return UNKNOWN. The host deadline covers writes as well as reads; responses above 256 KiB also
 return UNKNOWN.
@@ -96,7 +105,9 @@ return UNKNOWN.
 An exact-query decision cache is local to the root and holds at most 1,024 entries or two MiB of
 query text. Undecided responses are never cached. A cached satisfiable decision can answer a
 feasibility check, but cannot supply a counterexample model. There is no disk proof cache, state
-merging or cache of verified function summaries. Branch growth and complex solver queries can
+merging or cache of verified function summaries. A separate root-local cache shares up to 128
+instantiated and normalized MIR bodies through Rc, keyed by the full compiler Instance. It does
+not cache contracts, state or proof outcomes. Branch growth and complex solver queries can
 therefore remain expensive.
 
 A bounded in-process evaluator handles fully constant Boolean and bit-vector queries. It
@@ -105,7 +116,9 @@ operator arity. Supported integer operations wrap at their declared width; signe
 and sign/zero extensions preserve that width's semantics. Parser limits, symbolic expressions,
 floating point, arrays and unsupported syntax fall back to Z3. Constant false failure conditions
 can discharge obligations directly; failing obligations still request a Z3 counterexample model.
-This evaluator is part of the trusted implementation and has differential tests against Z3.
+The same exact evaluator folds supported closed Boolean/bit-vector MIR expressions before
+larger symbolic terms are built. Unsupported expressions remain symbolic. This evaluator is part
+of the trusted implementation and has differential tests against Z3.
 
 Setting MIR_CHECK_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
 existing -T:6 process option. This compatibility path relies on the executable honoring that
@@ -124,14 +137,16 @@ Trusted models implement slice length, byte prefix ranges, lossless integer conv
 decoding, shared byte-slice-to-array conversion, fixed-array map/from_fn, exact owned byte-array
 copies, opaque formatting arguments from evaluated static strings, and float abs/min/max.
 Min/max ignores one NaN and permits either operand on equal numeric inputs, including signed-zero
-ties. Raw NaN payload/sign observation is unsupported. Array map executes each
-actual callable body; the model supplies array traversal and storage. Compiler identities and
+ties. Numeric NaN outputs permit all storage encodings rather than selecting an assumed payload.
+Array map executes each actual callable body; the model supplies array traversal and storage.
+Compiler identities and
 instantiated types select models. Dependencies and dynamic formatters are not assumed safe.
 A solver model is not automatically replayed as a Rust test;
 confirmed examples currently have separate runtime replay tests.
 
 Concrete generic arguments are substituted and normalized before execution. Static trait dispatch
-resolves to a concrete implementation. Available dependency bodies, read-only closures and function
+resolves to a concrete implementation. Available dependency bodies, supported mutable closures and
+function
 items are interpreted with actual values. Unsupported shims and missing MIR still fail as unknown.
 Cargo rebuilds direct/transitive dependencies with always-encode-mir and MIR optimization level
 zero, retaining ordinary function bodies without trusting them. The outer wrapper preserves other
@@ -150,8 +165,8 @@ does not need decoding. Constant shape limits are eight levels and 256 values, w
 trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
 
 Coverage remains limited by enum/struct slices, general aliasing, multiple mutable root references,
-mutable captures,
-unresolved generic inputs, float remainder/bit observation, trait objects, function pointers and
+legacy mutable byte captures, unresolved generic inputs, float remainder, trait objects, function
+pointers and
 general iterator machinery, destructors and several MIR operations/constants, including some
 constant shapes. Non-byte arrays are limited to 16 elements; symbolic bounded indices work for
 integers, floats and booleans; enum/struct elements need a uniquely determined index. Array/slice
@@ -185,8 +200,16 @@ established index. Byte writes support symbolic indices with proven bounds.
 
 Root construction accepts one mutable reference and rejects reference fields inside its pointee.
 This avoids assuming distinct locations for unresolved root aliases. Multiple references created
-from known local storage can cross supported calls. General mutable-reference returns and
-captures remain unknown. Shared immutable byte views retain the earlier snapshot models.
+from known local storage can cross supported calls. Tuples, structs, enums and closure environments
+retain tracked references. Returns can retain references into incoming storage, including inside
+iterators or closures. The returned graph and incoming storage are checked for references into the
+returning frame or dead allocations. A local mutable borrow cannot escape by being nested.
+
+FnMut calls borrow the actual closure environment. Models for map/from_fn, predicates and folds
+allocate one environment per invocation and propagate owned field updates and captured writes
+between callbacks. The temporary environment is retired after traversal. Legacy mutable byte
+views cannot acquire an allocation merely by being nested. Shared immutable byte views retain
+the earlier snapshot models.
 
 Postcondition parameter names refer to entry snapshots. The `final_<parameter>` binding refers to
 the argument's state at return, for example final_state.count or final_self.integral. Parameter

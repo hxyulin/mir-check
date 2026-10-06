@@ -625,3 +625,31 @@ unknown. A sign-mask mutation refutes; native cases cover zero signs, subnormals
 NaN input encodings and 1,024 integer-cast/arithmetic inputs. Checked sidecars also force actual
 core to_bits/from_bits bodies through typed transmutes without library summaries. Float remainder
 and wider formats remain unknown.
+
+## Stage 34: incremental queries, ground folding and instantiated MIR reuse
+
+The default solver consumes structured declarations/assertions, retains a common assertion prefix
+and uses push/pop for branch suffixes. Declarations are installed outside assertion scopes;
+incompatible namespaces reset the session. Counterexamples still come from the current context,
+and reports retain complete standalone SMT scripts. Exact decision-cache bounds, protocol
+failure handling and the custom executable compatibility path remain unchanged.
+
+Exact closed Boolean/bit-vector folding reduces repeated MIR expression growth. A root-local cache
+shares at most 128 normalized bodies through Rc, keyed by the full compiler Instance rather than
+DefId alone. It caches no function proofs or unchecked summaries and persists no compiler objects
+to disk. Regression tests cover assertion-prefix changes, new/incompatible declarations and
+current models, alongside differential ground-expression tests and generic-instance separation.
+
+Default exploration increases from 256 to 2,048 steps and from eight to 16 active call frames.
+Finite recursion may complete under those limits; unfinished recursive/loop paths remain UNKNOWN.
+The 30-second root budget, 200,000-byte query limit and five/six-second solver/request limits remain
+unchanged. Speed improvements reduce repeated work; they do not guarantee that larger limits
+finish branch-heavy proofs or justify truncating unfinished paths.
+
+On the development host, alternating release builds were measured after a warm-up, using five
+measured samples each and the same Z3/compiler configuration. A bounded symbolic counter loop
+remained PROVED and improved from 0.258 to 0.060 seconds. A fixed 256-iteration loop went from
+UNKNOWN at the old step limit (0.871 seconds) to PROVED (0.048 seconds); its late-panic counterpart
+went from UNKNOWN (0.901 seconds) to REFUTED (0.048 seconds). A twelve-helper call chain went from
+UNKNOWN (0.035 seconds) to PROVED (0.040 seconds). These small synthetic cases demonstrate lower
+expression overhead and completed exploration, rather than a general speed guarantee.

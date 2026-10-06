@@ -1370,7 +1370,7 @@ pub fn beyond_budget() {
         ("finite", ProofStatus::Proved),
         ("late_panic", ProofStatus::Refuted),
         ("nonterminating", ProofStatus::Unknown),
-        ("beyond_budget", ProofStatus::Unknown),
+        ("beyond_budget", ProofStatus::Proved),
     ] {
         let proof = report
             .functions

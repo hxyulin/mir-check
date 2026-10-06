@@ -189,11 +189,11 @@ containing a shared byte slice.
 | Constants | Evaluated structs, tuples, active enum variants, bounded arrays/slices and immutable promoted/static references |
 | Arithmetic | Exact integer operations, min/max, saturation, bit counts and rearrangement; IEEE f32/f64 arithmetic, comparisons and saturating casts |
 | Interior mutation | Scalar Cell aliases/calls and conservative integer atomic counters with checked orderings |
-| Mutable storage | One mutable root receiver, projected writes, reborrows and state propagation through calls |
-| Calls | Concrete generics, static traits, available dependency MIR, function items, read-only closures and noncapturing evaluated closure constants |
+| Mutable storage | One mutable root receiver, projected writes, reborrows, tracked aggregate references and call effects |
+| Calls | Concrete generics, static traits, available dependency MIR, function items, tracked mutable captures and noncapturing evaluated closure constants |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |
 | Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map/from_fn, float abs/min/max/clamp and static formatting arguments |
-| Iteration | Shared/mutable slices and owned arrays; cursor operations, checked predicates and ordered fold/rfold callbacks |
+| Iteration | Shared/mutable slices and owned arrays; checked predicates, ordered folds and supported Zip/Flatten bodies |
 | Contracts | Caller bounds, entry preconditions and postconditions on actual returns |
 
 Integer/bool/float arrays support symbolic bounded indices and array/slice pattern projections.
@@ -211,12 +211,28 @@ decodes only the active variant. Constants have an eight-level depth limit and a
 byte arrays/slices have at most 128 bytes and other arrays/slices at most 16 elements. Unions,
 including MaybeUninit, and mutable or raw-pointer storage remain unknown.
 
-General aliasing, multiple mutable root references, mutable captures, enum/struct slices, unresolved
-generic inputs,
-float remainder and bit observation, dynamic dispatch, function pointers, destructor execution, some
-constant shapes and broader iterator machinery remain gaps. Limits and unsupported
+Tracked mutable references can be stored in tuples, structs, enums and closure environments.
+They keep allocation identity through calls and returns when their storage belongs to the caller;
+dead references and references into the returning frame fail verification. FnMut callbacks retain
+both owned capture state and writes through captured references between invocations. Legacy mutable
+byte views, multiple mutable root references, general aliasing and ambiguous non-byte writes remain
+gaps.
+
+Float storage bits are tracked through inputs, constants, from_bits/to_bits, moves, negation, abs
+and clamp. Arithmetic has exact numeric IEEE semantics; NaN output bits conservatively allow all
+payloads and signs, including signaling encodings. A bit-level counterexample involving an
+arithmetic NaN therefore may not replay on the target.
+
+Enum/struct slices, unresolved generic inputs, float remainder, dynamic dispatch, function pointers,
+destructor execution, some constant shapes and broader iterator machinery remain gaps. Limits and
+unsupported
 operations produce UNKNOWN. A selected-root proof also does not establish absence of undefined
 behavior, allocation failure, stack exhaustion, interrupt races or hardware timing failures.
+
+The default execution limits are 2,048 steps and 16 active call frames per root. Finite recursion
+can complete within those limits; unfinished paths remain UNKNOWN. Each root retains a 30-second
+budget and a 200,000-byte query limit. Incremental solver scopes, exact constant folding and a
+root-local instantiated MIR cache reduce repeated work without assuming function summaries.
 
 See [the coverage matrix](docs/coverage.md) for evidence and limits, and
 [proof execution](docs/proofs.md) for how obligations are generated and what the result trusts.

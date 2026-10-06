@@ -5,7 +5,7 @@ const MAX_TOKENS: usize = 16_384;
 const MAX_DEPTH: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Value {
+pub(crate) enum Constant {
     Bool(bool),
     BitVec { value: u128, bits: u32 },
 }
@@ -13,6 +13,12 @@ enum Value {
 struct Parser<'a> {
     tokens: Vec<&'a str>,
     position: usize,
+}
+
+pub(crate) fn constant(expression: &str) -> Option<Constant> {
+    let mut parser = Parser::new(expression)?;
+    let value = parser.expression(0)?;
+    (parser.position == parser.tokens.len()).then_some(value)
 }
 
 pub(super) fn feasible(query: &str) -> Option<bool> {
@@ -61,7 +67,7 @@ pub(super) fn feasible(query: &str) -> Option<bool> {
             }
             "assert" if options == 3 => {
                 assertions_started = true;
-                let Value::Bool(value) = parser.expression(0)? else {
+                let Constant::Bool(value) = parser.expression(0)? else {
                     return None;
                 };
                 answer &= value;
@@ -157,13 +163,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expression(&mut self, depth: usize) -> Option<Value> {
+    fn expression(&mut self, depth: usize) -> Option<Constant> {
         if depth >= MAX_DEPTH {
             return None;
         }
         match self.next()? {
-            "true" => Some(Value::Bool(true)),
-            "false" => Some(Value::Bool(false)),
+            "true" => Some(Constant::Bool(true)),
+            "false" => Some(Constant::Bool(false)),
             "(" => {
                 let operator = self.next()?;
                 let value = if operator == "(" {
@@ -174,7 +180,7 @@ impl<'a> Parser<'a> {
                     }
                     let extra: u32 = decimal(self.next()?)?.try_into().ok()?;
                     self.expect(")")?;
-                    let Value::BitVec { value, bits } = self.expression(depth + 1)? else {
+                    let Constant::BitVec { value, bits } = self.expression(depth + 1)? else {
                         return None;
                     };
                     let extended = bits.checked_add(extra).filter(|bits| *bits <= 128)?;
@@ -184,7 +190,7 @@ impl<'a> Parser<'a> {
                     } else {
                         value
                     };
-                    Value::BitVec {
+                    Constant::BitVec {
                         value,
                         bits: extended,
                     }
@@ -194,16 +200,16 @@ impl<'a> Parser<'a> {
                     if value > mask(bits) {
                         return None;
                     }
-                    Value::BitVec { value, bits }
+                    Constant::BitVec { value, bits }
                 } else {
                     let left = self.expression(depth + 1)?;
                     match operator {
                         "not" => match left {
-                            Value::Bool(value) => Value::Bool(!value),
-                            Value::BitVec { .. } => return None,
+                            Constant::Bool(value) => Constant::Bool(!value),
+                            Constant::BitVec { .. } => return None,
                         },
                         "bvnot" | "bvneg" => {
-                            let Value::BitVec { value, bits } = left else {
+                            let Constant::BitVec { value, bits } = left else {
                                 return None;
                             };
                             let value = if operator == "bvnot" {
@@ -211,7 +217,7 @@ impl<'a> Parser<'a> {
                             } else {
                                 0_u128.wrapping_sub(value)
                             } & mask(bits);
-                            Value::BitVec { value, bits }
+                            Constant::BitVec { value, bits }
                         }
                         _ => {
                             let right = self.expression(depth + 1)?;
@@ -227,17 +233,17 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn binary(operator: &str, left: Value, right: Value) -> Option<Value> {
+fn binary(operator: &str, left: Constant, right: Constant) -> Option<Constant> {
     match (left, right) {
-        (Value::Bool(left), Value::Bool(right)) => match operator {
-            "=" => Some(Value::Bool(left == right)),
-            "and" => Some(Value::Bool(left && right)),
-            "or" => Some(Value::Bool(left || right)),
+        (Constant::Bool(left), Constant::Bool(right)) => match operator {
+            "=" => Some(Constant::Bool(left == right)),
+            "and" => Some(Constant::Bool(left && right)),
+            "or" => Some(Constant::Bool(left || right)),
             _ => None,
         },
         (
-            Value::BitVec { value: left, bits },
-            Value::BitVec {
+            Constant::BitVec { value: left, bits },
+            Constant::BitVec {
                 value: right,
                 bits: right_bits,
             },
@@ -263,7 +269,7 @@ fn binary(operator: &str, left: Value, right: Value) -> Option<Value> {
                 _ => None,
             };
             if let Some(value) = comparison {
-                return Some(Value::Bool(value));
+                return Some(Constant::Bool(value));
             }
             let value = match operator {
                 "bvadd" => left.wrapping_add(right),
@@ -274,17 +280,17 @@ fn binary(operator: &str, left: Value, right: Value) -> Option<Value> {
                 "bvxor" => left ^ right,
                 _ => return None,
             } & mask(bits);
-            Some(Value::BitVec { value, bits })
+            Some(Constant::BitVec { value, bits })
         }
-        (Value::Bool(_), Value::BitVec { .. })
-        | (Value::BitVec { .. }, Value::Bool(_))
-        | (Value::BitVec { .. }, Value::BitVec { .. }) => None,
+        (Constant::Bool(_), Constant::BitVec { .. })
+        | (Constant::BitVec { .. }, Constant::Bool(_))
+        | (Constant::BitVec { .. }, Constant::BitVec { .. }) => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_DEPTH, MAX_TOKENS, feasible, mask};
+    use super::{Constant, MAX_DEPTH, MAX_TOKENS, constant, feasible, mask};
     use std::io::Write;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
@@ -294,6 +300,36 @@ mod tests {
             "(set-logic ALL)\n(set-option :timeout 5000)\n\
              (set-option :pp.bv-literals false)\n{assertions}\n(check-sat)\n"
         )
+    }
+
+    #[test]
+    fn constant_terms_require_a_closed_well_typed_complete_expression() {
+        assert_eq!(constant("(not false)"), Some(Constant::Bool(true)));
+        assert_eq!(
+            constant("(bvadd (_ bv255 8) (_ bv1 8))"),
+            Some(Constant::BitVec { value: 0, bits: 8 })
+        );
+        assert_eq!(
+            constant("((_ sign_extend 64) (_ bv18446744073709551615 64))"),
+            Some(Constant::BitVec {
+                value: u128::MAX,
+                bits: 128
+            })
+        );
+        for expression in [
+            "true false",
+            "(and false v0)",
+            "(not false) (check-sat)",
+            "(bvadd (_ bv1 8) (_ bv1 16))",
+            "(bvadd true false)",
+            "(_ bv1 0)",
+            "(_ bv256 8)",
+            "((_ zero_extend 1) (_ bv1 128))",
+            "(_ bv1 8) ; comment",
+            "(fp.isNaN (_ +zero 8 24))",
+        ] {
+            assert_eq!(constant(expression), None, "{expression}");
+        }
     }
 
     #[test]

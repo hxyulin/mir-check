@@ -10,7 +10,7 @@ const MAX_OUTPUT_BYTES: usize = 262_144;
 const MAX_CACHE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 1024;
 
-mod ground;
+pub(crate) mod ground;
 
 pub enum Answer {
     Unsat,
@@ -24,12 +24,60 @@ enum Decision {
     Sat,
 }
 
+pub struct Query {
+    text: String,
+    declarations: Vec<String>,
+    assertions: Vec<String>,
+}
+
+impl Query {
+    pub fn new(declarations: &[String], conditions: &[String], failure: &str) -> Self {
+        let mut seen = std::collections::HashSet::new();
+        let assertions = conditions
+            .iter()
+            .map(String::as_str)
+            .chain([failure])
+            .filter(|assertion| *assertion != "true" && seen.insert(*assertion))
+            .map(str::to_owned)
+            .collect();
+        let mut query = Self {
+            text: prelude().to_owned(),
+            declarations: declarations.to_vec(),
+            assertions,
+        };
+        for declaration in &query.declarations {
+            query.text.push_str(declaration);
+            query.text.push('\n');
+        }
+        for assertion in &query.assertions {
+            query.text.push_str(&format!("(assert {assertion})\n"));
+        }
+        query.text.push_str("(check-sat)\n");
+        query
+    }
+
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+}
+
+fn prelude() -> &'static str {
+    "(set-logic ALL)\n(set-option :timeout 5000)\n(set-option :pp.bv-literals false)\n"
+}
+
+#[derive(Default)]
+struct Context {
+    declarations: Vec<String>,
+    assertions: Vec<String>,
+}
+
 pub struct Solver {
     executable: PathBuf,
     custom: bool,
     session: Option<Session>,
     decisions: HashMap<String, Decision>,
     cache_bytes: usize,
+    context: Option<Context>,
 }
 
 impl Default for Solver {
@@ -49,12 +97,26 @@ impl Default for Solver {
             session: None,
             decisions: HashMap::new(),
             cache_bytes: 0,
+            context: None,
         }
     }
 }
 
 impl Solver {
+    pub fn feasible_query(&mut self, query: &Query) -> Result<bool, String> {
+        self.feasible_inner(query.text(), Some(query))
+    }
+
+    pub fn check_query(&mut self, query: &Query) -> Answer {
+        self.check_inner(query.text(), Some(query))
+    }
+
+    #[cfg(test)]
     pub fn feasible(&mut self, query: &str) -> Result<bool, String> {
+        self.feasible_inner(query, None)
+    }
+
+    fn feasible_inner(&mut self, query: &str, structured: Option<&Query>) -> Result<bool, String> {
         let decision = if let Some(decision) = self.decisions.get(query) {
             *decision
         } else {
@@ -67,7 +129,7 @@ impl Solver {
                     Decision::Unsat
                 }
             } else {
-                self.decide(query)?
+                self.decide_query(query, structured)?
             };
             self.remember(query, decision);
             decision
@@ -75,7 +137,12 @@ impl Solver {
         Ok(matches!(decision, Decision::Sat))
     }
 
+    #[cfg(test)]
     pub fn check(&mut self, query: &str) -> Answer {
+        self.check_inner(query, None)
+    }
+
+    fn check_inner(&mut self, query: &str, structured: Option<&Query>) -> Answer {
         if matches!(self.decisions.get(query), Some(Decision::Unsat)) {
             return Answer::Unsat;
         }
@@ -83,7 +150,7 @@ impl Solver {
             self.remember(query, Decision::Unsat);
             return Answer::Unsat;
         }
-        match self.decide(query) {
+        match self.decide_query(query, structured) {
             Ok(Decision::Unsat) => {
                 self.remember(query, Decision::Unsat);
                 Answer::Unsat
@@ -106,6 +173,7 @@ impl Solver {
                     }
                     Err(error) => {
                         self.session = None;
+                        self.context = None;
                         Answer::Unknown(error)
                     }
                 }
@@ -114,10 +182,17 @@ impl Solver {
         }
     }
 
-    fn decide(&mut self, query: &str) -> Result<Decision, String> {
+    fn decide_query(
+        &mut self,
+        query: &str,
+        structured: Option<&Query>,
+    ) -> Result<Decision, String> {
         let output = if self.custom {
             run(&self.executable, query)?
+        } else if let Some(query) = structured {
+            self.incremental(query)?
         } else {
+            self.context = None;
             self.request(&format!("(reset)\n{query}"))?
         };
         match output.trim() {
@@ -125,18 +200,65 @@ impl Solver {
             "sat" => Ok(Decision::Sat),
             _ => {
                 self.session = None;
+                self.context = None;
                 Err(format!("solver did not decide the query: {output}"))
             }
         }
     }
 
+    fn incremental(&mut self, query: &Query) -> Result<String, String> {
+        let mut commands = String::new();
+        if self
+            .context
+            .as_ref()
+            .is_none_or(|context| !query.declarations.starts_with(&context.declarations))
+        {
+            commands.push_str("(reset)\n");
+            commands.push_str(prelude());
+            self.context = Some(Context::default());
+        }
+        let context = self.context.as_mut().unwrap();
+        let common = if query.declarations.len() != context.declarations.len() {
+            0
+        } else {
+            context
+                .assertions
+                .iter()
+                .zip(&query.assertions)
+                .take_while(|(left, right)| left == right)
+                .count()
+        };
+        let pop = context.assertions.len() - common;
+        if pop > 0 {
+            commands.push_str(&format!("(pop {pop})\n"));
+        }
+        for declaration in &query.declarations[context.declarations.len()..] {
+            commands.push_str(declaration);
+            commands.push('\n');
+        }
+        for assertion in &query.assertions[common..] {
+            commands.push_str(&format!("(push 1)\n(assert {assertion})\n"));
+        }
+        commands.push_str("(check-sat)\n");
+        context.declarations = query.declarations.clone();
+        context.assertions = query.assertions.clone();
+        self.request(&commands)
+    }
+
     fn request(&mut self, commands: &str) -> Result<String, String> {
         if self.session.is_none() {
-            self.session = Some(Session::start(&self.executable)?);
+            match Session::start(&self.executable) {
+                Ok(session) => self.session = Some(session),
+                Err(error) => {
+                    self.context = None;
+                    return Err(error);
+                }
+            }
         }
         let result = self.session.as_mut().unwrap().request(commands);
         if result.is_err() {
             self.session = None;
+            self.context = None;
         }
         result
     }
@@ -459,5 +581,95 @@ mod tests {
         assert!(solver.request(&"x".repeat(1_000_000)).is_err());
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(solver.session.is_none());
+    }
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_process_start_does_not_leave_an_installed_query_context() {
+        let executable = Solver::default().executable;
+        let mut solver = Solver {
+            executable: std::env::temp_dir().join("mir-check-missing-incremental-test-solver"),
+            custom: false,
+            ..Solver::default()
+        };
+        let query = Query::new(
+            &["(declare-const v0 Bool)".into()],
+            &["v0".into()],
+            "(not v0)",
+        );
+        assert!(matches!(solver.check_query(&query), Answer::Unknown(_)));
+        assert!(solver.context.is_none());
+        assert!(solver.session.is_none());
+        assert!(solver.decisions.is_empty());
+        solver.executable = executable;
+        assert!(matches!(solver.check_query(&query), Answer::Unsat));
+        assert!(solver.context.is_some());
+    }
+
+    #[test]
+    fn incremental_queries_pop_branches_and_install_new_declarations_outside_scopes() {
+        let mut solver = Solver {
+            custom: false,
+            ..Solver::default()
+        };
+        let mut declarations = vec!["(declare-const v0 (_ BitVec 8))".to_owned()];
+        let first = Query::new(&declarations, &["(= v0 (_ bv17 8))".into()], "true");
+        assert!(solver.feasible_query(&first).unwrap());
+        let process = solver.session.as_ref().unwrap().child.id();
+        let second = Query::new(&declarations, &["(= v0 (_ bv93 8))".into()], "true");
+        assert!(solver.feasible_query(&second).unwrap());
+        declarations.push("(declare-const v1 Bool)".into());
+        let third = Query::new(&declarations, &["v1".into()], "(= v0 (_ bv23 8))");
+        match solver.check_query(&third) {
+            Answer::Sat(model) => assert!(model.contains("bv23") && model.contains("true")),
+            Answer::Unsat => panic!("new branch inherited an old assertion"),
+            Answer::Unknown(error) => panic!("{error}"),
+        }
+        assert_eq!(solver.session.as_ref().unwrap().child.id(), process);
+        let contradict = Query::new(&declarations, &["v1".into()], "(not v1)");
+        assert!(matches!(solver.check_query(&contradict), Answer::Unsat));
+        assert!(
+            solver
+                .feasible_query(&Query::new(&declarations, &[], "(not v1)"))
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn structured_queries_reset_incompatible_namespaces_and_keep_models_current() {
+        let mut solver = Solver {
+            custom: false,
+            ..Solver::default()
+        };
+        let first = Query::new(&["(declare-const v0 Bool)".into()], &[], "v0");
+        assert!(solver.feasible_query(&first).unwrap());
+        let second = Query::new(
+            &["(declare-const v0 (_ BitVec 8))".into()],
+            &[],
+            "(= v0 (_ bv41 8))",
+        );
+        assert!(solver.feasible_query(&second).unwrap());
+        assert!(matches!(solver.check_query(&first), Answer::Sat(_)));
+        let invalid = Query::new(&[], &[], "missing");
+        assert!(matches!(solver.check_query(&invalid), Answer::Unknown(_)));
+        assert!(solver.context.is_none());
+        assert!(solver.feasible_query(&second).unwrap());
+    }
+
+    #[test]
+    fn query_canonicalization_only_removes_true_and_identical_conjuncts() {
+        let query = Query::new(
+            &[],
+            &["true".into(), "false".into(), "false".into()],
+            "false",
+        );
+        assert_eq!(query.assertions, ["false"]);
+        assert!(query.text().contains("(assert false)"));
+        let query = Query::new(&[], &["p".into(), "(not p)".into()], "p");
+        assert_eq!(query.assertions, ["p", "(not p)"]);
     }
 }

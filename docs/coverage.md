@@ -15,14 +15,14 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Feature | Current support | Boundary |
 | --- | --- | --- |
 | Integers and bool | Symbolic target-width values, signed comparisons, exact bit-vector operations and population counts | Char and raw pointers are unsupported inputs |
-| Floating point | f32/f64 inputs/constants, IEEE arithmetic/comparisons, abs/min/max/clamp and integer/float casts | Remainder, raw bits and wider float formats are unsupported |
+| Floating point | f32/f64 numeric operations, casts and tracked IEEE storage bits | Remainder/wider formats remain unsupported; arithmetic NaN encodings are conservative |
 | Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | One mutable byte-slice root supports guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
 | Fixed non-byte arrays | At most 16 input/constant elements; generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
-| Mutable storage | One mutable root reference, field/byte writes, reborrows and call state propagation | Root pointees with reference fields, general aliasing, mutable returns/captures and partially initialized aggregates remain UNKNOWN |
+| Mutable storage | One mutable root reference, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing, legacy byte captures and partial initialization remain UNKNOWN |
 | Interior mutation | Scalar Cell aliases/calls and integer atomic load/store/add/sub/swap with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
@@ -51,22 +51,25 @@ at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaus
 | Loops | Complete finite unrolling through every feasible path | No inductive loop invariants; incomplete exploration is UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
-| Closures and function items | Read-only captures and supported generic Fn/FnOnce calls | Mutable captures and function pointers are unsupported |
-| Array map | Explicit traversal model, executing each actual callable body in index order | At most 16 elements; general iterators remain gaps |
-| Array from_fn | Execute actual callbacks in ascending index order, with conditions and tracked effects | At most 128 owned elements and 256 values; drops, identity-bearing results and mutable captures remain UNKNOWN |
+| Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Legacy mutable byte captures, function pointers and unsupported call shapes remain UNKNOWN |
+| Array map | Actual callback bodies in order, retaining capture state and reference-valued elements | At most 16 elements; callback destructors remain UNKNOWN |
+| Array from_fn | Actual callbacks in ascending index order, retaining capture state and effects | At most 128 owned elements and 256 values; drops and identity-bearing results remain UNKNOWN |
 | Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; identities, user destructors, clone and views remain UNKNOWN |
-| Iterator fold/sum | Execute actual fold/rfold callbacks with accumulator, order and memory effects; sum uses ordinary MIR | Unfinished folds, mutable callback environments and unsupported element/call shapes remain UNKNOWN |
+| Iterator fold/sum | Actual fold/rfold callbacks preserve accumulator, capture state and effects; sum uses ordinary MIR | Unfinished folds, callback drops and unsupported element/call shapes remain UNKNOWN |
 | Evaluated closure constants | Typed noncapturing, zero-field, zero-sized closure values | Captured constants, including zero-sized captures, remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, min/max, saturating add/subtract, zero counts, byte/bit reversal, comparisons, casts, bit operations and shifts | Optional overflow checks depend on build settings; unsafe nonzero count intrinsics remain unsupported |
-| Float operations | Nearest-even add/subtract/multiply/divide, negation, comparisons and saturating casts | NaN, infinities and signed zero are preserved numerically; raw NaN payloads are not modeled |
-| Drop | Skip a concrete value only if rustc says it needs no drop | Destructor execution remains UNKNOWN |
+| Float operations | Numeric IEEE operations, exact input/from_bits encodings, moves, negation, abs, clamp and to_bits | Arithmetic NaN encodings allow every payload/sign, including signaling NaNs; counterexamples may not replay |
+| Drop | No-drop values and harmless owned-iterator wrapper glue | User destructors and broader drop execution remain UNKNOWN |
 | MIR assume | Prove its predicate as a validity obligation | Never turn it into an unchecked assumption |
 
-The execution budget is 256 dequeued blocks per root, including callees and infeasible queued
-branches. Call depth is eight; recursion is unsupported. Queries have at most 200,000 bytes, a
+The execution budget is 2,048 steps per root, including callees, iterator model steps and infeasible
+queued branches. Call depth is 16 active frames; recursion can finish within the same limits.
+Queries have at most 200,000 bytes, a
 five-second solver timeout and a six-second host deadline per default solver request. Exceeding a
-limit returns UNKNOWN. Root-local solver sessions reset before each query; bounded exact-query
-caching avoids repeated decisions without reusing function proofs or unchecked summaries.
+limit returns UNKNOWN. The root budget remains 30 seconds. Root-local solver sessions retain
+common assertions with push/pop and reset incompatible declaration namespaces. Exact-query caching,
+closed Boolean/bit-vector folding and a full-Instance MIR cache reduce repeated work. None reuses
+function proofs or unchecked summaries; full standalone queries remain in reports.
 
 Explicit core models implement byte lengths/ranges/copies, shared slice-to-array conversion,
 lossless integer conversion, endian decoding, fixed-array map and opaque formatting arguments from
@@ -98,14 +101,14 @@ and grouped unknown reasons. An empty inventory or zero selected roots establish
 | Bus validator | Two symbolic three-device families through 44-block nested-loop MIR on host/ARM | Five invalid families are refuted/replayed; arbitrary input slices remain UNKNOWN |
 | DR16 parser | Unchanged 42-block body, exact length and decoded bounds on host/ARM without entry assumptions | Bad index and channel mask are refuted; 4,608 sample frames use independent formulas |
 | Generic/dependency calls | Concrete bodies/static traits; non-inline transitive dependencies on host/ARM, with configuration and encoded flags preserved | Dependency precondition violations and overflow refute; opt-out calls and unsupported retained operations stay UNKNOWN |
-| Read-only callbacks | Captured closures, function items, map and question-mark payload propagation | Mutable captures remain UNKNOWN |
+| Callbacks and aggregate borrows | Struct/tuple/Option references, returned captures, owned FnMut state, Zip/Flatten and ordered callback effects on host/ARM | Wrong field/state assertions and swapped-field mutations refute; legacy byte captures and unresolved root aliases remain UNKNOWN |
 | Generated arrays | Synthetic ticket/parcel/label cases, function items, zero length, 18/128-element arrays and exact value-budget boundary on host/ARM | Bad callback assertions, overflows, call bounds and label mutations refute; drops, storage identities and larger shapes remain UNKNOWN |
-| Iterator audit regressions | Mixed forward/reverse skips, usize::MAX exhaustion, zero-sized elements, skipped byte storage and shared Cell aliases on host/ARM; 1,792 native cases | Wrong alias and exhaustion mutation refute; unsupported views and owned mutable callback environments remain UNKNOWN |
+| Iterator audit regressions | Mixed forward/reverse skips, usize::MAX exhaustion, zero-sized elements, skipped byte storage and shared Cell aliases on host/ARM; 1,792 native cases | Wrong alias, false reset-state claims and exhaustion mutations refute; unsupported views remain UNKNOWN |
 | Aggregate inputs | Nested/generic structs, tuples, shared byte fields and fixed struct arrays on host/ARM | An off-by-one nested call guard is refuted; mutable/recursive/oversized shapes are UNKNOWN |
-| Floats | Host/ARM tests for NaN, zero signs, rounding, saturation and caller bounds | Bad NaN/zero/index/call assertions are refuted; remainder and raw bits remain UNKNOWN |
+| Floats | Host/ARM numeric and storage tests, signaling/quiet NaN inputs, payloads, signed zero, casts and same-width transmutes | Wrong masks/signs and fixed arithmetic-NaN claims refute; remainder stays UNKNOWN and NaN encodings may overapproximate the target |
 | Symbolic enums | Signed tags, Option/Result payloads, foreign nested inputs and entry snapshots on host/ARM | Variant/payload/off-by-one call mutations are refuted; unsupported payloads stay UNKNOWN |
 | Array patterns | Fixed float arrays and guarded byte slices with start/end projections on host/ARM | An unequal-endpoint assertion is refuted; float slices remain UNKNOWN |
-| Aggregate constants | Option::as_ref, niche layouts, signed enum tags, nested fields and immutable storage on host/ARM | Wrong payloads/guards and a mutated constant index refute; unions, mutable storage, transmutes and oversized shapes remain UNKNOWN |
+| Aggregate constants | Option::as_ref, niche layouts, signed enum tags, nested fields and immutable storage on host/ARM | Wrong payloads/guards and a mutated constant index refute; unions, mutable storage, unsupported transmutes and oversized shapes remain UNKNOWN |
 | Cargo selection | Selected roots can prove beside unsupported workspace code | Ambiguous names select all matches; unknown/refuted/missing roots fail |
 
 Mutation regressions change source guards, indices, masks and copies to ensure the corresponding
@@ -142,7 +145,8 @@ wrong bounds and a tightened mask bound refute. Unsupported pointer inputs remai
 Primitive core f32/f64 clamp checks min <= max before producing a value. Reversed bounds and NaN
 bounds refute; a NaN input remains NaN and equality preserves the input's signed zero. Tests cover
 symbolic ordered bounds, infinities, signed-zero observations and a reversed-guard mutation.
-Raw float bit observation remains UNKNOWN. These models follow the pinned compiler's core
+Float storage observations preserve selected input/clamp bits. These models follow the pinned
+compiler's core
 intrinsic declaration and primitive clamp implementation; they do not trust application summaries.
 
 ## Owned aggregate repeats
@@ -172,7 +176,7 @@ items. Generic enumerate/copied/rev adapters execute actual core MIR.
 all/any execute concrete callback bodies in element order and preserve memory effects, including
 Cell updates. A deciding callback stops traversal immediately and leaves the remaining cursor
 intact. Iteration consumes the existing step/time budget; unfinished paths remain UNKNOWN.
-Mutable iteration and iterator slice views are not part of this stage.
+Mutable iteration uses the same tracked storage machinery; iterator slice views remain unsupported.
 
 Host/ARM compiler tests cover integers, floats, units, tuples, bounded symbolic byte slices,
 clones, mixed-direction traversal, huge skip counts, short-circuiting and shared Cell identities.
@@ -194,8 +198,9 @@ Host/ARM tests prove disjoint element writes, final-array postconditions, tuple 
 byte-slice clearing, byte-prefix writes followed by copies, mutable predicate short-circuiting
 and six-by-six diagonal matrix initialization. A wrong-column mutation and incorrect alias or
 overflow assertions refute. Two sets of 4,096 host cases compare reads and writes with direct
-formulas. Ambiguous composite writes and general mutable iterator returns remain UNKNOWN;
-no broad raw-pointer, captured-reference or root-alias model was added.
+formulas. Incoming-storage iterator returns and tracked references inside aggregates/captures are
+supported. Ambiguous composite writes, general raw pointers and unresolved root aliases remain
+UNKNOWN.
 
 Borrowed fixed-array/slice IntoIterator factories also use these cursor models; owned arrays have
 a compiler-identified model over the same cursor representation. Compiler-identified primitive
@@ -215,3 +220,34 @@ Harmless owned iterator drop glue is recognized only when elements need no drop 
 drop-requiring field of a wrapper is itself harmless. A wrapper with its own destructor remains
 unknown. Evaluated noncapturing closures require compiler-confirmed empty upvars, zero fields
 and zero-sized layout. Captured constant environments are not fabricated, even when zero-sized.
+
+## Aggregate references and callback state
+
+Tracked references retain allocation IDs and field/index projections inside tuples, structs,
+enums and closures. Returned values can refer to caller storage; the reference graph rejects
+callee-local or dead allocations escaping directly or through caller storage. Core Zip/Flatten
+adapters can execute actual MIR over supported mutable iterators without assumed summaries.
+One tracked environment per modeled callback invocation preserves owned FnMut fields and writes
+through captures. Array map retains reference-valued input elements. Completed temporary callback
+environments are retired; unsupported destructors do not become harmless by entering a model.
+
+The synthetic aggregate fixture checks 19 roots on host/ARM: 13 prove, three refute and three remain
+unknown. Native execution checks 700 bounded calls plus stateful callback examples and negative
+panic catches. Swapping the mutable struct fields refutes the unchanged assertion. Four memory
+regressions reject dead references, a callee borrow hidden in caller storage and legacy byte views,
+while preserving nested incoming references. These checks do not cover every alias/lifetime rule.
+
+## Floating-point storage
+
+Inputs, evaluated constants and from_bits preserve every IEEE encoding, including quiet/signaling
+NaN signs and payloads. Moves, selected array elements, negation, abs and clamp retain the selected
+encoding. to_bits and same-width integer/float transmutes expose it. Numeric arithmetic still uses
+IEEE nearest-even operations; its stored result is constrained to that numeric value. NaN results
+conservatively allow all payloads/signs, including signaling encodings. Repeated reads of one
+stored result use the same bits, while a bit-level NaN counterexample may not replay on the target.
+
+The storage fixture checks 17 roots on host/ARM: 13 prove, three refute and one remains unknown.
+A changed sign mask refutes. Native checks include signed zero, subnormals, infinities and both
+kinds of NaN for f32/f64, plus 1,024 integer-cast/arithmetic inputs. Checked sidecars force actual
+core to_bits/from_bits bodies through typed transmutes and retain the same outcomes without
+library summaries. Remainder and wider floating-point formats remain unsupported.

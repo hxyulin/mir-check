@@ -1,4 +1,5 @@
 mod floating;
+mod fold;
 pub use floating::{float, float_cast, float_from_bits, float_negate};
 
 pub const MAX_REPEAT_VALUES: usize = 256;
@@ -190,6 +191,10 @@ pub fn not(expression: &str) -> String {
 }
 
 pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, String> {
+    binary_unfolded(operation, left, right).map(fold::fold)
+}
+
+fn binary_unfolded(operation: &str, left: Value, right: Value) -> Result<Value, String> {
     if let (Value::Float { .. }, Value::Float { .. }) = (&left, &right) {
         return floating::binary(operation, left, right);
     }
@@ -275,6 +280,10 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
 }
 
 pub fn cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
+    cast_unfolded(value, bits, signed).map(fold::fold)
+}
+
+fn cast_unfolded(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
     if matches!(value, Value::Float { .. }) {
         return floating::integer_cast(value, bits, signed);
     }
@@ -306,6 +315,10 @@ pub fn cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
 }
 
 pub fn shift(leftward: bool, left: Value, right: Value) -> Result<Value, String> {
+    shift_unfolded(leftward, left, right).map(fold::fold)
+}
+
+fn shift_unfolded(leftward: bool, left: Value, right: Value) -> Result<Value, String> {
     let (left, bits, signed) = left.integer()?;
     let (right, _, _) = cast(right, bits, false)?.integer()?;
     let amount = format!("(bvand {right} (_ bv{} {bits}))", bits - 1);

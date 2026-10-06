@@ -1,5 +1,5 @@
 use super::contracts;
-use super::solver::{Answer, Solver};
+use super::solver::{Answer, Query, Solver};
 use super::symbolic::{self, Value};
 use mir_check::{Contract, ContractKind, Obligation, ObligationKind, Proof, ProofStatus};
 use rustc_attr_ir::{HasAttrs, LangItem};
@@ -13,8 +13,8 @@ use rustc_span::Span;
 use rustc_span::def_id::DefId;
 use std::collections::{BTreeMap, VecDeque};
 
-const MAX_STEPS: usize = 256;
-const MAX_CALL_DEPTH: usize = 8;
+const MAX_STEPS: usize = 2048;
+const MAX_CALL_DEPTH: usize = 16;
 const MAX_QUERY_BYTES: usize = 200_000;
 const MAX_INPUT_DEPTH: usize = 8;
 const MAX_INPUT_VALUES: usize = 128;
@@ -57,6 +57,8 @@ struct Engine<'tcx> {
     config: mir_check::ContractConfig,
     resolved_contracts: BTreeMap<String, DefId>,
     solver: std::cell::RefCell<Solver>,
+    bodies:
+        std::cell::RefCell<std::collections::HashMap<ty::Instance<'tcx>, std::rc::Rc<Body<'tcx>>>>,
 }
 
 pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) -> Proof {
@@ -71,6 +73,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) ->
         config: config.clone(),
         resolved_contracts: BTreeMap::new(),
         solver: std::cell::RefCell::new(Solver::default()),
+        bodies: std::cell::RefCell::new(std::collections::HashMap::new()),
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
@@ -405,27 +408,12 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
-    fn query(&self, conditions: &[String], failure: &str) -> Result<String, String> {
+    fn query(&self, conditions: &[String], failure: &str) -> Result<Query, String> {
         if self.started.elapsed().as_secs() >= MAX_ROOT_SECONDS {
             return Err("symbolic root exceeded the 30-second execution budget".to_owned());
         }
-        let mut query = String::from(
-            "(set-logic ALL)\n(set-option :timeout 5000)\n\
-             (set-option :pp.bv-literals false)\n",
-        );
-        for declaration in &self.declarations {
-            query.push_str(declaration);
-            query.push('\n');
-        }
-        for condition in conditions
-            .iter()
-            .map(String::as_str)
-            .chain(std::iter::once(failure))
-        {
-            query.push_str(&format!("(assert {condition})\n"));
-        }
-        query.push_str("(check-sat)\n");
-        if query.len() > MAX_QUERY_BYTES {
+        let query = Query::new(&self.declarations, conditions, failure);
+        if query.text().len() > MAX_QUERY_BYTES {
             return Err("symbolic query size limit reached".to_owned());
         }
         Ok(query)
@@ -434,7 +422,7 @@ impl<'tcx> Engine<'tcx> {
     fn feasible(&self, conditions: &[String]) -> Result<bool, String> {
         self.solver
             .borrow_mut()
-            .feasible(&self.query(conditions, "true")?)
+            .feasible_query(&self.query(conditions, "true")?)
     }
 
     fn require(
@@ -447,7 +435,7 @@ impl<'tcx> Engine<'tcx> {
         detail: String,
     ) -> Result<(), String> {
         let query = self.query(conditions, &symbolic::not(safe))?;
-        let (status, model, detail) = match self.solver.borrow_mut().check(&query) {
+        let (status, model, detail) = match self.solver.borrow_mut().check_query(&query) {
             Answer::Unsat => (ProofStatus::Proved, None, detail),
             Answer::Sat(model) => (ProofStatus::Refuted, Some(model), detail),
             Answer::Unknown(reason) => (ProofStatus::Unknown, None, format!("{detail}: {reason}")),
@@ -458,7 +446,7 @@ impl<'tcx> Engine<'tcx> {
             kind,
             detail,
             status,
-            query: Some(query),
+            query: Some(query.text().to_owned()),
             model,
         });
         if status == ProofStatus::Unknown {
@@ -479,7 +467,13 @@ impl<'tcx> Engine<'tcx> {
         });
     }
 
-    fn instantiated_body(&self, instance: ty::Instance<'tcx>) -> Result<Body<'tcx>, String> {
+    fn instantiated_body(
+        &self,
+        instance: ty::Instance<'tcx>,
+    ) -> Result<std::rc::Rc<Body<'tcx>>, String> {
+        if let Some(body) = self.bodies.borrow().get(&instance) {
+            return Ok(body.clone());
+        }
         if !matches!(instance.def, ty::InstanceKind::Item(_)) {
             return Err(format!("unmodeled call adapter {:?}", instance.def));
         }
@@ -489,13 +483,20 @@ impl<'tcx> Engine<'tcx> {
                 self.tcx.def_path_str(instance.def_id())
             ));
         }
-        instance
+        let body = instance
             .try_instantiate_mir_and_normalize_erasing_regions(
                 self.tcx,
                 ty::TypingEnv::fully_monomorphized(),
                 ty::EarlyBinder::bind(self.tcx, self.tcx.instance_mir(instance.def).clone()),
             )
-            .map_err(|error| format!("MIR substitution failed: {error:?}"))
+            .map_err(|error| format!("MIR substitution failed: {error:?}"))?;
+        let body = std::rc::Rc::new(body);
+        let mut bodies = self.bodies.borrow_mut();
+        if bodies.len() >= 128 {
+            bodies.clear();
+        }
+        bodies.insert(instance, body.clone());
+        Ok(body)
     }
 
     fn execute(
@@ -507,8 +508,10 @@ impl<'tcx> Engine<'tcx> {
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
         let id = instance.def_id();
-        if stack.contains(&id) || stack.len() >= MAX_CALL_DEPTH {
-            return Err("recursion or call-depth limit requires an invariant".to_owned());
+        if stack.len() >= MAX_CALL_DEPTH {
+            return Err(
+                "16-frame call-depth limit reached; recursion may require an invariant".to_owned(),
+            );
         }
         let mut stack = stack.to_vec();
         stack.push(id);
