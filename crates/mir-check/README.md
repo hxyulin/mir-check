@@ -198,6 +198,13 @@ pipe writes and reads, and failures discard the session. MIR_CHECK_Z3 keeps the 
 one-shot protocol, which relies on the executable's -T:6 timeout option. No proofs are reused
 across compiler invocations.
 
+A bounded in-process evaluator decides fully constant Boolean/bit-vector queries and validates
+the whole script before returning an answer. It supports exact wrapping arithmetic, bitwise
+operations, signed/unsigned comparisons and sign/zero extension through 128 bits. Symbolic terms,
+floating point, arrays and unsupported syntax fall back to Z3. Constant false failure conditions
+can prove an obligation without a solver process; failing obligations still obtain Z3 models.
+The evaluator is part of the trusted implementation, with boundary and differential regressions.
+
 Compiler-identified core::array::from_fn executes actual callback bodies in ascending index order,
 including checked call bounds and tracked Cell effects. Empty arrays do not invoke the callback.
 Generated owned results have at most 128 elements and 256 modeled values, including containers.

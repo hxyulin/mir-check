@@ -41,7 +41,7 @@ at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaus
 
 | Feature | Current support | Boundary |
 | --- | --- | --- |
-| Branches | Path-sensitive states; discard a branch only after an unsat solver response | No state merging or abstract interpretation |
+| Branches | Path-sensitive states; discard a branch only after an exact constant UNSAT decision or an unsat solver response | No state merging or abstract interpretation |
 | Loops | Complete finite unrolling through every feasible path | No inductive loop invariants; incomplete exploration is UNKNOWN |
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |

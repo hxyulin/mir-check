@@ -513,3 +513,27 @@ alias assertions and an exhaustion mutation refute; unsupported views and owned 
 environments remain unknown. Native execution checks 1,792 bounded cases. The review found no
 new reproducible false proof in these paths; the interpreter has not completed a soundness audit.
 There are 86 compiler integration tests and one metadata integration test.
+
+## Stage 28: exact ground Boolean and bit-vector decisions
+
+A bounded in-process evaluator validates complete generated SMT scripts and decides supported
+fully constant assertions. It implements wrapping bit-vector arithmetic, bitwise operations,
+signed/unsigned comparisons and exact sign/zero extension through 128 bits. Symbolic expressions,
+floats, arrays, malformed scripts and unsupported operations fall back to Z3. False ground
+failure conditions can discharge obligations without a solver process; failing obligations still
+request real counterexample models. Custom solver overrides retain their compatibility behavior.
+
+Tests compare 1,158 arithmetic, comparison and extension cases with Z3 at widths 1, 8, 16, 32, 64
+and 128, including wraparound and signed boundaries. Removing the signed-order transformation
+breaks the differential test. Parser tests cover unsupported content after false assertions,
+malformed arity/types, declaration collisions, invalid widths and parser budgets. Integration
+with the solver verifies that constant decisions need no process while counterexamples still
+require a model. This is exact evaluation of a restricted closed-expression subset, not a new
+solver for symbolic floating point or memory.
+
+A follow-up direct-analysis benchmark, with the test suite finished, used one warmup and seven
+alternating measured runs per release binary under the same host/solver configuration. Median
+old-to-final times were 0.323 to 0.047 seconds for units, 0.699 to 0.087 seconds for enumerate and
+0.976 to 0.114 seconds for floats. All remained PROVED. Floating-point queries use Z3; their gain
+comes from session reuse and decision caching. These are small synthetic roots, not a promise
+about branch-heavy or solver-heavy code.

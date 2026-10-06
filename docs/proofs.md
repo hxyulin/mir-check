@@ -77,7 +77,8 @@ host deadline per solver request. Reaching these limits is a verification failur
 starts one Z3 process and resets its declarations and assertions before each query. Feasibility
 checks request a decision; a refuted obligation requests its model from the same query context.
 Malformed output, missing response markers, closed pipes and timeouts discard the session and
-return UNKNOWN. The host deadline covers writes as well as reads.
+return UNKNOWN. The host deadline covers writes as well as reads; responses above 256 KiB also
+return UNKNOWN.
 
 An exact-query decision cache is local to the root and holds at most 1,024 entries or two MiB of
 query text. Undecided responses are never cached. A cached satisfiable decision can answer a
@@ -85,21 +86,30 @@ feasibility check, but cannot supply a counterexample model. There is no disk pr
 merging or cache of verified function summaries. Branch growth and complex solver queries can
 therefore remain expensive.
 
+A bounded in-process evaluator handles fully constant Boolean and bit-vector queries. It
+validates the complete script and every assertion before deciding, including types, widths and
+operator arity. Supported integer operations wrap at their declared width; signed comparisons
+and sign/zero extensions preserve that width's semantics. Parser limits, symbolic expressions,
+floating point, arrays and unsupported syntax fall back to Z3. Constant false failure conditions
+can discharge obligations directly; failing obligations still request a Z3 counterexample model.
+This evaluator is part of the trusted implementation and has differential tests against Z3.
+
 Setting MIR_CHECK_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
 existing -T:6 process option. This compatibility path relies on the executable honoring that
 option; the default persistent backend enforces the host deadline independently.
 
 ## What is trusted and missing
 
-The result trusts rustc's lowering and types, this MIR interpreter and predicate evaluator, the
-explicit core models, and Z3. Bit-vector, array and floating-point semantics preserve supported
-integer, byte and numeric float operations, but the translator has not been formally verified.
+The result trusts rustc's lowering and types, this MIR interpreter, its predicate and constant-query
+evaluators, the explicit core models, and Z3. Bit-vector, array and floating-point semantics
+preserve supported integer, byte and numeric float operations, but the translator has not been
+formally verified.
 Mutation tests and runtime replays check representative semantics; they do not establish correctness
 of the analyzer.
 
 Trusted models implement slice length, byte prefix ranges, lossless integer conversions, endian
-decoding, shared byte-slice-to-array conversion, fixed-array map/from_fn, exact copies into owned byte
-arrays, opaque formatting arguments from evaluated static strings, and float abs/min/max.
+decoding, shared byte-slice-to-array conversion, fixed-array map/from_fn, exact owned byte-array
+copies, opaque formatting arguments from evaluated static strings, and float abs/min/max.
 Min/max ignores one NaN and permits either operand on equal numeric inputs, including signed-zero
 ties. Raw NaN payload/sign observation is unsupported. Array map executes each
 actual callable body; the model supplies array traversal and storage. Compiler identities and

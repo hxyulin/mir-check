@@ -10,6 +10,8 @@ const MAX_OUTPUT_BYTES: usize = 262_144;
 const MAX_CACHE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 1024;
 
+mod ground;
+
 pub enum Answer {
     Unsat,
     Sat(String),
@@ -56,7 +58,17 @@ impl Solver {
         let decision = if let Some(decision) = self.decisions.get(query) {
             *decision
         } else {
-            let decision = self.decide(query)?;
+            let decision = if !self.custom
+                && let Some(answer) = ground::feasible(query)
+            {
+                if answer {
+                    Decision::Sat
+                } else {
+                    Decision::Unsat
+                }
+            } else {
+                self.decide(query)?
+            };
             self.remember(query, decision);
             decision
         };
@@ -65,6 +77,10 @@ impl Solver {
 
     pub fn check(&mut self, query: &str) -> Answer {
         if matches!(self.decisions.get(query), Some(Decision::Unsat)) {
+            return Answer::Unsat;
+        }
+        if !self.custom && ground::feasible(query) == Some(false) {
+            self.remember(query, Decision::Unsat);
             return Answer::Unsat;
         }
         match self.decide(query) {
@@ -370,6 +386,26 @@ mod tests {
         assert_eq!(solver.decisions.len(), 1);
         solver.remember(&"x".repeat(MAX_CACHE_BYTES + 1), Decision::Unsat);
         assert_eq!(solver.decisions.len(), 1);
+    }
+
+    #[test]
+    fn constant_decisions_need_no_process_but_counterexamples_still_need_models() {
+        let mut solver = Solver {
+            executable: std::env::temp_dir().join("mir-check-missing-ground-test-solver"),
+            ..persistent()
+        };
+        let ground = |assertion: &str| {
+            format!(
+                "(set-logic ALL)\n(set-option :timeout 5000)\n\
+                 (set-option :pp.bv-literals false)\n(assert {assertion})\n(check-sat)\n"
+            )
+        };
+        assert!(solver.feasible(&ground("true")).unwrap());
+        assert!(!solver.feasible(&ground("false")).unwrap());
+        assert!(matches!(solver.check(&ground("false")), Answer::Unsat));
+        assert!(solver.session.is_none());
+        assert!(matches!(solver.check(&ground("true")), Answer::Unknown(_)));
+        assert!(solver.feasible(&query("(= v0 (_ bv17 8))")).is_err());
     }
 
     #[cfg(unix)]
