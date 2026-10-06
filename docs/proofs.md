@@ -103,10 +103,20 @@ flags; --no-dependency-mir disables retention. Prebuilt sysroot libraries are no
 identify interpreted instances separately from trusted models. Compiler assume intrinsics become
 validity obligations, so their predicates must be established on the current path.
 
+Evaluated constants are inspected through rustc_const_eval, using compiler layouts and active
+discriminants rather than decoding enum bytes by hand. Initialized scalar reads preserve integer,
+boolean and floating-point values. Struct/tuple fields, active enum payloads and bounded
+arrays/slices recurse into the same decoder. Immutable promoted/static references are snapshots
+only when the pointee has no interior mutation; mutable global reads are rejected. Unions and
+MaybeUninit remain unknown, even when a union was initialized. An inactive unsupported payload
+does not need decoding. Constant shape limits are eight levels and 256 values, with at most
+128 bytes or 16 non-byte elements per array/slice. This adds compiler constant inspection to the
+trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
+
 Coverage remains limited by enum/struct slices, general mutation and aliasing, mutable captures,
 unresolved generic inputs, float remainder/bit observation, trait objects, function pointers and
 general iterator machinery, destructors and several MIR operations/constants, including some
-promoted constants. Non-byte arrays are limited to 16 elements; symbolic bounded indices work for
+constant shapes. Non-byte arrays are limited to 16 elements; symbolic bounded indices work for
 integers, floats and booleans; enum/struct elements need a uniquely determined index. Array/slice
 patterns prove their minimum length and index bounds before applying constant start/end offsets.
 Generic roots with unresolved type parameters remain unsupported. There are no inductive loop

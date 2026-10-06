@@ -21,6 +21,7 @@ const MAX_INPUT_VALUES: usize = 128;
 
 mod aggregates;
 mod builtins;
+mod constants;
 mod library;
 
 #[derive(Clone)]
@@ -899,15 +900,6 @@ impl<'tcx> Engine<'tcx> {
                 if matches!(ty.kind(), ty::Tuple(fields) if fields.is_empty()) {
                     return Ok(Value::Unit);
                 }
-                if matches!(
-                    constant.const_,
-                    rustc_middle::mir::Const::Val(rustc_middle::mir::ConstValue::ZeroSized, _)
-                ) && matches!(ty.kind(), ty::Adt(def, args)
-                        if self.tcx.lang_items().get(LangItem::Option) == Some(def.did())
-                            && args.type_at(0).is_never())
-                {
-                    return self.constructed(ty, 0, Vec::new());
-                }
                 if matches!(ty.kind(), ty::Ref(_, element, mutability)
                     if element.is_str() && !mutability.is_mut())
                     && matches!(
@@ -920,18 +912,7 @@ impl<'tcx> Engine<'tcx> {
                 {
                     return Ok(Value::StaticText);
                 }
-                let bits = constant
-                    .const_
-                    .try_eval_bits(self.tcx, ty::TypingEnv::post_analysis(self.tcx, id))
-                    .ok_or_else(|| format!("unsupported MIR constant {:?}", constant.const_))?;
-                if ty.is_bool() {
-                    return Ok(Value::Bool((bits != 0).to_string()));
-                }
-                if let Some(width) = self.float_type(ty) {
-                    return Ok(symbolic::float(bits, width));
-                }
-                let (width, signed) = self.integer_type(ty).ok_or("unsupported constant type")?;
-                Ok(symbolic::integer(bits, width, signed))
+                self.constant(id, constant.const_, constant.span)
             }
             other => Err(format!("unsupported operand {other:?}")),
         }

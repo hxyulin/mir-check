@@ -2244,6 +2244,111 @@ fn floating_paths_preserve_nan_zero_rounding_saturation_and_call_bounds_on_host_
 }
 
 #[test]
+fn aggregate_constants_preserve_variants_fields_and_initialized_memory_on_host_and_arm() {
+    let entries = [
+        ("guarded_as_ref", ProofStatus::Proved),
+        ("bad_as_ref", ProofStatus::Refuted),
+        ("none", ProofStatus::Proved),
+        ("some", ProofStatus::Proved),
+        ("wrong_payload", ProofStatus::Refuted),
+        ("niche", ProofStatus::Proved),
+        ("niche_get", ProofStatus::Unknown),
+        ("niche_reference", ProofStatus::Proved),
+        ("discriminants", ProofStatus::Proved),
+        ("nested", ProofStatus::Proved),
+        ("promoted", ProofStatus::Proved),
+        ("static_array", ProofStatus::Proved),
+        ("constant_slice", ProofStatus::Proved),
+        ("maximum_bytes", ProofStatus::Proved),
+        ("uninitialized", ProofStatus::Unknown),
+        ("inactive_uninitialized", ProofStatus::Proved),
+        ("active_uninitialized", ProofStatus::Unknown),
+        ("interior_mutable", ProofStatus::Unknown),
+        ("mutable_static_storage", ProofStatus::Unknown),
+        ("initialized_union", ProofStatus::Unknown),
+        ("raw_pointer", ProofStatus::Unknown),
+        ("oversized_array", ProofStatus::Unknown),
+        ("oversized_bytes", ProofStatus::Unknown),
+        ("oversized_shape", ProofStatus::Unknown),
+        ("deep_shape", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("aggregate_constants.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status, expected,
+                "{target:?} {name}: {:?}",
+                proof.obligations
+            );
+        }
+        let guarded = report
+            .functions
+            .iter()
+            .find(|f| f.name == "guarded_as_ref")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert!(
+            guarded
+                .analyzed_bodies
+                .iter()
+                .any(|name| name.contains("as_ref"))
+        );
+        let mutable_static = report
+            .functions
+            .iter()
+            .find(|f| f.name == "mutable_static_storage")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert!(mutable_static.obligations.iter().any(|o| {
+            o.status == ProofStatus::Unknown && o.detail.contains("interior mutable storage")
+        }));
+        let directory = Directory::new();
+        let mutated = directory.0.join("mutated.rs");
+        std::fs::write(
+            &mutated,
+            std::fs::read_to_string(fixture("aggregate_constants.rs"))
+                .unwrap()
+                .replace("index: Some(2)", "index: Some(4)"),
+        )
+        .unwrap();
+        let (output, report) = verify_vendored(&mutated, &["nested"], &args);
+        assert!(!output.status.success());
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == "nested")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted);
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .any(|o| { o.status == ProofStatus::Refuted && o.detail.contains("BoundsCheck") })
+        );
+    }
+}
+
+#[test]
 fn enum_inputs_preserve_tags_payloads_and_option_contracts_on_host_and_arm() {
     let entries = [
         ("discriminants", ProofStatus::Proved),

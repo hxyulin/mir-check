@@ -161,6 +161,7 @@ containing a shared byte slice.
 | Area | Supported subset |
 | --- | --- |
 | Inputs | Integers, f32/f64, bool, unit, byte slices/arrays, tuples, nested local/dependency structs and enums, shared references and small arrays |
+| Constants | Evaluated structs, tuples, active enum variants, bounded arrays/slices and immutable promoted/static references |
 | Arithmetic | Exact integer operations; IEEE f32/f64 arithmetic, comparisons and saturating casts |
 | Calls | Concrete generics, static traits, available dependency MIR, function items and read-only closures |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |
@@ -174,9 +175,15 @@ invariant. Nested input construction is limited to eight levels and 128 values; 
 at most 16 elements and input enums have at most 16 variants. All variant payloads must have
 supported shapes.
 
+Constant decoding uses rustc's constant interpreter for layouts, discriminants and initialized
+scalar reads. It follows only immutable references to storage without interior mutation and
+decodes only the active variant. Constants have an eight-level depth limit and a 256-value budget;
+byte arrays/slices have at most 128 bytes and other arrays/slices at most 16 elements. Unions,
+including MaybeUninit, and mutable or raw-pointer storage remain unknown.
+
 General mutation and aliasing, mutable captures, enum/struct slices, unresolved generic inputs,
 float remainder and bit observation, dynamic dispatch, function pointers, destructor execution, some
-aggregate/promoted constants and broader iterator machinery remain gaps. Limits and unsupported
+constant shapes and broader iterator machinery remain gaps. Limits and unsupported
 operations produce UNKNOWN. A selected-root proof also does not establish absence of undefined
 behavior, allocation failure, stack exhaustion, interrupt races or hardware timing failures.
 

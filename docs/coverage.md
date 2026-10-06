@@ -17,6 +17,7 @@ completed a soundness audit. Every result is tied to its compiler, target, flags
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
+| Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
 Root input construction has at most eight recursive levels and 128 values across all arguments.
 References, aggregate containers and their children consume the budget. A symbolic byte array or
@@ -26,6 +27,13 @@ value. Struct fields remain arbitrary inputs; privacy and constructors imply no 
 Enum selectors are constrained to the actual compiler discriminants, including explicit signed
 values. A downcast must prove the active tag before reading its payload. Reports expose
 `value.discriminant` and `value.variantN.field`; inactive payload bindings have no runtime meaning.
+
+Constants use rustc_const_eval to read compiler layouts, discriminants and initialized scalars.
+The decoder inspects only the active variant; it does not invent values for inactive or
+uninitialized fields. Immutable references require a pointee without interior mutation, and the
+compiler's inspection context rejects mutable global reads. Constant decoding has eight recursive
+levels and 256 values, including containers/references and each element. Byte arrays/slices have
+at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaustion is UNKNOWN.
 
 ## Execution and calls
 
@@ -51,7 +59,7 @@ lossless integer conversion, endian decoding, fixed-array map and opaque formatt
 static strings, plus compiler-identified float absolute value and min/max. They check their
 applicable bounds/length conditions and are recorded per root. They are trusted translation code,
 not proofs of the modeled library bodies. Dynamic formatting, arbitrary pointer operations and some
-promoted constants remain unsupported.
+constant shapes remain unsupported.
 
 ## Contracts and root selection
 
@@ -81,6 +89,7 @@ and grouped unknown reasons. An empty inventory or zero selected roots establish
 | Floats | Host/ARM tests for NaN, zero signs, rounding, saturation and caller bounds | Bad NaN/zero/index/call assertions are refuted; remainder and raw bits remain UNKNOWN |
 | Symbolic enums | Signed tags, Option/Result payloads, foreign nested inputs and entry snapshots on host/ARM | Variant/payload/off-by-one call mutations are refuted; unsupported payloads stay UNKNOWN |
 | Array patterns | Fixed float arrays and guarded byte slices with start/end projections on host/ARM | An unequal-endpoint assertion is refuted; float slices remain UNKNOWN |
+| Aggregate constants | Option::as_ref, niche layouts, signed enum tags, nested fields and immutable storage on host/ARM | Wrong payloads/guards and a mutated constant index refute; unions, mutable storage, transmutes and oversized shapes remain UNKNOWN |
 | Cargo selection | Selected roots can prove beside unsupported workspace code | Ambiguous names select all matches; unknown/refuted/missing roots fail |
 
 Mutation regressions change source guards, indices, masks and copies to ensure the corresponding

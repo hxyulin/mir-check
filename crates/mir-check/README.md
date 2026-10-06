@@ -56,6 +56,14 @@ construction has an eight-level depth limit and a 128-value budget across argume
 references and larger shapes remain unknown. General mutable-reference fields still fail before
 execution. Input bindings retain nested names such as packet.header.index and value.1.0.
 
+Constant decoding reads evaluated values through rustc_const_eval, using compiler layouts,
+discriminants and initialized scalar reads. It supports nested structs/tuples, active enum
+payloads, immutable promoted/static references and bounded arrays/slices. A reference to interior
+mutable storage is rejected. Only active fields are read: None with an unsupported inactive
+payload can be modeled, while a reachable union/MaybeUninit remains unknown. Limits are eight
+recursive levels, 256 values, 128 bytes or 16 non-byte elements per array/slice. The decoder
+inspects constants; it does not replace symbolic MIR execution or model arbitrary memory.
+
 The contract evaluator accepts pure comparisons and boolean predicates,
 with modeled array/slice lengths, constant non-byte array indices, named/numeric fields, integer
 and float casts and restricted Option matches. Symbolic Option arms must return booleans.
@@ -94,3 +102,6 @@ rounding. Float remainder and raw bit observation stay unknown. Min/max permits 
 for equal numeric inputs, including signed-zero ties. Enum tests cover explicit signed tags,
 payload bounds, symbolic Option contracts, entry snapshots and foreign nested types. Array
 pattern tests check start/end offsets and minimum lengths, including a refuted payload assertion.
+Constant tests cover Option::as_ref, niche layouts, explicit signed tags, nested fields and
+immutable storage on host/ARM. Wrong payload assertions, off-by-one guards and a mutated constant
+index refute; unions, interior mutation, unsupported transmutes and shape limits remain unknown.

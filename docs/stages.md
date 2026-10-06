@@ -291,3 +291,19 @@ and CAN bus constructors/readers. Newly reachable constant and pointer/mutation 
 visible. Independent mutable controller updates remain unsupported. The new survey data preserves
 the original/intermediate measurements and records transitions, first-gap reasons and fresh build
 costs. Verification of the already-built units takes 63.8 seconds on the development machine.
+
+## Stage 15: inspect initialized aggregate constants
+
+The constant decoder uses rustc_const_eval's inspection context for compiler layouts, active
+discriminants, field/index projections and initialized scalar reads. It supports structs, tuples,
+active enum fields, bounded arrays/slices and immutable promoted/static references. References to
+interior mutable storage, mutable global reads, raw pointers and unions/MaybeUninit remain
+unknown. Constants have eight recursive levels and a 256-value budget; byte arrays/slices have
+at most 128 bytes and other arrays/slices at most 16 elements. No runtime calls are executed by
+the constant inspection context.
+
+Host/ARM integration tests prove guarded Option::as_ref calls, niche variants, explicit signed
+tags, nested fields and immutable constants. Off-by-one guards, wrong payload assertions and a
+mutated constant index refute. Inactive unsupported payloads need no read; active unions,
+interior mutation, unsupported transmutes and shape exhaustion stay unknown. There are 55
+compiler integration tests and one metadata test.
