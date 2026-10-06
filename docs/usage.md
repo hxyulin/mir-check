@@ -237,6 +237,41 @@ The display clearly labels these as saved results; it does not validate the proo
 or establish a new proof. Stored REFUTED/UNKNOWN results produce a nonzero exit, and conditional
 results require --allow-assumptions, just as in analysis mode.
 
+## Direct whole-crate and main checks
+
+`mir-check --verify -- <rustc arguments>` already checks every inventoried body in the selected
+compilation unit when no --entry is supplied. This includes generated bodies; generic or
+unsupported roots can still be UNKNOWN. A successful run requires every selected root to pass
+under its recorded domain. Dependencies execute when called but do not become independent roots.
+
+Reuse compiler arguments from a saved per-crate JSON report to avoid copying a long invocation:
+
+```sh
+mir-check --verify --from-report invocation.json --jsonl results.jsonl
+mir-check --verify --from-report invocation.json --entry main
+```
+
+Run these commands from the original compiler working directory. The source, dependency metadata
+and sysroot paths must remain available. This runs the compiler and solver on current source;
+it does not rebuild Cargo dependencies. Rebuild the inventory after changing dependencies,
+features or build configuration. The saved compiler must match the analyzer's pinned compiler.
+Schema-7/8 inputs are accepted; extra rustc arguments cannot be combined with --from-report.
+Only compiler arguments are reused. Saved root selection, proof outcomes, sidecar contracts and
+trusted-summary acceptance are ignored; supply checker options explicitly for the new run.
+Compiler diagnostic formatting is changed to human output with the selected color policy, so
+Cargo's JSON artifact notifications do not clutter a standalone terminal run. The new report
+records the actual invocation, including those display-only changes.
+
+Checking main analyzes its reachable calls with their actual arguments, while a whole-crate scan
+also gives helpers independent symbolic root inputs. A guarded main can therefore prove even
+when an independently selected helper refutes under a larger arbitrary input domain.
+
+Macro-based entry points can have different MIR names. A missing main selector reports available
+main-related names for explicit selection. Startup wrappers and async task bodies are separate;
+checking a startup wrapper does not execute a future's polling behavior. Coroutines, executor
+state and unsupported hardware operations can still prevent completion. This mode does not run
+the application's main on the host.
+
 ## Work through UNKNOWN
 
 Start with an inventory or a small root, then inspect the summary's gap reasons. An unsupported

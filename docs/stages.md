@@ -393,3 +393,18 @@ rerun. Malformed/empty/unsupported inputs and output failures fail the command.
 Compiler regressions cover clean machine streams, captured/forced colors, distinct trusted labels,
 saved-report exits, legacy input, malformed input, Cargo message forwarding and a deliberately
 slow solver that must show active-root progress. There are 67 compiler tests and one metadata test.
+
+## Stage 21: direct compiler-configuration reuse and crate/main selection
+
+--from-report FILE reuses a saved schema-7/8 compiler invocation for fresh source analysis without
+calling the Cargo wrapper. --verify without --entry already selects every inventoried crate body;
+an explicit main selects only that root and its reachable calls. Saved proof results, selectors
+and user-trusted configurations are not reused. Compiler mismatch, missing arguments and mixed
+raw/reused arguments fail. Direct compiler probes cannot masquerade as verification, while Cargo
+wrapper probes retain their required behavior.
+
+Tests prove a bounded binary main beside an independently refuted helper, then mutate the source
+and reject the previously passing main despite loading its saved report. Legacy configurations,
+invalid invocations and missing main selectors are covered. Main-related MIR hints help users
+select expanded macro names. A coroutine construction case stays unknown; no async execution
+semantics were added. There are 70 compiler integration tests and one metadata test.

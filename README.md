@@ -88,6 +88,12 @@ JSONL contains one complete crate report per line, preserving queries, models an
 assumptions. `--jsonl -` writes clean JSONL to stdout and moves human output to stderr. The report
 command reads saved JSON files, report directories or JSONL without running the compiler or solver.
 
+To run fresh direct analysis with a saved compiler configuration, use
+`mir-check --verify --from-report invocation.json`. Omitting --entry checks every inventoried
+crate body; adding --entry main checks that root and its reachable calls. This reuses compiler
+arguments rather than proof results and requires the original working directory and dependency
+artifacts. See [direct checks](docs/usage.md#direct-whole-crate-and-main-checks).
+
 | Result | What it tells you |
 | --- | --- |
 | **PROVED** | Every feasible path completed and every obligation passed for the selected root domain |

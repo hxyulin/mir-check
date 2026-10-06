@@ -3591,3 +3591,166 @@ fn long_solver_queries_show_the_active_root_and_elapsed_time_before_finishing() 
     assert!(progress.contains("Analyzed bodies"), "{progress}");
     assert!(String::from_utf8_lossy(&output.stdout).contains("UNKNOWN identity"));
 }
+
+#[test]
+fn rechecking_saved_arguments_checks_current_source_and_can_select_a_binary_main_or_whole_crate() {
+    let directory = Directory::new();
+    let source = directory.0.join("application.rs");
+    std::fs::write(
+        &source,
+        "pub fn read(bytes: [u8; 4], index: usize) -> u8 { bytes[index] }\n\
+         fn main() { let _ = read([1, 2, 3, 4], 2); }\n",
+    )
+    .unwrap();
+    let inventory = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args(["--json", "--", "--edition=2024"])
+        .arg(&source)
+        .arg("--out-dir")
+        .arg(&directory.0)
+        .output()
+        .unwrap();
+    assert!(inventory.status.success());
+    let config = directory.0.join("invocation.json");
+    std::fs::write(&config, inventory.stdout).unwrap();
+    let recheck = |entries: &[&str]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mir-check"));
+        command
+            .args(["--json", "--verify", "--from-report"])
+            .arg(&config);
+        for entry in entries {
+            command.args(["--entry", entry]);
+        }
+        command.output().unwrap()
+    };
+    let output = recheck(&[]);
+    assert!(!output.status.success());
+    let whole: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(whole.coverage.selected_roots, 2);
+    assert_eq!(whole.coverage.proved, 1);
+    assert_eq!(whole.coverage.refuted, 1);
+    let output = recheck(&["main"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let selected: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(selected.coverage.selected_roots, 1);
+    assert_eq!(selected.coverage.proved, 1);
+    assert_eq!(selected.coverage.unselected_bodies, 1);
+    // Reuse a saved successful proof as input, then break its actual source.
+    std::fs::write(&config, output.stdout).unwrap();
+    std::fs::write(
+        &source,
+        std::fs::read_to_string(&source)
+            .unwrap()
+            .replace("read([1, 2, 3, 4], 2)", "read([1, 2, 3, 4], 4)"),
+    )
+    .unwrap();
+    let output = recheck(&["main"]);
+    assert!(!output.status.success());
+    let mutated: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(mutated.coverage.refuted, 1);
+}
+
+#[test]
+fn rechecking_rejects_invalid_invocations_and_verification_requires_actual_mir_analysis() {
+    let directory = Directory::new();
+    let original = report(analyze(&fixture("bodies.rs"), &directory, &[]));
+    let original = serde_json::to_value(original).unwrap();
+    let file = directory.0.join("invocation.json");
+    for (field, value) in [
+        ("schema_version", serde_json::json!(999)),
+        ("compiler", serde_json::json!("another compiler")),
+        ("rustc_arguments", serde_json::json!([])),
+    ] {
+        let mut invalid = original.clone();
+        invalid[field] = value;
+        std::fs::write(&file, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+            .args(["--verify", "--json", "--from-report"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{field}");
+        assert!(output.stdout.is_empty(), "{field}");
+    }
+    std::fs::write(&file, serde_json::to_vec(&original).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args(["--verify", "--from-report"])
+        .arg(&file)
+        .args(["--", "--version"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args(["--verify", "--", "--version"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("without MIR analysis"));
+    let mut legacy = original;
+    legacy["schema_version"] = serde_json::json!(7);
+    legacy["rustc_arguments"].as_array_mut().unwrap().extend([
+        serde_json::json!("--error-format=json"),
+        serde_json::json!("--json=artifacts"),
+    ]);
+    std::fs::write(&file, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args(["--verify", "--json", "--entry", "identity", "--from-report"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let refreshed: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        refreshed
+            .rustc_arguments
+            .iter()
+            .any(|arg| arg == "--error-format=human")
+    );
+    assert!(
+        !refreshed
+            .rustc_arguments
+            .iter()
+            .any(|arg| arg.starts_with("--json="))
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("$message_type"));
+}
+
+#[test]
+fn main_selection_does_not_treat_coroutine_construction_as_execution_and_lists_macro_related_names()
+{
+    let directory = Directory::new();
+    let source = directory.0.join("application.rs");
+    std::fs::write(
+        &source,
+        "async fn task() { panic!(\"inside future\"); }\nfn main() { let _future = task(); }\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_mir-check"))
+        .args([
+            "--verify",
+            "--json",
+            "--entry",
+            "main",
+            "--",
+            "--edition=2024",
+        ])
+        .arg(&source)
+        .arg("--out-dir")
+        .arg(&directory.0)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let report: Report = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report.coverage.unknown, 1);
+    std::fs::write(&source, "pub fn generated_main() {}\n").unwrap();
+    let output = analyze_from(&source, &directory, &["--verify", "--entry", "main"], &[]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("main-related MIR names: generated_main")
+    );
+}

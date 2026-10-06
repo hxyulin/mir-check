@@ -42,6 +42,7 @@ struct Checker {
     quiet: bool,
     jsonl: Option<PathBuf>,
     started: std::time::Instant,
+    analysis_ran: bool,
     contracts_path: Option<PathBuf>,
     contract_config: Option<ContractConfig>,
     allow_assumptions: bool,
@@ -60,6 +61,7 @@ impl Callbacks for Checker {
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
         tcx.dcx().abort_if_errors();
+        self.analysis_ran = true;
         let progress = Progress::new(
             !self.quiet,
             self.color,
@@ -101,6 +103,27 @@ impl Callbacks for Checker {
             && let Some(entry) = missing
         {
             self.error = Some(format!("entry {entry:?} has no inventoried local MIR body"));
+            if entry == "main" || entry.ends_with("::main") {
+                let candidates = report
+                    .functions
+                    .iter()
+                    .filter(|function| {
+                        function.name.contains("main") && !function.name.contains("{closure#")
+                    })
+                    .take(8)
+                    .map(|function| function.name.as_str())
+                    .collect::<Vec<_>>();
+                if !candidates.is_empty() {
+                    self.error
+                        .as_mut()
+                        .expect("missing entry error")
+                        .push_str(&format!(
+                            "; main-related MIR names: {}. Select an exact name; macro-generated \
+                         startup bodies are separate from async task execution",
+                            candidates.join(", ")
+                        ));
+                }
+            }
             return Compilation::Stop;
         }
         let entries: Vec<_> = report
@@ -368,10 +391,12 @@ fn main() -> ExitCode {
         quiet: std::env::var_os("MIR_CHECK_QUIET").is_some(),
         jsonl: None,
         started: std::time::Instant::now(),
+        analysis_ran: false,
         contracts_path: std::env::var_os("MIR_CHECK_CONTRACTS").map(PathBuf::from),
         contract_config: None,
         allow_assumptions: std::env::var_os("MIR_CHECK_ALLOW_ASSUMPTIONS").is_some(),
     };
+    let mut from_report = None;
     if checker.report_dir.is_some() {
         if args.len() > 1 {
             args.remove(1); // Cargo's wrapper argument is the real rustc executable.
@@ -387,6 +412,9 @@ fn main() -> ExitCode {
                 [--contracts FILE] [--allow-assumptions] [--verbose] [--quiet] \
                 [--color auto|always|never] [--jsonl FILE|-] -- \
                 <rustc arguments>\n\
+                Or: mir-check --verify --from-report FILE [--entry FUNCTION] [display options]\n\
+                Without --entry, --verify checks every inventoried MIR body in the crate.\n\
+                --from-report recompiles with saved arguments; it does not reuse saved proofs.\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
                 mir-check report <file or directory> reads saved JSON/JSONL reports."
             );
@@ -454,6 +482,18 @@ fn main() -> ExitCode {
                     };
                     args.remove(1);
                 }
+                Some("--from-report") => {
+                    args.remove(1);
+                    if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
+                        eprintln!("mir-check: --from-report requires a JSON report file");
+                        return ExitCode::FAILURE;
+                    }
+                    if from_report.is_some() {
+                        eprintln!("mir-check: specify --from-report only once");
+                        return ExitCode::FAILURE;
+                    }
+                    from_report = Some(PathBuf::from(args.remove(1)));
+                }
                 Some("--allow-assumptions") => {
                     checker.allow_assumptions = true;
                     args.remove(1);
@@ -481,6 +521,63 @@ fn main() -> ExitCode {
             args.remove(1);
         }
     }
+    if let Some(path) = from_report {
+        if args.len() != 1 {
+            eprintln!("mir-check: --from-report supplies rustc arguments; do not add more");
+            return ExitCode::FAILURE;
+        }
+        let loaded = (|| -> Result<Report, Box<dyn std::error::Error>> {
+            let report: Report = serde_json::from_slice(&std::fs::read(&path)?)?;
+            if !(7..=8).contains(&report.schema_version) {
+                return Err(format!("unsupported report schema {}", report.schema_version).into());
+            }
+            if report.compiler != env!("MIR_CHECK_COMPILER") {
+                return Err(
+                    "saved invocation requires a different compiler; rebuild its inventory".into(),
+                );
+            }
+            if report.rustc_arguments.is_empty() {
+                return Err("saved report has no compiler arguments".into());
+            }
+            Ok(report)
+        })();
+        match loaded {
+            Ok(report) => {
+                if !checker.quiet {
+                    eprintln!(
+                        "mir-check: Rechecking {} with saved compiler arguments",
+                        report.crate_name
+                    );
+                }
+                let mut saved = report.rustc_arguments.into_iter();
+                while let Some(arg) = saved.next() {
+                    if matches!(arg.as_str(), "--error-format" | "--json" | "--color") {
+                        saved.next();
+                    } else if !["--error-format=", "--json=", "--color="]
+                        .iter()
+                        .any(|prefix| arg.starts_with(prefix))
+                    {
+                        args.push(arg);
+                    }
+                }
+                let color = if matches!(checker.color, Color::Auto)
+                    && std::env::var_os("NO_COLOR").is_some()
+                {
+                    "never"
+                } else {
+                    checker.color.argument()
+                };
+                args.extend([
+                    "--error-format=human".to_owned(),
+                    format!("--color={color}"),
+                ]);
+            }
+            Err(error) => {
+                eprintln!("mir-check: {}: {error}", path.display());
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     if checker.json && checker.jsonl.is_some() {
         eprintln!("mir-check: choose --json or --jsonl");
         return ExitCode::FAILURE;
@@ -503,6 +600,16 @@ fn main() -> ExitCode {
     checker.rustc_arguments = args[1..].to_vec();
     let status =
         rustc_driver::catch_with_exit_code(|| rustc_driver::run_compiler(&args, &mut checker));
+    if checker.verify
+        && checker.report_dir.is_none()
+        && !checker.analysis_ran
+        && status == ExitCode::SUCCESS
+    {
+        eprintln!(
+            "mir-check: compiler invocation completed without MIR analysis; no proof produced"
+        );
+        return ExitCode::FAILURE;
+    }
     if let Some(error) = checker.error {
         eprintln!("mir-check: {error}");
         return ExitCode::FAILURE;

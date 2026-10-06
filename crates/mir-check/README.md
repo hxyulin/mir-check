@@ -143,3 +143,14 @@ readability; raw data is complete. --jsonl FILE exports one complete report per 
 reserves stdout for machine data and sends human/Cargo output to stderr. Both binaries provide
 a report subcommand for saved schema-7/8 JSON, JSONL or report directories. It recomputes counts
 and applies the usual exit policy without claiming a new proof or rerunning the compiler/solver.
+
+Direct --verify without --entry independently checks every inventoried body in one crate.
+--entry main checks that selected body's reachable calls instead. --from-report FILE reads a
+schema-7/8 report's compiler arguments and recompiles current source using the pinned compiler;
+it never reuses saved proofs, selectors or trusted configuration. Run from the original working
+directory with dependency artifacts available. Extra rustc arguments and mismatched compilers
+are rejected. Missing main selectors list main-related MIR names for expanded macros. Async
+construction/coroutine execution remains unsupported, and compiler invocations that bypass MIR
+analysis cannot succeed as verification runs.
+Reused Cargo diagnostic flags are replaced with human output and the chosen color policy;
+analysis flags are preserved and the actual invocation is recorded in the new report.
