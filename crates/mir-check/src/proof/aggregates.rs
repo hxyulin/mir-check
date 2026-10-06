@@ -212,9 +212,36 @@ impl<'tcx> Engine<'tcx> {
         index: &Value,
         conditions: &[String],
     ) -> Result<Value, String> {
-        let (_, bits, signed) = index.integer()?;
+        let (expression, bits, signed) = index.integer()?;
         if signed || bits != u32::from(self.tcx.sess.target.pointer_width) {
             return Err("fixed array index type mismatch".to_owned());
+        }
+        if let Some(super::super::solver::ground::Constant::BitVec {
+            value,
+            bits: constant_bits,
+        }) = super::super::solver::ground::constant(&expression)
+            && constant_bits == bits
+        {
+            return usize::try_from(value)
+                .ok()
+                .and_then(|position| elements.get(position))
+                .cloned()
+                .ok_or_else(|| "array read lacks a proven bounds check".to_owned());
+        }
+        let scalar_choice = symbolic::select_element(elements, index);
+        if scalar_choice.is_ok() {
+            let bound = symbolic::binary(
+                "lt",
+                index.clone(),
+                symbolic::integer(elements.len() as u128, bits, false),
+            )?
+            .boolean()?;
+            let mut outside = conditions.to_vec();
+            outside.push(symbolic::not(&bound));
+            if self.feasible(&outside)? {
+                return Err("array read lacks a proven bounds check".to_owned());
+            }
+            return scalar_choice;
         }
         for (position, element) in elements.iter().enumerate() {
             let equal = symbolic::binary(

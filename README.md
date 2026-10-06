@@ -198,7 +198,8 @@ containing a shared byte slice.
 
 Integer/bool/float arrays support symbolic bounded indices and array/slice pattern projections.
 Owned aggregate repeats preserve independent copies, with at most 128 elements and 256 modeled
-values per repeat. Input and constant non-byte arrays retain their 16-element limit.
+values per repeat. Non-byte input arrays retain their 16-element limit; evaluated constants allow
+128 elements.
 Tuple/struct/enum array elements require a uniquely determined index on the current path. Root
 struct fields are independent inputs; privacy and constructors do not supply an implicit type
 invariant. Nested input construction is limited to eight levels and 128 values; non-byte arrays have
@@ -208,7 +209,7 @@ supported shapes.
 Constant decoding uses rustc's constant interpreter for layouts, discriminants and initialized
 scalar reads. It follows only immutable references to storage without interior mutation and
 decodes only the active variant. Constants have an eight-level depth limit and a 256-value budget;
-byte arrays/slices have at most 128 bytes and other arrays/slices at most 16 elements. Unions,
+evaluated arrays/slices have at most 128 elements. Unions,
 including MaybeUninit, and mutable or raw-pointer storage remain unknown.
 
 Tracked mutable references can be stored in tuples, structs, enums and closure environments.

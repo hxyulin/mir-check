@@ -666,3 +666,16 @@ Original host/ARM cases check successful/guarded Options, reachable unwrap failu
 application-name collisions, primitive AddAssign effects and unknown function-pointer calls.
 String reborrows before some expect calls remain UNKNOWN. Native cases and a changed increment
 verify that unit-returning calls preserve their writes.
+
+## Stage 36: evaluated constant tables and scalar index selection
+
+Evaluated immutable arrays/slices accept up to 128 elements, including non-byte scalars and
+composites. The 256-value total budget and eight-level depth limit remain. Root non-byte inputs
+still have at most 16 elements. Constants are fully decoded; this does not add lazy storage or
+permit uninitialized/interior-mutable data. Exact ground indices select directly; compatible
+scalar symbolic reads use one bounds query and conditional selection, avoiding a solver query
+for each possible element. Composite reads still require a uniquely determined index.
+
+Original host/ARM regressions cover integer/Boolean tables, exact float payloads and copied
+aliases, structs, nested arrays, bounded slices and resource exhaustion. Wrong bounds and payload
+assertions refute; a changed table-spacing mutation refutes and fails under native execution.

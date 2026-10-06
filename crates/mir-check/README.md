@@ -67,7 +67,7 @@ discriminants and initialized scalar reads. It supports nested structs/tuples, a
 payloads, immutable promoted/static references and bounded arrays/slices. A reference to interior
 mutable storage is rejected. Only active fields are read: None with an unsupported inactive
 payload can be modeled, while a reachable union/MaybeUninit remains unknown. Limits are eight
-recursive levels, 256 values, 128 bytes or 16 non-byte elements per array/slice. The decoder
+recursive levels, 256 values and 128 elements per evaluated array/slice. The decoder
 inspects constants; it does not replace symbolic MIR execution or model arbitrary memory.
 
 The contract evaluator accepts pure comparisons and boolean predicates,
@@ -169,9 +169,10 @@ regressions reject bad bounds, same-named user methods and mutated guards/count 
 
 Repeated arrays support small owned tuples, structs, enums and nested arrays, preserving each copy's
 fields and independent writes. Generated repeats have at most 128 elements and 256 modeled values.
-Input and constant non-byte arrays retain their 16-element limit; byte arrays retain their 128-byte
-limit. Storage identities (Cell, atomics, tracked references and mutable byte views) are not cloned
-by the repeat model. Accessing repeated inline-constant interior mutable storage remains unknown.
+Non-byte root inputs retain their 16-element limit; evaluated constants permit 128 elements.
+Byte arrays retain their 128-byte limit. Storage identities (Cell, atomics, tracked references and
+mutable byte views) are not cloned by the repeat model. Accessing repeated inline-constant interior
+mutable storage remains unknown.
 Composite indices still require a unique value on each path; this stage does not extend alias or
 iterator semantics.
 

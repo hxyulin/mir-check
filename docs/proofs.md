@@ -161,14 +161,14 @@ arrays/slices recurse into the same decoder. Immutable promoted/static reference
 only when the pointee has no interior mutation; mutable global reads are rejected. Unions and
 MaybeUninit remain unknown, even when a union was initialized. An inactive unsupported payload
 does not need decoding. Constant shape limits are eight levels and 256 values, with at most
-128 bytes or 16 non-byte elements per array/slice. This adds compiler constant inspection to the
+128 elements per evaluated array/slice. This adds compiler constant inspection to the
 trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
 
 Coverage remains limited by enum/struct slices, general aliasing, multiple mutable root references,
 legacy mutable byte captures, unresolved generic inputs, float remainder, trait objects, function
 pointers and
 general iterator machinery, destructors and several MIR operations/constants, including some
-constant shapes. Non-byte arrays are limited to 16 elements; symbolic bounded indices work for
+constant shapes. Non-byte input arrays are limited to 16 elements; symbolic bounded indices work for
 integers, floats and booleans; enum/struct elements need a uniquely determined index. Array/slice
 patterns prove their minimum length and index bounds before applying constant start/end offsets.
 Generic roots with unresolved type parameters remain unsupported. There are no inductive loop

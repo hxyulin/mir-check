@@ -19,7 +19,7 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | One mutable byte-slice root supports guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
-| Fixed non-byte arrays | At most 16 input/constant elements; generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
+| Fixed non-byte arrays | At most 16 input elements; evaluated constants and generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 16 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | One mutable root reference, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing, legacy byte captures and partial initialization remain UNKNOWN |
@@ -40,8 +40,8 @@ Constants use rustc_const_eval to read compiler layouts, discriminants and initi
 The decoder inspects only the active variant; it does not invent values for inactive or
 uninitialized fields. Immutable references require a pointee without interior mutation, and the
 compiler's inspection context rejects mutable global reads. Constant decoding has eight recursive
-levels and 256 values, including containers/references and each element. Byte arrays/slices have
-at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaustion is UNKNOWN.
+levels and 256 values, including containers/references and each element. Evaluated arrays/slices
+have at most 128 elements. Exhaustion is UNKNOWN.
 
 ## Execution and calls
 
@@ -154,8 +154,9 @@ intrinsic declaration and primitive clamp implementation; they do not trust appl
 Small repeated tuples, structs, enum values and nested arrays preserve their contents and variant
 tags. Each copy owns its data: changing a field or byte in one copy does not change another copy.
 Generated repeats have at most 128 elements and 256 modeled values, counting aggregate containers
-and their children. Input and constant non-byte arrays retain their 16-element limit; byte arrays
-retain their 128-byte limit.
+and their children. Non-byte root inputs retain their 16-element limit; evaluated constants permit
+128 elements.
+Byte arrays retain their 128-byte limit.
 Tracked references, Cell/atomic identities and mutable views are excluded from repeat cloning.
 
 Host/ARM tests prove six-by-six float matrix initialization, tuple/struct/enum copies, 18-element
@@ -251,3 +252,10 @@ A changed sign mask refutes. Native checks include signed zero, subnormals, infi
 kinds of NaN for f32/f64, plus 1,024 integer-cast/arithmetic inputs. Checked sidecars force actual
 core to_bits/from_bits bodies through typed transmutes and retain the same outcomes without
 library summaries. Remainder and wider floating-point formats remain unsupported.
+
+## Larger evaluated tables and numeric-only float exploration
+
+Evaluated constants now allow up to 128 elements, with the same 256-value total and eight-level
+depth budgets. Symbolic compatible scalar selection needs a bounds proof, while constant indices
+select directly. Composite indices still require uniqueness. Host/ARM tests retain unknown results
+for oversized, ambiguous, uninitialized and interior-mutable cases.

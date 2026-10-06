@@ -5,6 +5,7 @@ use rustc_const_eval::interpret::{OpTy, Projectable};
 use rustc_middle::mir::Const;
 
 const MAX_CONSTANT_VALUES: usize = 256;
+const MAX_CONSTANT_ELEMENTS: u64 = 128;
 
 impl<'tcx> Engine<'tcx> {
     pub(super) fn constant(
@@ -143,7 +144,7 @@ impl<'tcx> Engine<'tcx> {
                     .discard_err()
                     .ok_or("unsupported constant array length")?;
                 let bytes = *element == self.tcx.types.u8;
-                if count > if bytes { 128 } else { 16 } {
+                if count > MAX_CONSTANT_ELEMENTS {
                     return Err("unsupported constant array exceeds element budget".to_owned());
                 }
                 let elements = (0..count)
