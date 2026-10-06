@@ -14,15 +14,16 @@ Functions and methods with bodies are supported, including const fn. Receiver ty
 checker's modeled input subset remain unsupported for proof.
 
 The checker supports nested modeled fields and numeric tuple projections in predicates, such as
-packet.header.index or value.1.0. Constants can index fixed non-byte arrays. Arbitrary predicate
-calls, arithmetic, dynamic indexing and Result matches remain unsupported; the macros only check
-syntax and do not expand the checker's supported predicate language.
+packet.header.index or value.1.0. Literal indices can select fixed non-byte arrays or byte storage
+with a known length. Arbitrary predicate calls, arithmetic, dynamic indexing and Result matches
+remain unsupported; the macros only check syntax and do not expand the checker's supported predicate
+language.
 
 Versioned HTML comments in doc attributes carry the declarations through macro expansion to
 the compiler adapter. This format is experimental and is not a trusted proof certificate.
 
 Predicates support comparisons, boolean operations, modeled fields and tuple projections,
-array/slice lengths, constant non-byte array indices, integer/float casts and restricted
-exhaustive Option matches. Float literals infer their type from the compared value; mismatched
-or out-of-range literals are rejected. Symbolic Option matches require boolean arms.
+array/slice lengths, literal fixed-array and known-length byte indices, integer/float casts and
+restricted exhaustive Option matches. Float literals infer their type from the compared value;
+mismatched or out-of-range literals are rejected. Symbolic Option matches require boolean arms.
 Unsupported predicates and inconsistent entry domains return UNKNOWN.

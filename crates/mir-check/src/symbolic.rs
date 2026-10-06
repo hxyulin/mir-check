@@ -9,6 +9,14 @@ pub enum MemoryProjection {
     Field(usize),
     Variant(usize),
     Index(Box<Value>),
+    Slice {
+        offset: Box<Value>,
+        length: Box<Value>,
+    },
+    Chunks {
+        width: usize,
+        count: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -51,10 +59,6 @@ pub enum Value {
         allocation: usize,
         projection: Vec<MemoryProjection>,
         mutable: bool,
-    },
-    MutableBytes {
-        owner: usize,
-        length: Box<Value>,
     },
     SliceIterator {
         source: Box<Value>,
@@ -102,7 +106,6 @@ impl Value {
             Self::Cell { .. }
             | Self::Atomic { .. }
             | Self::Reference { .. }
-            | Self::MutableBytes { .. }
             | Self::SliceIterator { .. }
             | Self::MetadataPointer(_)
             | Self::StaticText
@@ -113,7 +116,7 @@ impl Value {
 
     pub fn contains_mutable(&self) -> bool {
         match self {
-            Self::MutableBytes { .. } | Self::Reference { mutable: true, .. } => true,
+            Self::Reference { mutable: true, .. } => true,
             Self::SliceIterator {
                 mutable, source, ..
             } => *mutable || source.contains_mutable(),

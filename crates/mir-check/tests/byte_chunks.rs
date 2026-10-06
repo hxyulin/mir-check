@@ -12,10 +12,8 @@ struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {
         let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "mir-check-aggregate-borrow-{}-{id}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("mir-check-byte-chunks-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -28,7 +26,7 @@ impl Drop for Directory {
 }
 
 fn fixture() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/aggregate_borrows.rs")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/byte_chunks.rs")
 }
 
 fn contract_library() -> PathBuf {
@@ -81,89 +79,62 @@ fn verify(path: &Path, names: &[&str], target: Option<&str>) -> (Output, Report)
 }
 
 #[test]
-fn tracked_aggregate_borrows_preserve_writes_on_host_and_arm() {
+fn mutable_byte_regions_preserve_parent_writes_on_host_and_arm() {
     let entries = [
-        ("parcel_pair", ProofStatus::Proved),
-        ("tuple_reborrow", ProofStatus::Proved),
-        ("captured_counter", ProofStatus::Proved),
-        ("returned_capture", ProofStatus::Proved),
-        ("optional_borrow", ProofStatus::Proved),
-        ("zipped_labels", ProofStatus::Proved),
-        ("flattened_bins", ProofStatus::Proved),
-        ("wrong_pair", ProofStatus::Refuted),
-        ("wrong_capture", ProofStatus::Refuted),
-        ("owned_capture_state", ProofStatus::Proved),
-        ("wrong_owned_capture_state", ProofStatus::Refuted),
-        ("generated_capture_state", ProofStatus::Proved),
-        ("mapped_capture_state", ProofStatus::Proved),
-        ("mapped_reference_elements", ProofStatus::Proved),
-        ("predicate_capture_state", ProofStatus::Proved),
-        ("folded_capture_state", ProofStatus::Proved),
-        ("byte_capture_boundary", ProofStatus::Proved),
-        ("multiple_mutable_inputs", ProofStatus::Unknown),
-        ("ambiguous_write", ProofStatus::Unknown),
+        ("pixel_strip", ProofStatus::Proved),
+        ("shade_palette", ProofStatus::Proved),
+        ("out_of_bounds_contract", ProofStatus::Unknown),
+        ("symbolic_prefix", ProofStatus::Proved),
+        ("returned_regions", ProofStatus::Proved),
+        ("same_named_method", ProofStatus::Refuted),
+        ("wrong_pixel_strip", ProofStatus::Refuted),
+        ("interleaved_regions", ProofStatus::Proved),
+        ("copied_prefix", ProofStatus::Proved),
+        ("copied_chunk", ProofStatus::Proved),
+        ("copy_then_repaint", ProofStatus::Proved),
+        ("mismatched_copy", ProofStatus::Refuted),
+        ("zero_chunk_width", ProofStatus::Refuted),
+        ("oversized_chunk", ProofStatus::Proved),
+        ("empty_regions", ProofStatus::Proved),
+        ("symbolic_chunks", ProofStatus::Unknown),
+        ("oversized_storage", ProofStatus::Unknown),
     ];
+    let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
     for target in [None, Some("thumbv7em-none-eabihf")] {
-        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
-        let (output, report) = verify(&fixture(), &names, target);
-        assert!(!output.status.success());
+        let (_, report) = verify(&fixture(), &names, target);
         for (name, expected) in entries {
-            let proof = report
+            let function = report
                 .functions
                 .iter()
-                .find(|f| f.name == name)
-                .unwrap()
-                .proof
-                .as_ref()
+                .find(|f| f.name.ends_with(name))
                 .unwrap();
+            let proof = function.proof.as_ref().unwrap();
             assert_eq!(
                 proof.status,
                 expected,
-                "{target:?} {name}: {:?}",
+                "{name}: {:?}",
                 proof
                     .obligations
                     .iter()
-                    .map(|o| (&o.status, &o.detail))
+                    .map(|o| &o.detail)
                     .collect::<Vec<_>>()
             );
+            if expected == ProofStatus::Refuted {
+                assert!(
+                    proof
+                        .obligations
+                        .iter()
+                        .any(|o| o.status == ProofStatus::Refuted)
+                );
+            }
         }
     }
 }
 
 #[test]
-fn swapped_aggregate_field_mutation_is_refuted() {
-    let source = std::fs::read_to_string(fixture()).unwrap();
-    let original = "Pair { left, right }";
-    assert_eq!(source.matches(original).count(), 1);
+fn byte_region_assertions_match_native_execution() {
     let directory = Directory::new();
-    let path = directory.0.join("aggregate_borrows.rs");
-    std::fs::write(
-        &path,
-        source.replace(original, "Pair { left: right, right: left }"),
-    )
-    .unwrap();
-    let (output, report) = verify(&path, &["parcel_pair"], None);
-    assert!(!output.status.success());
-    let proof = report
-        .functions
-        .iter()
-        .find(|f| f.name == "parcel_pair")
-        .unwrap()
-        .proof
-        .as_ref()
-        .unwrap();
-    assert_eq!(
-        proof.status,
-        ProofStatus::Refuted,
-        "{:?}",
-        proof.obligations
-    );
-    assert!(proof.obligations.iter().any(|o| o.model.is_some()));
-}
-#[test]
-fn aggregate_borrows_match_native_writes() {
-    let directory = Directory::new();
-    let executable = directory.0.join("aggregate-borrow-tests");
+    let executable = directory.0.join("byte-chunks-tests");
     let output = Command::new("rustc")
         .args(["--test", "--edition=2024", "-Coverflow-checks=yes"])
         .arg(fixture())
@@ -184,4 +155,27 @@ fn aggregate_borrows_match_native_writes() {
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
+}
+
+#[test]
+fn a_pixel_write_mutation_is_refuted() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let directory = Directory::new();
+    let path = directory.0.join("byte_chunks.rs");
+    std::fs::write(
+        &path,
+        source.replace("*pixel = [shade, 17, 23];", "*pixel = [shade, 19, 23];"),
+    )
+    .unwrap();
+    let (_, report) = verify(&path, &["pixel_strip"], None);
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name.ends_with("pixel_strip"))
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(proof.status, ProofStatus::Refuted);
+    assert!(proof.obligations.iter().any(|o| o.model.is_some()));
 }

@@ -1182,7 +1182,7 @@ pub fn caller(value: u8, source: &[u8]) {
 }
 
 #[test]
-fn mutable_array_borrows_cannot_cross_an_unmodeled_call_boundary() {
+fn mutable_array_borrows_preserve_writes_across_a_call_boundary() {
     let directory = Directory::new();
     let path = directory.0.join("mutable_call.rs");
     std::fs::write(
@@ -1193,13 +1193,14 @@ fn fill(bytes: &mut [u8], value: u8) { bytes[0] = value; }
 pub fn caller(value: u8) -> u8 {
     let mut bytes = [0; 8];
     fill(&mut bytes, value);
+    assert!(bytes[0] == value);
     bytes[0]
 }
 "#,
     )
     .unwrap();
     let (output, report) = verify_vendored(&path, &["caller"], &[]);
-    assert!(!output.status.success());
+    assert!(output.status.success());
     let proof = report
         .functions
         .iter()
@@ -1208,12 +1209,12 @@ pub fn caller(value: u8) -> u8 {
         .proof
         .as_ref()
         .unwrap();
-    assert_eq!(proof.status, ProofStatus::Unknown);
+    assert_eq!(proof.status, ProofStatus::Proved);
     assert!(
         proof
-            .obligations
+            .analyzed_bodies
             .iter()
-            .any(|obligation| obligation.detail.contains("mutable"))
+            .any(|body| body.starts_with("fill "))
     );
 }
 

@@ -222,7 +222,6 @@ impl<'tcx> Engine<'tcx> {
                 return Ok(());
             }
             Value::Reference { .. }
-            | Value::MutableBytes { .. }
             | Value::SliceIterator { .. }
             | Value::MetadataPointer(_)
             | Value::StaticText
@@ -530,12 +529,6 @@ impl<'tcx> Engine<'tcx> {
         }
         if arguments.len() != body.arg_count {
             return Err("call arguments do not match the MIR body".to_owned());
-        }
-        if arguments
-            .iter()
-            .any(|value| matches!(value, Value::MutableBytes { .. }))
-        {
-            return Err("mutable local borrows cannot cross an unmodeled call boundary".to_owned());
         }
         let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
         let bindings = self.configured_bindings(body, &snapshots, instance)?;
@@ -869,9 +862,9 @@ impl<'tcx> Engine<'tcx> {
                     if !configured
                         && let Some(value) = self.builtin(
                             body,
-                            callee,
-                            instance.args,
+                            instance,
                             &modeled_values,
+                            &values,
                             &mut state,
                             terminator.source_info.span,
                         )?
@@ -987,7 +980,6 @@ impl<'tcx> Engine<'tcx> {
                     value @ (Value::Bytes { .. }
                     | Value::Adt { .. }
                     | Value::Enum { .. }
-                    | Value::MutableBytes { .. }
                     | Value::Elements(_)
                     | Value::Tuple(_)
                     | Value::Unit
@@ -1127,16 +1119,7 @@ impl<'tcx> Engine<'tcx> {
         match value {
             Rvalue::Use(operand, _) => self.operand(id, body, state, operand),
             Rvalue::Ref(_, BorrowKind::Shared, place) => self.borrow(state, *place, false),
-            Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => {
-                if matches!(self.place(state, *place)?, Value::MutableBytes { .. })
-                    || (place.projection.is_empty()
-                        && matches!(self.place(state, *place)?, Value::Bytes { .. }))
-                {
-                    self.mutable_bytes(state, *place)
-                } else {
-                    self.borrow(state, *place, true)
-                }
-            }
+            Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => self.borrow(state, *place, true),
             Rvalue::RawPtr(rustc_middle::mir::RawPtrKind::FakeForPtrMetadata, place) => {
                 let value = self.place(state, *place)?;
                 let length = match value {
@@ -1332,10 +1315,7 @@ impl<'tcx> Engine<'tcx> {
                 if *element != self.tcx.types.u8 {
                     return Err("only byte-slice coercions are modeled".to_owned());
                 }
-                if matches!(
-                    (&value, mutability.is_mut()),
-                    (Value::Bytes { .. }, false) | (Value::MutableBytes { .. }, true)
-                ) {
+                if matches!((&value, mutability.is_mut()), (Value::Bytes { .. }, false)) {
                     Ok(value)
                 } else {
                     Err("unsupported pointer coercion".to_owned())

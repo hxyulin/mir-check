@@ -33,7 +33,6 @@ pub(super) fn fold(value: Value) -> Value {
         | Value::Cell { .. }
         | Value::Atomic { .. }
         | Value::Reference { .. }
-        | Value::MutableBytes { .. }
         | Value::SliceIterator { .. }
         | Value::Elements(_)
         | Value::MetadataPointer(_)

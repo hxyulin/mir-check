@@ -372,22 +372,4 @@ impl<'tcx> Engine<'tcx> {
             data: format!("((as const (Array (_ BitVec {bits}) (_ BitVec 8))) {expression})"),
         })
     }
-
-    pub(super) fn mutable_bytes(&self, state: &State, place: Place<'tcx>) -> Result<Value, String> {
-        if place.projection.is_empty() {
-            let Value::Bytes { length, .. } = self.place(state, place)? else {
-                return Err("mutable borrowing only models owned local byte arrays".to_owned());
-            };
-            return Ok(Value::MutableBytes {
-                owner: place.local.as_usize(),
-                length,
-            });
-        }
-        let value = self.place(state, place)?;
-        if matches!(value, Value::MutableBytes { .. }) {
-            Ok(value)
-        } else {
-            Err("unsupported mutable reborrow".to_owned())
-        }
-    }
 }

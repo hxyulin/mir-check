@@ -75,13 +75,15 @@ impl<'tcx> Engine<'tcx> {
     pub(super) fn builtin(
         &mut self,
         caller_body: &Body<'tcx>,
-        callee: DefId,
-        args: ty::GenericArgsRef<'tcx>,
+        instance: ty::Instance<'tcx>,
         values: &[Value],
+        raw_values: &[Value],
         state: &mut State,
         span: Span,
     ) -> Result<Option<Value>, String> {
         let caller = caller_body.source.def_id();
+        let callee = instance.def_id();
+        let args = instance.args;
         if self.tcx.def_kind(callee) == DefKind::Closure {
             return Ok(None);
         }
@@ -91,9 +93,7 @@ impl<'tcx> Engine<'tcx> {
             };
             self.record_model(callee, "slice length");
             return match receiver {
-                Value::Bytes { length, .. } | Value::MutableBytes { length, .. } => {
-                    Ok(Some((**length).clone()))
-                }
+                Value::Bytes { length, .. } => Ok(Some((**length).clone())),
                 Value::Elements(elements) => Ok(Some(symbolic::integer(
                     elements.len() as u128,
                     u32::from(self.tcx.sess.target.pointer_width),
@@ -428,7 +428,7 @@ impl<'tcx> Engine<'tcx> {
             };
             let end = range.field("end")?;
             let length = match receiver {
-                Value::Bytes { length, .. } | Value::MutableBytes { length, .. } => &**length,
+                Value::Bytes { length, .. } => &**length,
                 _ => return Err("range receiver is not modeled".to_owned()),
             };
             let safe = symbolic::binary("le", end.clone(), length.clone())?.boolean()?;
@@ -441,16 +441,37 @@ impl<'tcx> Engine<'tcx> {
                 "byte prefix end must not exceed its receiver length".to_owned(),
             )?;
             state.conditions.push(safe);
-            let result = match (receiver, index_mut) {
-                (Value::Bytes { data, .. }, false) => Value::Bytes {
+            let result = if index_mut {
+                let Some(Value::Reference {
+                    allocation,
+                    projection,
+                    mutable: true,
+                }) = raw_values.first()
+                else {
+                    return Err("mutable prefix needs tracked writable byte storage".to_owned());
+                };
+                let mut projection = projection.clone();
+                projection.push(symbolic::MemoryProjection::Slice {
+                    offset: Box::new(symbolic::integer(
+                        0,
+                        u32::from(self.tcx.sess.target.pointer_width),
+                        false,
+                    )),
+                    length: Box::new(end),
+                });
+                Value::Reference {
+                    allocation: *allocation,
+                    projection,
+                    mutable: true,
+                }
+            } else {
+                let Value::Bytes { data, .. } = receiver else {
+                    return Err("shared prefix needs byte storage".to_owned());
+                };
+                Value::Bytes {
                     length: Box::new(end),
                     data: data.clone(),
-                },
-                (Value::MutableBytes { owner, .. }, true) => Value::MutableBytes {
-                    owner: *owner,
-                    length: Box::new(end),
-                },
-                _ => return Err("range mutability mismatch".to_owned()),
+                }
             };
             return Ok(Some(result));
         }
@@ -537,7 +558,7 @@ impl<'tcx> Engine<'tcx> {
                 "byte copy; equal lengths and exact local-array updates",
             );
             return self
-                .copy_bytes(caller, caller_body, values, state, span)
+                .copy_bytes(caller, raw_values, values, state, span)
                 .map(Some);
         }
         Ok(None)
@@ -553,40 +574,31 @@ impl<'tcx> Engine<'tcx> {
     fn copy_bytes(
         &mut self,
         caller: DefId,
-        body: &Body<'tcx>,
+        raw_values: &[Value],
         values: &[Value],
         state: &mut State,
         span: Span,
     ) -> Result<Value, String> {
         let [
-            Value::MutableBytes { owner, length },
+            Value::Bytes { length, .. },
             Value::Bytes {
-                length: source_len,
-                data: source,
+                length: source_length,
+                data,
             },
         ] = values
         else {
-            return Err(
-                "copy model requires a local mutable byte array and an immutable byte source"
-                    .to_owned(),
-            );
+            return Err("copy model requires byte source and destination storage".to_owned());
         };
-        let ty::Array(element, capacity) = body.local_decls
-            [rustc_middle::mir::Local::from_usize(*owner)]
-        .ty
-        .kind() else {
-            return Err("copy destination owner is not a local array".to_owned());
+        let Some(Value::Reference {
+            allocation,
+            projection,
+            mutable: true,
+        }) = raw_values.first()
+        else {
+            return Err("copy destination requires tracked writable byte storage".to_owned());
         };
-        if *element != self.tcx.types.u8 {
-            return Err("non-byte copy destination".to_owned());
-        }
-        let capacity = capacity
-            .try_to_target_usize(self.tcx)
-            .ok_or("unknown copy capacity")?;
-        if capacity > 128 {
-            return Err("byte array model size limit reached".to_owned());
-        }
-        let safe = symbolic::binary("eq", (**length).clone(), (**source_len).clone())?.boolean()?;
+        let safe =
+            symbolic::binary("eq", (**length).clone(), (**source_length).clone())?.boolean()?;
         self.require(
             caller,
             span,
@@ -596,34 +608,20 @@ impl<'tcx> Engine<'tcx> {
             "copy_from_slice requires equal source and destination lengths".to_owned(),
         )?;
         state.conditions.push(safe);
-        let Value::Bytes {
-            length: owner_len,
-            data: old,
-        } = self.local(state, *owner)?
-        else {
-            return Err("copy destination storage is not modeled".to_owned());
-        };
-        let (len, bits, signed) = length.integer()?;
-        if signed {
-            return Err("signed copy length".to_owned());
-        }
-        let mut data = old.clone();
-        for index in 0..capacity {
-            let cell = format!("(_ bv{index} {bits})");
-            let value = format!(
-                "(ite (bvult {cell} {len}) (select {source} {cell}) (select {old} {cell}))"
-            );
-            data = format!("(store {data} {cell} {value})");
-        }
-        let value = Value::Bytes {
-            length: owner_len,
-            data,
-        };
-        if let Some(allocation) = state.addresses[*owner] {
-            state.memory[allocation] = Some(value);
-        } else {
-            state.locals[*owner] = Some(value);
-        }
+        let storage = state
+            .memory
+            .get_mut(*allocation)
+            .and_then(Option::as_mut)
+            .ok_or("copy destination allocation is dead")?;
+        self.write_projection(
+            storage,
+            projection,
+            Value::Bytes {
+                length: length.clone(),
+                data: data.clone(),
+            },
+            &state.conditions,
+        )?;
         Ok(Value::Unit)
     }
 }

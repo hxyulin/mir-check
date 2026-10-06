@@ -104,14 +104,6 @@ impl<'tcx> Engine<'tcx> {
             };
             let snapshot = self.snapshot(source, &state.memory, &state.conditions, 0)?;
             let (source, back) = match snapshot {
-                Value::MutableBytes { owner, length } => (
-                    self.borrow(
-                        state,
-                        Place::from(rustc_middle::mir::Local::from_usize(owner)),
-                        mutable,
-                    )?,
-                    *length,
-                ),
                 Value::Bytes { length, .. } => (source.clone(), *length),
                 Value::Elements(elements) => {
                     (source.clone(), self.iterator_index(elements.len() as u128))

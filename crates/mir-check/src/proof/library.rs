@@ -101,6 +101,112 @@ impl<'tcx> Engine<'tcx> {
         if self.core_array_from_fn() == Some(callee) {
             return self.array_from_fn(instance, signature, raw_values, state, stack, site);
         }
+        let inherent_slice = matches!(
+            self.tcx.def_kind(self.tcx.parent(callee)),
+            DefKind::Impl { of_trait: false }
+        ) && matches!(self.tcx.type_of(self.tcx.parent(callee)).instantiate(self.tcx, instance.args)
+                .skip_norm_wip().kind(), ty::Slice(element) if *element == self.tcx.types.u8);
+        if inherent_slice && self.tcx.item_name(callee) == Symbol::intern("as_chunks_mut") {
+            let [input] = signature.inputs() else {
+                return Ok(None);
+            };
+            if !matches!(input.kind(), ty::Ref(_, slice, mutability)
+                if mutability.is_mut() && matches!(slice.kind(), ty::Slice(element) if *element == self.tcx.types.u8))
+            {
+                return Ok(None);
+            }
+            let ty::Tuple(outputs) = signature.output().kind() else {
+                return Ok(None);
+            };
+            if outputs.len() != 2 {
+                return Ok(None);
+            }
+            let ty::Ref(_, chunk_slice, mutability) = outputs[0].kind() else {
+                return Ok(None);
+            };
+            let ty::Slice(chunk_array) = chunk_slice.kind() else {
+                return Ok(None);
+            };
+            let ty::Array(element, width) = chunk_array.kind() else {
+                return Ok(None);
+            };
+            if !mutability.is_mut()
+                || *element != self.tcx.types.u8
+                || !matches!(outputs[1].kind(), ty::Ref(_, slice, mutability)
+                    if mutability.is_mut() && matches!(slice.kind(), ty::Slice(element) if *element == self.tcx.types.u8))
+            {
+                return Ok(None);
+            }
+            let width = width
+                .try_to_target_usize(self.tcx)
+                .ok_or("unknown chunk width")?;
+            let safe = if width == 0 { "false" } else { "true" };
+            self.require(
+                site.0,
+                site.1,
+                &state.conditions,
+                safe,
+                ObligationKind::PanicSafety,
+                "as_chunks_mut requires a nonzero chunk width".to_owned(),
+            )?;
+            if width == 0 {
+                return Ok(Some(Vec::new()));
+            }
+            let [
+                Value::Reference {
+                    allocation,
+                    projection,
+                    mutable: true,
+                },
+            ] = raw_values
+            else {
+                return Err("as_chunks_mut requires tracked writable byte storage".to_owned());
+            };
+            let [Value::Bytes { length, .. }] = values else {
+                return Err("as_chunks_mut requires modeled byte slice storage".to_owned());
+            };
+            let Some(crate::solver::ground::Constant::BitVec { value: length, .. }) =
+                crate::solver::ground::constant(&length.integer()?.0)
+            else {
+                return Err("as_chunks_mut needs a fixed slice length".to_owned());
+            };
+            if length > 128 {
+                return Err("as_chunks_mut exceeds the 128-byte view budget".to_owned());
+            }
+            let count = length / u128::from(width);
+            let covered = count * u128::from(width);
+            let bits = u32::from(self.tcx.sess.target.pointer_width);
+            let mut chunk_projection = projection.clone();
+            chunk_projection.push(symbolic::MemoryProjection::Chunks {
+                width: width as usize,
+                count: count as usize,
+            });
+            let mut remainder_projection = projection.clone();
+            remainder_projection.push(symbolic::MemoryProjection::Slice {
+                offset: Box::new(symbolic::integer(covered, bits, false)),
+                length: Box::new(symbolic::integer(length - covered, bits, false)),
+            });
+            self.record_model(
+                callee,
+                "fixed mutable byte chunks and remainder; shared allocation regions",
+            );
+            return Ok(Some(vec![Return {
+                value: Value::Tuple(vec![
+                    Value::Reference {
+                        allocation: *allocation,
+                        projection: chunk_projection,
+                        mutable: true,
+                    },
+                    Value::Reference {
+                        allocation: *allocation,
+                        projection: remainder_projection,
+                        mutable: true,
+                    },
+                ]),
+                conditions: state.conditions.clone(),
+                memory: state.memory.clone(),
+            }]));
+        }
         let parent = self.tcx.parent(callee);
         let name = self.tcx.item_name(callee);
         let trait_id = if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: true }) {

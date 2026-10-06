@@ -708,3 +708,14 @@ panic helper. Strings receive no length, content, equality or pointer semantics;
 string-reference storage remains unknown. Original host/ARM regressions check guarded/unbounded
 expect paths, application helper identities and rejected unsupported operations. A guard mutation
 refutes, and native execution independently checks the shared-reference cases.
+
+
+## Stage 39: allocation-backed local bytes and finite chunk views
+
+Local mutable byte references use tracked allocations across calls and returns. Prefix views and
+copy_from_slice update the original allocation. Compiler-identified byte-slice as_chunks_mut returns
+chunk and remainder projections into one allocation, checking nonzero width and finite bounds. Chunk
+writes translate directly to parent byte offsets. Symbolic lengths, excessive views and unresolved
+root aliases remain UNKNOWN. Fixed byte post-state contracts support checked literal indices.
+Original host/ARM cases exercise helper writes, returned views, disjoint copies, parent updates,
+impostor methods and failure/unknown cases; native replay and a mutation verify writes.

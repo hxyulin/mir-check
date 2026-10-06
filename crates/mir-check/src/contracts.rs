@@ -95,14 +95,34 @@ fn evaluate(
             let index = index
                 .base10_parse::<usize>()
                 .map_err(|error| error.to_string())?;
-            let Value::Elements(elements) = evaluate(&expr.expr, bindings, pointer_bits, None)?
-            else {
-                return Err("contract indexing requires a fixed non-byte array".to_owned());
-            };
-            elements
-                .get(index)
-                .cloned()
-                .ok_or("contract array index is out of bounds".to_owned())
+            match evaluate(&expr.expr, bindings, pointer_bits, None)? {
+                Value::Elements(elements) => elements
+                    .get(index)
+                    .cloned()
+                    .ok_or("contract array index is out of bounds".to_owned()),
+                Value::Bytes { length, data } => {
+                    let (length, bits, signed) = length.integer()?;
+                    if signed || bits != pointer_bits {
+                        return Err("contract byte length must be target usize".to_owned());
+                    }
+                    let Some(crate::solver::ground::Constant::BitVec {
+                        value: length,
+                        bits,
+                    }) = crate::solver::ground::constant(&length)
+                    else {
+                        return Err("contract byte indexing needs a fixed array length".to_owned());
+                    };
+                    if bits != pointer_bits || index as u128 >= length {
+                        return Err("contract byte array index is out of bounds".to_owned());
+                    }
+                    Ok(Value::Int {
+                        expression: format!("(select {data} (_ bv{index} {pointer_bits}))"),
+                        bits: 8,
+                        signed: false,
+                    })
+                }
+                _ => Err("contract indexing requires a fixed array".to_owned()),
+            }
         }
         Expr::Cast(expr) => {
             let syn::Type::Path(ty) = expr.ty.as_ref() else {
@@ -474,5 +494,50 @@ mod tests {
         }
         assert!(uses_post_state("final_state ==").is_err());
         assert!(uses_post_state("unsupported(final_state)").is_err());
+    }
+    #[test]
+    fn byte_contract_indices_require_fixed_target_lengths_and_valid_literal_bounds() {
+        use super::{BTreeMap, Value, predicate, symbolic};
+        for bits in [32, 64] {
+            let mut bindings = BTreeMap::new();
+            bindings.insert(
+                "bytes".to_owned(),
+                Value::Bytes {
+                    length: Box::new(symbolic::integer(3, bits, false)),
+                    data: "buffer".to_owned(),
+                },
+            );
+            let valid = predicate("bytes[2] == 7_u8", &bindings, bits).unwrap();
+            assert!(valid.contains(&format!("(select buffer (_ bv2 {bits}))")));
+            for expression in [
+                "bytes[3] == 7",
+                "bytes[0_i32] == 7",
+                "bytes[-1] == 7",
+                "bytes[1 + 1] == 7",
+            ] {
+                assert!(
+                    predicate(expression, &bindings, bits).is_err(),
+                    "{expression}"
+                );
+            }
+            for length in [
+                Value::Int {
+                    expression: "n".to_owned(),
+                    bits,
+                    signed: false,
+                },
+                symbolic::integer(3, bits, true),
+                symbolic::integer(3, 8, false),
+            ] {
+                bindings.insert(
+                    "bytes".to_owned(),
+                    Value::Bytes {
+                        length: Box::new(length),
+                        data: "buffer".to_owned(),
+                    },
+                );
+                assert!(predicate("bytes[0] == 7", &bindings, bits).is_err());
+            }
+        }
     }
 }

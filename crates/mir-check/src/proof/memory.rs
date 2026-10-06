@@ -110,8 +110,34 @@ impl<'tcx> Engine<'tcx> {
             .and_then(Option::as_ref)
             .cloned()
             .ok_or("reference points to dead or uninitialized storage")?;
-        for element in projection {
-            value = self.memory_projection(value, element, conditions)?;
+        let mut projections = projection.iter().peekable();
+        while let Some(element) = projections.next() {
+            if let MemoryProjection::Chunks { width, count } = element
+                && let Some(MemoryProjection::Index(index)) = projections.peek()
+            {
+                let bits = u32::from(self.tcx.sess.target.pointer_width);
+                self.memory_bounds(
+                    index,
+                    &symbolic::integer(*count as u128, bits, false),
+                    conditions,
+                )?;
+                let offset = symbolic::binary(
+                    "mul",
+                    (**index).clone(),
+                    symbolic::integer(*width as u128, bits, false),
+                )?;
+                value = self.memory_projection(
+                    value,
+                    &MemoryProjection::Slice {
+                        offset: Box::new(offset),
+                        length: Box::new(symbolic::integer(*width as u128, bits, false)),
+                    },
+                    conditions,
+                )?;
+                projections.next();
+            } else {
+                value = self.memory_projection(value, element, conditions)?;
+            }
         }
         Ok(value)
     }
@@ -176,6 +202,52 @@ impl<'tcx> Engine<'tcx> {
                     bits: 8,
                     signed: false,
                 })
+            }
+            (
+                MemoryProjection::Slice { offset, length },
+                Value::Bytes {
+                    data,
+                    length: capacity,
+                },
+            ) => {
+                let valid_offset =
+                    symbolic::binary("le", (**offset).clone(), (*capacity).clone())?.boolean()?;
+                let available = symbolic::binary("sub", (*capacity).clone(), (**offset).clone())?;
+                let valid_length =
+                    symbolic::binary("le", (**length).clone(), available)?.boolean()?;
+                let safe = format!("(and {valid_offset} {valid_length})");
+                if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&safe)]].concat())? {
+                    return Err("byte view lacks proven region bounds".to_owned());
+                }
+                let (offset, bits, signed) = offset.integer()?;
+                if signed {
+                    return Err("signed byte view offset".to_owned());
+                }
+                Ok(Value::Bytes {
+                    length: length.clone(),
+                    data: format!(
+                        "(lambda ((view_index (_ BitVec {bits}))) (select {data} (bvadd {offset} view_index)))"
+                    ),
+                })
+            }
+            (MemoryProjection::Chunks { width, count }, bytes @ Value::Bytes { .. }) => {
+                let bits = u32::from(self.tcx.sess.target.pointer_width);
+                let mut chunks = Vec::with_capacity(*count);
+                for index in 0..*count {
+                    chunks.push(self.memory_projection(
+                        bytes.clone(),
+                        &MemoryProjection::Slice {
+                            offset: Box::new(symbolic::integer(
+                                (index * width) as u128,
+                                bits,
+                                false,
+                            )),
+                            length: Box::new(symbolic::integer(*width as u128, bits, false)),
+                        },
+                        conditions,
+                    )?);
+                }
+                Ok(Value::Elements(chunks))
             }
             _ => Err("unsupported memory projection".to_owned()),
         }
@@ -358,6 +430,42 @@ impl<'tcx> Engine<'tcx> {
             *storage = value;
             return Ok(());
         };
+        if let MemoryProjection::Slice { offset, length } = projection {
+            if let Some((MemoryProjection::Index(index), tail)) = rest.split_first() {
+                // Prove the parent region before translating its element address.
+                self.memory_projection(storage.clone(), projection, conditions)?;
+                self.memory_bounds(index, length, conditions)?;
+                let absolute = symbolic::binary("add", (**offset).clone(), (**index).clone())?;
+                let mut translated = vec![MemoryProjection::Index(Box::new(absolute))];
+                translated.extend_from_slice(tail);
+                return self.write_projection(storage, &translated, value, conditions);
+            }
+            let mut view = self.memory_projection(storage.clone(), projection, conditions)?;
+            self.write_projection(&mut view, rest, value, conditions)?;
+            return self.merge_byte_view(storage, offset, length, view, conditions);
+        }
+        if let MemoryProjection::Chunks { width, count } = projection {
+            let Some((MemoryProjection::Index(index), rest)) = rest.split_first() else {
+                return Err("whole chunk view assignment is not modeled".to_owned());
+            };
+            let bits = u32::from(self.tcx.sess.target.pointer_width);
+            self.memory_bounds(
+                index,
+                &symbolic::integer(*count as u128, bits, false),
+                conditions,
+            )?;
+            let offset = symbolic::binary(
+                "mul",
+                (**index).clone(),
+                symbolic::integer(*width as u128, bits, false),
+            )?;
+            let mut translated = vec![MemoryProjection::Slice {
+                offset: Box::new(offset),
+                length: Box::new(symbolic::integer(*width as u128, bits, false)),
+            }];
+            translated.extend_from_slice(rest);
+            return self.write_projection(storage, &translated, value, conditions);
+        }
         // Establish downcast/bounds conditions before mutating the selected field.
         self.memory_projection(storage.clone(), projection, conditions)?;
         match (projection, storage) {
@@ -399,10 +507,78 @@ impl<'tcx> Engine<'tcx> {
                     return Err("byte write has non-byte value".to_owned());
                 }
                 *data = format!("(store {data} {} {expression})", index.integer()?.0);
+                if data.len() > MAX_QUERY_BYTES {
+                    return Err("byte storage expression exceeds the query-size budget".to_owned());
+                }
                 Ok(())
             }
             _ => Err("unsupported projected memory write".to_owned()),
         }
+    }
+
+    fn merge_byte_view(
+        &self,
+        storage: &mut Value,
+        offset: &Value,
+        length: &Value,
+        view: Value,
+        conditions: &[String],
+    ) -> Result<(), String> {
+        let Value::Bytes {
+            length: capacity,
+            data,
+        } = storage
+        else {
+            return Err("byte view requires byte allocation storage".to_owned());
+        };
+        let Value::Bytes {
+            length: source_length,
+            data: source,
+        } = view
+        else {
+            return Err("byte view assignment requires a byte array".to_owned());
+        };
+        let equal = symbolic::binary("eq", (*source_length).clone(), length.clone())?.boolean()?;
+        if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&equal)]].concat())? {
+            return Err("byte view assignment changed its length".to_owned());
+        }
+        let Some(crate::solver::ground::Constant::BitVec { value: count, .. }) =
+            crate::solver::ground::constant(&capacity.integer()?.0)
+        else {
+            return Err("byte view updates need a fixed allocation capacity".to_owned());
+        };
+        if count > 128 {
+            return Err("byte view allocation exceeds the 128-byte budget".to_owned());
+        }
+        let (offset, bits, signed) = offset.integer()?;
+        let (length, length_bits, length_signed) = length.integer()?;
+        if signed || length_signed || bits != length_bits {
+            return Err("byte view index type mismatch".to_owned());
+        }
+        let fixed_length = match crate::solver::ground::constant(&length) {
+            Some(crate::solver::ground::Constant::BitVec { value, .. }) if value <= count => {
+                Some(value)
+            }
+            _ => None,
+        };
+        let mut copied = data.clone();
+        for index in 0..fixed_length.unwrap_or(count) {
+            let cell = format!("(_ bv{index} {bits})");
+            let target = format!("(bvadd {offset} {cell})");
+            let byte = if fixed_length.is_some() {
+                format!("(select {source} {cell})")
+            } else {
+                format!(
+                    "(ite (bvult {cell} {length}) (select {source} {cell}) (select {data} {target}))"
+                )
+            };
+            copied = format!("(store {copied} {target} {byte})");
+        }
+        *data = copied;
+        if data.len() > MAX_QUERY_BYTES {
+            return Err("byte view expression exceeds the query-size budget".to_owned());
+        }
+        Ok(())
     }
 
     pub(super) fn callback_environment(
@@ -482,9 +658,6 @@ impl<'tcx> Engine<'tcx> {
                 }
                 Ok(())
             }
-            Value::MutableBytes { .. } => {
-                Err("untracked mutable byte view cannot be stored in an aggregate".to_owned())
-            }
             Value::Adt { fields, .. } => {
                 for (_, value) in fields {
                     Self::validate_reference_graph(value, state, incoming, visited)?;
@@ -550,9 +723,6 @@ impl<'tcx> Engine<'tcx> {
             value @ (Value::Reference { .. } | Value::Cell { .. }) => {
                 Self::validate_reference_graph(&value, state, Some(incoming), &mut Vec::new())?;
                 Ok(value)
-            }
-            Value::MutableBytes { .. } => {
-                Err("mutable local borrows cannot escape their frame".to_owned())
             }
             Value::Adt {
                 name,
@@ -654,17 +824,5 @@ mod tests {
             Some(Value::Tuple(vec![reference(0, false)])),
         ]);
         Engine::validate_reference_graph(&borrowed, &state, Some(2), &mut Vec::new()).unwrap();
-    }
-
-    #[test]
-    fn untracked_byte_views_do_not_gain_an_allocation_by_being_nested() {
-        let borrowed = Value::Tuple(vec![Value::MutableBytes {
-            owner: 0,
-            length: Box::new(symbolic::integer(2, 64, false)),
-        }]);
-        let state = state(Vec::new());
-        assert!(
-            Engine::validate_reference_graph(&borrowed, &state, None, &mut Vec::new()).is_err()
-        );
     }
 }

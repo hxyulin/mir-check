@@ -282,3 +282,7 @@ Evaluated static string literals can pass through shared dereferences, reborrows
 returns as opaque immutable values. This reaches Option expect panic boundaries without modeling
 string contents, lengths, equality or pointer identity. Mutable string-reference storage remains
 UNKNOWN.
+
+Local byte borrows and finite as_chunks_mut views retain tracked allocation identities across
+calls. Prefix copies and literal byte-index contracts preserve parent storage. Unsupported
+lengths and unresolved aliases remain UNKNOWN.
