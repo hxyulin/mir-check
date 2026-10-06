@@ -246,3 +246,9 @@ borrows escaping, including references hidden in caller storage. FnMut callback 
 preserve owned capture state and external writes across calls. General root aliasing and legacy
 mutable byte captures remain unknown. Synthetic host/ARM tests cover Zip/Flatten, reference
 returns, stateful callbacks and rejected mutations.
+
+Float inputs, constants and from_bits retain exact storage encodings. Moves, selection, negation,
+abs and clamp preserve those bits; to_bits and same-width integer/float transmutes observe them.
+Computed arithmetic/cast results get a stable encoding constrained to their numeric value. NaN
+arithmetic outputs conservatively permit every encoding, including signaling payloads; bit-level
+counterexamples may not replay on the target. Float remainder remains unknown.

@@ -316,10 +316,10 @@ impl<'tcx> Engine<'tcx> {
             });
         }
         if let Some(bits) = self.float_type(ty) {
-            return Ok(Value::Float {
-                expression: self.fresh(&symbolic::float_sort(bits)),
+            return Ok(symbolic::float_from_bits(
+                self.fresh(&format!("(_ BitVec {bits})")),
                 bits,
-            });
+            ));
         }
         match ty.kind() {
             ty::Bool => Ok(Value::Bool(self.fresh("Bool"))),
@@ -1101,7 +1101,7 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn rvalue(
-        &self,
+        &mut self,
         id: DefId,
         body: &Body<'tcx>,
         state: &mut State,
@@ -1197,7 +1197,8 @@ impl<'tcx> Engine<'tcx> {
                     BinOp::Ge => "ge",
                     other => return Err(format!("unsupported binary operation {other:?}")),
                 };
-                symbolic::binary(operation, left, right)
+                let value = symbolic::binary(operation, left, right)?;
+                Ok(self.materialize_float(value, state))
             }
             Rvalue::UnaryOp(operation, operand) => {
                 let value = self.operand(id, body, state, operand)?;
@@ -1207,10 +1208,7 @@ impl<'tcx> Engine<'tcx> {
                     value
                 };
                 match (operation, value) {
-                    (UnOp::Neg, Value::Float { expression, bits }) => Ok(Value::Float {
-                        expression: format!("(fp.neg {expression})"),
-                        bits,
-                    }),
+                    (UnOp::Neg, value @ Value::Float { .. }) => symbolic::float_negate(value),
                     (UnOp::Not, Value::Bool(expression)) => {
                         Ok(Value::Bool(symbolic::not(&expression)))
                     }
@@ -1256,11 +1254,29 @@ impl<'tcx> Engine<'tcx> {
                 symbolic::cast(value, bits, signed)
             }
             Rvalue::Cast(CastKind::IntToFloat | CastKind::FloatToFloat, operand, target) => {
-                symbolic::float_cast(
+                let value = symbolic::float_cast(
                     self.operand(id, body, state, operand)?,
                     self.float_type(*target)
                         .ok_or("unsupported float cast target")?,
-                )
+                )?;
+                Ok(self.materialize_float(value, state))
+            }
+            Rvalue::Cast(CastKind::Transmute, operand, target) => {
+                let source = operand.ty(&body.local_decls, self.tcx);
+                let value = self.operand(id, body, state, operand)?;
+                if let Some(bits) = self.float_type(source)
+                    && let Some((target_bits, signed)) = self.integer_type(*target)
+                    && target_bits == bits
+                {
+                    return self.float_to_bits(value, bits, signed);
+                }
+                if let Some((source_bits, _)) = self.integer_type(source)
+                    && let Some(bits) = self.float_type(*target)
+                    && bits == source_bits
+                {
+                    return Ok(symbolic::float_from_bits(value.integer()?.0, bits));
+                }
+                Err("only same-width integer/float transmute is modeled".to_owned())
             }
             Rvalue::Cast(CastKind::FloatToInt, operand, target) => {
                 let (bits, signed) = self

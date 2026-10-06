@@ -2,6 +2,52 @@ use super::*;
 use rustc_span::Symbol;
 
 impl<'tcx> Engine<'tcx> {
+    pub(super) fn materialize_float(&mut self, value: Value, state: &mut State) -> Value {
+        let Value::Float {
+            expression,
+            bits,
+            raw_bits: None,
+        } = value
+        else {
+            return value;
+        };
+        let raw_bits = self.fresh(&format!("(_ BitVec {bits})"));
+        let Value::Float {
+            expression: decoded,
+            ..
+        } = symbolic::float_from_bits(raw_bits.clone(), bits)
+        else {
+            unreachable!("bit decoding constructs a float");
+        };
+        // SMT represents all NaN encodings as one value. This equality allows every
+        // NaN payload/sign while fixing the exact encoding of other IEEE values.
+        state.conditions.push(format!("(= {decoded} {expression})"));
+        Value::Float {
+            expression,
+            bits,
+            raw_bits: Some(raw_bits),
+        }
+    }
+
+    pub(super) fn float_to_bits(
+        &self,
+        value: Value,
+        width: u32,
+        signed: bool,
+    ) -> Result<Value, String> {
+        let Value::Float { bits, raw_bits, .. } = value else {
+            return Err("float bit observation requires a float".to_owned());
+        };
+        if bits != width {
+            return Err("float bit observation width mismatch".to_owned());
+        }
+        Ok(Value::Int {
+            expression: raw_bits.ok_or("float result has no tracked storage encoding")?,
+            bits,
+            signed,
+        })
+    }
+
     pub(super) fn builtin(
         &mut self,
         caller_body: &Body<'tcx>,
@@ -77,13 +123,23 @@ impl<'tcx> Engine<'tcx> {
             && self.float_type(signature.output()).is_some()
             && self.tcx.is_intrinsic(callee, Symbol::intern("fabs"))
         {
-            let [Value::Float { expression, bits }] = values else {
+            let [
+                Value::Float {
+                    expression,
+                    bits,
+                    raw_bits,
+                },
+            ] = values
+            else {
                 return Err("float absolute value requires a modeled float".to_owned());
             };
             self.record_model(callee, "IEEE floating-point absolute value");
             return Ok(Some(Value::Float {
                 expression: format!("(fp.abs {expression})"),
                 bits: *bits,
+                raw_bits: raw_bits.as_ref().map(|raw| {
+                    format!("(bvand {raw} (_ bv{} {bits}))", (1_u128 << (bits - 1)) - 1)
+                }),
             }));
         }
         let float_min = ["minimum_number_nsz_f32", "minimum_number_nsz_f64"]
@@ -104,6 +160,7 @@ impl<'tcx> Engine<'tcx> {
                 Value::Float {
                     expression: left,
                     bits,
+                    ..
                 },
                 Value::Float {
                     expression: right, ..
@@ -118,14 +175,16 @@ impl<'tcx> Engine<'tcx> {
                 callee,
                 "IEEE min/max; numeric NaN fallback and either signed-zero tie",
             );
-            return Ok(Some(Value::Float {
+            let result = Value::Float {
                 expression: format!(
                     "(ite (fp.isNaN {left}) {right} (ite (fp.isNaN {right}) {left} \
                      (ite (fp.eq {left} {right}) (ite {tie} {left} {right}) \
                      (ite ({comparison} {left} {right}) {left} {right}))))"
                 ),
                 bits: *bits,
-            }));
+                raw_bits: None,
+            };
+            return Ok(Some(self.materialize_float(result, state)));
         }
         let parent = self.tcx.parent(callee);
         let trait_id = if self.tcx.def_kind(parent) == DefKind::Trait {
@@ -142,7 +201,58 @@ impl<'tcx> Engine<'tcx> {
             None
         };
         let name = self.tcx.item_name(callee);
-        if self.tcx.crate_name(callee.krate) == Symbol::intern("core")
+        if self
+            .tcx
+            .lang_items()
+            .get(LangItem::SliceLen)
+            .is_some_and(|id| id.krate == callee.krate)
+            && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+            && self
+                .float_type(
+                    self.tcx
+                        .type_of(parent)
+                        .instantiate(self.tcx, args)
+                        .skip_norm_wip(),
+                )
+                .is_some()
+            && signature.inputs().len() == 1
+        {
+            if name == Symbol::intern("to_bits")
+                && let Some(width) = self.float_type(signature.inputs()[0])
+                && self.integer_type(signature.output()) == Some((width, false))
+            {
+                let [value] = values else {
+                    return Err("float bit observation requires one float".to_owned());
+                };
+                self.record_model(
+                    callee,
+                    "exact floating-point storage bits, including NaN payloads",
+                );
+                return self.float_to_bits(value.clone(), width, false).map(Some);
+            }
+            if name == Symbol::intern("from_bits")
+                && let Some(width) = self.float_type(signature.output())
+                && self.integer_type(signature.inputs()[0]) == Some((width, false))
+            {
+                let [value] = values else {
+                    return Err("float bit construction requires one integer".to_owned());
+                };
+                let (expression, bits, _) = value.integer()?;
+                if bits != width {
+                    return Err("float bit construction width mismatch".to_owned());
+                }
+                self.record_model(
+                    callee,
+                    "exact floating-point construction from storage bits",
+                );
+                return Ok(Some(symbolic::float_from_bits(expression, bits)));
+            }
+        }
+        if self
+            .tcx
+            .lang_items()
+            .get(LangItem::SliceLen)
+            .is_some_and(|id| id.krate == callee.krate)
             && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
             && self
                 .float_type(
@@ -165,7 +275,11 @@ impl<'tcx> Engine<'tcx> {
                 "(and (not (fp.isNaN {expression})) (not (fp.isInfinite {expression})))"
             ))));
         }
-        if self.tcx.crate_name(callee.krate) == Symbol::intern("core")
+        if self
+            .tcx
+            .lang_items()
+            .get(LangItem::SliceLen)
+            .is_some_and(|id| id.krate == callee.krate)
             && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
             && self
                 .float_type(
@@ -184,12 +298,20 @@ impl<'tcx> Engine<'tcx> {
             && self.float_type(signature.output()).is_some()
         {
             let [
-                Value::Float { expression, bits },
                 Value::Float {
-                    expression: min, ..
+                    expression,
+                    bits,
+                    raw_bits,
                 },
                 Value::Float {
-                    expression: max, ..
+                    expression: min,
+                    raw_bits: min_raw,
+                    ..
+                },
+                Value::Float {
+                    expression: max,
+                    raw_bits: max_raw,
+                    ..
                 },
             ] = values
             else {
@@ -215,6 +337,16 @@ impl<'tcx> Engine<'tcx> {
                      (ite (fp.gt {expression} {max}) {max} {expression}))"
                 ),
                 bits: *bits,
+                raw_bits: raw_bits
+                    .as_ref()
+                    .zip(min_raw.as_ref())
+                    .zip(max_raw.as_ref())
+                    .map(|((raw, min_raw), max_raw)| {
+                        format!(
+                            "(ite (fp.lt {expression} {min}) {min_raw} \
+                         (ite (fp.gt {expression} {max}) {max_raw} {raw}))"
+                        )
+                    }),
             }));
         }
         if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })

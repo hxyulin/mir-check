@@ -2213,7 +2213,7 @@ fn floating_paths_preserve_nan_zero_rounding_saturation_and_call_bounds_on_host_
         ("guarded_call", ProofStatus::Proved),
         ("bad_call", ProofStatus::Refuted),
         ("unsupported_remainder", ProofStatus::Unknown),
-        ("unsupported_bits", ProofStatus::Unknown),
+        ("unsupported_bits", ProofStatus::Proved),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let args = target
@@ -2321,7 +2321,7 @@ fn float_clamp_checks_bounds_and_preserves_nan_and_zero_on_host_and_arm() {
         ("bad_nan", ProofStatus::Refuted),
         ("bad_zero", ProofStatus::Refuted),
         ("user_method", ProofStatus::Refuted),
-        ("unsupported", ProofStatus::Unknown),
+        ("unsupported", ProofStatus::Proved),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let args = target
@@ -3131,7 +3131,7 @@ pub fn unsupported(value: f32) -> u32 { dependency::bits(value) }
                 ("guarded", ProofStatus::Proved),
                 ("bad_call", ProofStatus::Refuted),
                 ("overflow", ProofStatus::Refuted),
-                ("unsupported", ProofStatus::Unknown),
+                ("unsupported", ProofStatus::Proved),
             ] {
                 let proof = report
                     .functions

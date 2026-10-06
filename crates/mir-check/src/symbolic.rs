@@ -1,5 +1,5 @@
 mod floating;
-pub use floating::{float, float_cast, float_sort};
+pub use floating::{float, float_cast, float_from_bits, float_negate};
 
 pub const MAX_REPEAT_VALUES: usize = 256;
 
@@ -21,6 +21,7 @@ pub enum Value {
     Float {
         expression: String,
         bits: u32,
+        raw_bits: Option<String>,
     },
     Bytes {
         length: Box<Value>,
@@ -348,14 +349,23 @@ pub fn select_element(elements: &[Value], index: &Value) -> Result<Value, String
                 Value::Bool(format!("(ite {condition} {expression} {otherwise})"))
             }
             (
-                Value::Float { expression, bits },
+                Value::Float {
+                    expression,
+                    bits,
+                    raw_bits,
+                },
                 Value::Float {
                     expression: otherwise,
                     bits: other_bits,
+                    raw_bits: other_raw_bits,
                 },
             ) if *bits == other_bits => Value::Float {
                 expression: format!("(ite {condition} {expression} {otherwise})"),
                 bits: *bits,
+                raw_bits: raw_bits
+                    .as_ref()
+                    .zip(other_raw_bits)
+                    .map(|(left, right)| format!("(ite {condition} {left} {right})")),
             },
             _ => return Err("array choice only models compatible scalar values".to_owned()),
         };

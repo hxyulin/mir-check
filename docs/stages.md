@@ -610,3 +610,18 @@ unknown. Native tests exercise 700 bounded calls, stateful callback cases and ne
 catches. A struct-field swap mutation refutes, and four internal graph regressions cover hidden
 local escapes, dead storage, nested incoming references and untracked byte views. These tests are
 regression evidence rather than a completed alias/lifetime audit.
+
+## Stage 33: floating-point storage encodings
+
+Float values retain IEEE storage bits alongside numeric SMT values. Inputs, evaluated constants,
+from_bits, moves, array selection, negation, abs and clamp preserve the selected encoding,
+including quiet/signaling NaN signs and payloads. to_bits and same-width integer/float transmutes
+observe that encoding. Arithmetic/cast results get one stable encoding constrained to their
+numeric IEEE value. NaN arithmetic outputs conservatively allow every encoding, including
+signaling NaNs; bit-level counterexamples can therefore fail to replay on the target.
+
+The synthetic storage fixture checks 17 roots on host/ARM: 13 prove, three refute and one remains
+unknown. A sign-mask mutation refutes; native cases cover zero signs, subnormals, infinities,
+NaN input encodings and 1,024 integer-cast/arithmetic inputs. Checked sidecars also force actual
+core to_bits/from_bits bodies through typed transmutes without library summaries. Float remainder
+and wider formats remain unknown.

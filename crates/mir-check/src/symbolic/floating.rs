@@ -8,17 +8,34 @@ fn format(bits: u32) -> (u32, u32) {
     }
 }
 
-pub fn float_sort(bits: u32) -> String {
-    let (exponent, significand) = format(bits);
-    format!("(_ FloatingPoint {exponent} {significand})")
+pub fn float(raw: u128, bits: u32) -> Value {
+    float_from_bits(format!("(_ bv{raw} {bits})"), bits)
 }
 
-pub fn float(raw: u128, bits: u32) -> Value {
+pub fn float_from_bits(raw_bits: String, bits: u32) -> Value {
     let (exponent, significand) = format(bits);
     Value::Float {
-        expression: format!("((_ to_fp {exponent} {significand}) (_ bv{raw} {bits}))"),
+        expression: format!("((_ to_fp {exponent} {significand}) {raw_bits})"),
         bits,
+        raw_bits: Some(raw_bits),
     }
+}
+
+pub fn float_negate(value: Value) -> Result<Value, String> {
+    let Value::Float {
+        expression,
+        bits,
+        raw_bits,
+    } = value
+    else {
+        return Err("floating-point negation requires a float".to_owned());
+    };
+    Ok(Value::Float {
+        expression: format!("(fp.neg {expression})"),
+        bits,
+        raw_bits: raw_bits
+            .map(|raw| format!("(bvxor {raw} (_ bv{} {bits}))", 1_u128 << (bits - 1))),
+    })
 }
 
 pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, String> {
@@ -26,10 +43,12 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
         Value::Float {
             expression: left,
             bits,
+            ..
         },
         Value::Float {
             expression: right,
             bits: other,
+            ..
         },
     ) = (left, right)
     else {
@@ -61,6 +80,7 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
     Ok(Value::Float {
         expression: format!("({operator} RNE {left} {right})"),
         bits,
+        raw_bits: None,
     })
 }
 
@@ -73,9 +93,14 @@ pub fn float_cast(value: Value, bits: u32) -> Result<Value, String> {
         Value::Float {
             expression,
             bits: old_bits,
+            raw_bits,
         } => {
             if bits == old_bits {
-                return Ok(Value::Float { expression, bits });
+                return Ok(Value::Float {
+                    expression,
+                    bits,
+                    raw_bits,
+                });
             }
             ("to_fp", expression)
         }
@@ -84,6 +109,7 @@ pub fn float_cast(value: Value, bits: u32) -> Result<Value, String> {
     Ok(Value::Float {
         expression: format!("((_ {operator} {exponent} {significand}) RNE {expression})"),
         bits,
+        raw_bits: None,
     })
 }
 
@@ -91,6 +117,7 @@ pub fn integer_cast(value: Value, bits: u32, signed: bool) -> Result<Value, Stri
     let Value::Float {
         expression,
         bits: source_bits,
+        ..
     } = value
     else {
         return Err("expected a floating-point value".to_owned());
