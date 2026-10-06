@@ -568,8 +568,18 @@ impl<'tcx> Engine<'tcx> {
             return Err("call arguments do not match the MIR body".to_owned());
         }
         let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
-        let bindings = self.configured_bindings(body, &snapshots, instance)?;
         let contracts = self.configured_contracts(instance)?;
+        let binds_contract_names = contracts
+            .iter()
+            .any(|contract| !matches!(contract.kind, ContractKind::NoPanic))
+            || self
+                .specification(instance)?
+                .is_some_and(|spec| !spec.arguments.is_empty());
+        let bindings = if binds_contract_names {
+            self.configured_bindings(body, &snapshots, instance)?
+        } else {
+            BTreeMap::new()
+        };
         if bindings.keys().any(|name| name.starts_with("final_"))
             && contracts
                 .iter()
@@ -1342,7 +1352,9 @@ impl<'tcx> Engine<'tcx> {
                 {
                     return Ok(symbolic::float_from_bits(value.integer()?.0, bits));
                 }
-                Err("only same-width integer/float transmute is modeled".to_owned())
+                Err(format!(
+                    "unsupported transmute from {source:?} to {target:?}"
+                ))
             }
             Rvalue::Cast(CastKind::FloatToInt, operand, target) => {
                 let (bits, signed) = self

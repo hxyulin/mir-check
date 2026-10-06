@@ -315,3 +315,9 @@ Refuted roots stop after their first counterexample by default; remaining select
 run. --all-failures continues collecting obligations under the existing budgets. Reports include
 stopped_after_counterexample, and saved reports without that field still deserialize. CLI and
 Cargo modes share this policy. A counterexample retains its full query and model.
+
+Ordinary calls omit unused contract name maps and duplicate precondition setup. Actual predicates
+and explicit argument aliases retain validation, while callee snapshots still check storage.
+Compiler-identified scalar static-value hints use independent Boolean choices per call, following
+the intrinsic's formal contract. Both branches are explored. Pointer hints and unsupported
+transmute layouts remain UNKNOWN, with diagnostics naming their source and destination types.

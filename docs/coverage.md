@@ -292,3 +292,13 @@ Original host/ARM cases check mutable region writes, returned views, caller boun
 dispatch, endian boundaries and valid scalar domains. Native tests and failing mutations check
 these effects independently. Byte-source sharing bounds expression growth without increasing
 the query-size cap, and standalone SMT scripts remain available in reports.
+
+Guarded unchecked integer MIR arithmetic generates validity obligations before continuing.
+Compiler runtime-check operands follow the analyzed session's UB/overflow flags, and the actual
+cold-path marker has no runtime effects. Original integer-boundary and host/ARM flag regressions
+check these paths. Unsupported pointer continuations remain UNKNOWN.
+
+Scalar static-value optimization hints produce independent Boolean choices, so both branches
+must be safe. Unused contract name maps do not block dependency execution; declared predicates
+and argument aliases still validate. Integer power currently progresses to a niche-layout
+transmute, which remains unsupported.

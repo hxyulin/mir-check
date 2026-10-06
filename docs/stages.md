@@ -799,3 +799,18 @@ identifies early stops. Cargo forwards the policy to compiler invocations and cl
 settings when the option is absent. Original host/ARM cases compare both policies, preserve
 positive and unknown roots, replay native failures and expose a late failure after removing its
 earlier guard. Caller contracts and postconditions remain checked in either mode.
+
+## Stage 47: avoid unused contract maps and model optimization choices
+
+Ordinary calls build argument name maps only for checked predicates or explicit aliases. Callee
+entry snapshots still validate storage, and preconditions, postconditions and alias conflicts
+retain their checks. Calls without preconditions avoid a duplicate body/snapshot/name-map pass.
+Ambiguous dependency debug names therefore stop blocking ordinary body execution.
+
+The compiler-identified scalar is_val_statically_known intrinsic follows its documented independent
+Boolean choice on each call. Both optimization paths must be safe; the checker does not assume
+a preferred value or stable repeated results. Pointer operands remain unsupported. Typed
+transmute diagnostics identify source and destination types, with unsupported layouts still
+UNKNOWN. Original host/ARM, native branch cases, invalid aliases and a guard mutation exercise
+these changes. Integer power reaches actual checked_pow MIR but remains unknown at a niche
+transmute rather than receiving an unchecked summary.

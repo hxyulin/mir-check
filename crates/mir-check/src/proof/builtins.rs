@@ -122,6 +122,24 @@ impl<'tcx> Engine<'tcx> {
             self.record_model(callee, "optimization-only cold path marker");
             return Ok(Some(Value::Unit));
         }
+        if self
+            .tcx
+            .is_intrinsic(callee, Symbol::intern("is_val_statically_known"))
+            && signature.inputs().len() == 1
+            && signature.output().is_bool()
+            && (signature.inputs()[0].is_bool()
+                || self.integer_type(signature.inputs()[0]).is_some()
+                || self.float_type(signature.inputs()[0]).is_some())
+        {
+            if values.len() != 1 {
+                return Err("static-value hint requires one modeled scalar".to_owned());
+            }
+            self.record_model(
+                callee,
+                "static-value optimization hint; independent Boolean per call",
+            );
+            return Ok(Some(Value::Bool(self.fresh("Bool"))));
+        }
         if let Some(value) = self.core_endian_encoding(callee, args, signature, values)? {
             return Ok(Some(value));
         }
