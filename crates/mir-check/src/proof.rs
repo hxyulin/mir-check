@@ -16,14 +16,15 @@ use std::collections::{BTreeMap, VecDeque};
 const MAX_STEPS: usize = 2048;
 const MAX_CALL_DEPTH: usize = 16;
 const MAX_QUERY_BYTES: usize = 200_000;
-const MAX_INPUT_DEPTH: usize = 8;
-const MAX_INPUT_VALUES: usize = 128;
+const MAX_INPUT_DEPTH: usize = 16;
+const MAX_INPUT_VALUES: usize = 512;
 const MAX_ROOT_SECONDS: u64 = 30;
 
 mod aggregates;
 mod builtins;
 mod constants;
 mod external;
+mod inputs;
 mod integer_intrinsics;
 mod interior;
 mod iterators;
@@ -291,10 +292,10 @@ impl<'tcx> Engine<'tcx> {
         conditions: &mut Vec<String>,
     ) -> Result<Value, String> {
         if self.input_depth >= MAX_INPUT_DEPTH {
-            return Err("input shape exceeds 8 levels of nesting".to_owned());
+            return Err("input shape exceeds 16 levels of nesting".to_owned());
         }
         if self.input_values >= MAX_INPUT_VALUES {
-            return Err("input shape exceeds the 128-value budget".to_owned());
+            return Err("input shape exceeds the 512-value budget".to_owned());
         }
         self.input_depth += 1;
         self.input_values += 1;
@@ -309,6 +310,29 @@ impl<'tcx> Engine<'tcx> {
         ty: Ty<'tcx>,
         conditions: &mut Vec<String>,
     ) -> Result<Value, String> {
+        if let ty::Pat(base, pattern) = ty.kind() {
+            let value = self.argument_value(id, *base, conditions)?;
+            conditions.push(self.input_pattern(*pattern, &value, 0)?);
+            return Ok(value);
+        }
+        if ty.is_char() {
+            let value = Value::Int {
+                expression: self.fresh("(_ BitVec 32)"),
+                bits: 32,
+                signed: false,
+            };
+            let within =
+                symbolic::binary("le", value.clone(), symbolic::integer(0x10ffff, 32, false))?
+                    .boolean()?;
+            let below =
+                symbolic::binary("lt", value.clone(), symbolic::integer(0xd800, 32, false))?
+                    .boolean()?;
+            let above =
+                symbolic::binary("gt", value.clone(), symbolic::integer(0xdfff, 32, false))?
+                    .boolean()?;
+            conditions.push(format!("(and {within} (or {below} {above}))"));
+            return Ok(value);
+        }
         if let Some(value) = self.atomic_shape(ty) {
             return Ok(value);
         }
@@ -395,6 +419,8 @@ impl<'tcx> Engine<'tcx> {
     fn integer_type(&self, ty: Ty<'tcx>) -> Option<(u32, bool)> {
         let pointer_bits = u64::from(self.tcx.sess.target.pointer_width);
         match ty.kind() {
+            ty::Pat(base, _) => self.integer_type(*base),
+            ty::Char => Some((32, false)),
             ty::Int(kind) => Some((kind.bit_width().unwrap_or(pointer_bits) as u32, true)),
             ty::Uint(kind) => Some((kind.bit_width().unwrap_or(pointer_bits) as u32, false)),
             _ => None,

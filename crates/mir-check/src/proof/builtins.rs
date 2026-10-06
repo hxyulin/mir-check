@@ -87,6 +87,10 @@ impl<'tcx> Engine<'tcx> {
         if self.tcx.def_kind(callee) == DefKind::Closure {
             return Ok(None);
         }
+        if let Some(value) = self.nonzero_get(instance, values)? {
+            self.record_model(callee, "nonzero integer value");
+            return Ok(Some(value));
+        }
         if self.tcx.lang_items().get(LangItem::SliceLen) == Some(callee) {
             let [receiver] = values else {
                 return Err("slice len receiver is not modeled".to_owned());

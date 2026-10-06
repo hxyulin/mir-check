@@ -6,6 +6,7 @@ use rustc_middle::mir::Const;
 
 const MAX_CONSTANT_VALUES: usize = 256;
 const MAX_CONSTANT_ELEMENTS: u64 = 128;
+const MAX_CONSTANT_DEPTH: usize = 8;
 
 impl<'tcx> Engine<'tcx> {
     pub(super) fn constant(
@@ -40,7 +41,7 @@ impl<'tcx> Engine<'tcx> {
         depth: usize,
         values: &mut usize,
     ) -> Result<Value, String> {
-        if depth >= MAX_INPUT_DEPTH || *values >= MAX_CONSTANT_VALUES {
+        if depth >= MAX_CONSTANT_DEPTH || *values >= MAX_CONSTANT_VALUES {
             return Err("unsupported constant shape exceeds depth or value budget".to_owned());
         }
         *values += 1;

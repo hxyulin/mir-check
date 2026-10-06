@@ -3,7 +3,8 @@ use rustc_index::IndexVec;
 
 const MAX_ARRAY_BYTES: u64 = 128;
 const MAX_ARRAY_ELEMENTS: usize = 16;
-const MAX_ENUM_VARIANTS: usize = 16;
+const MAX_INPUT_ELEMENTS: usize = 256;
+const MAX_ENUM_VARIANTS: usize = 64;
 
 impl<'tcx> Engine<'tcx> {
     pub(super) fn enum_input(
@@ -16,7 +17,7 @@ impl<'tcx> Engine<'tcx> {
             return Err("expected an enum type".to_owned());
         };
         if def.variants().is_empty() || def.variants().len() > MAX_ENUM_VARIANTS {
-            return Err("enum inputs need between 1 and 16 variants".to_owned());
+            return Err("enum inputs need between 1 and 64 variants".to_owned());
         }
         let (bits, signed) = self
             .integer_type(ty.discriminant_ty(self.tcx))
@@ -30,7 +31,7 @@ impl<'tcx> Engine<'tcx> {
         let mut valid = Vec::new();
         for (index, variant) in def.variants().iter_enumerated() {
             if self.input_values >= MAX_INPUT_VALUES {
-                return Err("input shape exceeds the 128-value budget".to_owned());
+                return Err("input shape exceeds the 512-value budget".to_owned());
             }
             self.input_values += 1;
             let tag = def.discriminant_for_variant(self.tcx, index).val;
@@ -114,8 +115,8 @@ impl<'tcx> Engine<'tcx> {
         let count = count
             .try_to_target_usize(self.tcx)
             .ok_or("unknown input array length")?;
-        if count > MAX_ARRAY_ELEMENTS as u64 {
-            return Err("fixed array input exceeds 16 elements".to_owned());
+        if count > MAX_INPUT_ELEMENTS as u64 {
+            return Err("fixed array input exceeds 256 elements".to_owned());
         }
         Ok(Value::Elements(
             (0..count)

@@ -96,7 +96,7 @@ fn evaluated_constant_tables_keep_bounds_storage_bits_and_shape_limits_on_host_a
         ("element_limit", ProofStatus::Unknown),
         ("value_limit", ProofStatus::Unknown),
         ("ambiguous_exhibit", ProofStatus::Unknown),
-        ("root_array_limit", ProofStatus::Unknown),
+        ("root_array_limit", ProofStatus::Proved),
         ("interior_table", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {

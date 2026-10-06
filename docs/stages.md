@@ -739,3 +739,13 @@ and construction borrows condition strings instead of cloning an intermediate li
 model-freshness and replay regressions verify answers; removing the global option breaks the new
 test. Synthetic optimized workloads improved from 698 to 47.5 ms for 256 growing queries, and from
 187 to 99 ms for constructing 5,000 queries, using six alternating samples.
+
+## Stage 42: broader bounded roots and scalar validity
+
+Root inputs allow 512 values, 16 nested levels, 256 non-byte array elements and 64 enum variants.
+Constants retain their separate eight-level, 256-value and 128-element budgets. Integer pattern
+ranges and alternatives constrain root values to their compiler-described domains. Unicode char
+inputs exclude surrogates and values above U+10FFFF. The actual core NonZero getter exposes the
+modeled scalar; unrelated get methods execute normal MIR. No constructor invariants are inferred for
+other structs. Original host/ARM roots, native valid-domain cases, bound failures and a changed
+divisor exercise these extensions. Exhausted or unresolved domains remain UNKNOWN.

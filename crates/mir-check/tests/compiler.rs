@@ -1902,7 +1902,7 @@ fn cargo_entries_select_workspace_roots_and_missing_or_failed_roots_cannot_pass(
                 "#![no_std]\npub fn read(value: u8) -> u8 { value }\n\
                  pub fn bad(value: u8) -> u8 { value + 1 }\n"
             } else {
-                "#![no_std]\npub fn read(value: char) -> char { value }\n"
+                "#![no_std]\npub fn read(value: fn(u8) -> u8) -> u8 { value(0) }\n"
             },
         )
         .unwrap();
@@ -1954,7 +1954,7 @@ fn cargo_entries_select_workspace_roots_and_missing_or_failed_roots_cannot_pass(
         assert_eq!(actual, counts, "{entries:?}: {stdout}");
         assert!(stdout.contains("not line coverage or whole-crate safety"));
         if entries.contains(&"read") {
-            assert!(stdout.contains("unsupported argument type char"));
+            assert!(stdout.contains("unsupported argument type"));
         }
         if entries.contains(&"absent") {
             assert!(stderr.contains("entry \"absent\" has no inventoried MIR body"));
@@ -2100,7 +2100,7 @@ pub fn fixed_structs(values: [Header; 2], index: usize) -> usize { values[index]
 }
 
 #[test]
-fn recursive_large_and_mutable_input_shapes_remain_unknown() {
+fn recursive_and_mutable_shapes_stay_unknown_while_larger_bounded_inputs_prove() {
     let directory = Directory::new();
     let path = directory.0.join("unknown_inputs.rs");
     std::fs::write(
@@ -2129,17 +2129,23 @@ pub fn mutable(packet: Mutable<'_>) { packet.bytes[0] = 1; }
             .unwrap();
         assert_eq!(
             proof.status,
-            ProofStatus::Unknown,
+            if entry == "large" {
+                ProofStatus::Proved
+            } else {
+                ProofStatus::Unknown
+            },
             "{entry}: {:?}",
             proof.obligations
         );
-        assert!(proof.obligations.iter().any(|obligation| {
-            obligation.detail.contains(if entry == "mutable" {
-                "unsupported argument type"
-            } else {
-                "input shape exceeds"
-            })
-        }));
+        if entry != "large" {
+            assert!(proof.obligations.iter().any(|obligation| {
+                obligation.detail.contains(if entry == "mutable" {
+                    "unsupported argument type"
+                } else {
+                    "input shape exceeds"
+                })
+            }));
+        }
     }
 }
 
@@ -2616,7 +2622,7 @@ fn owned_aggregate_repeats_preserve_independent_copies_and_keep_storage_limits_o
         ("empty_tuple", ProofStatus::Proved),
         ("larger", ProofStatus::Proved),
         ("maximum", ProofStatus::Proved),
-        ("large_input", ProofStatus::Unknown),
+        ("large_input", ProofStatus::Proved),
         ("value_budget_limit", ProofStatus::Proved),
         ("over_value_budget", ProofStatus::Unknown),
         ("bad_copy", ProofStatus::Refuted),
@@ -2695,7 +2701,7 @@ fn aggregate_constants_preserve_variants_fields_and_initialized_memory_on_host_a
         ("some", ProofStatus::Proved),
         ("wrong_payload", ProofStatus::Refuted),
         ("niche", ProofStatus::Proved),
-        ("niche_get", ProofStatus::Unknown),
+        ("niche_get", ProofStatus::Proved),
         ("niche_reference", ProofStatus::Proved),
         ("discriminants", ProofStatus::Proved),
         ("nested", ProofStatus::Proved),
@@ -2809,7 +2815,7 @@ fn enum_inputs_preserve_tags_payloads_and_option_contracts_on_host_and_arm() {
         ("generic_enum", ProofStatus::Unknown),
         ("mutable_enum", ProofStatus::Proved),
         ("enum_slice", ProofStatus::Unknown),
-        ("large", ProofStatus::Unknown),
+        ("large", ProofStatus::Proved),
         ("empty", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {

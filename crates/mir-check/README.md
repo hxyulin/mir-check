@@ -293,3 +293,7 @@ from omitted prebuilt core bodies. Cargo -Zbuild-std=core can capture rebuilt co
 
 Live solver declarations survive scope pops, retaining common assertion prefixes as symbols grow.
 Incompatible namespaces still reset. Query construction skips unused deferred-encoding scans.
+
+Root input budgets are 512 values, 16 nested levels, 256 non-byte array elements and 64 enum
+variants. Unicode char and integer pattern domains preserve compiler validity constraints;
+the exact core NonZero getter exposes the modeled scalar. Unsupported domains remain UNKNOWN.
