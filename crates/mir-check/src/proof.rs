@@ -994,6 +994,7 @@ impl<'tcx> Engine<'tcx> {
                     | Value::Int { .. }
                     | Value::Float { .. }
                     | Value::Bool(_)
+                    | Value::StaticText
                     | Value::Cell { .. }
                     | Value::Atomic { .. }
                     | Value::SliceIterator { .. }),

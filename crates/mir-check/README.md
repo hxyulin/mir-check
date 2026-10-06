@@ -269,10 +269,16 @@ Optimized dependency MIR may return unit without assigning the return local; uni
 tracked effects without requiring that assignment. Core Option unwrap/expect panic helpers use the
 actual Option module identity, exact helper names and never-returning signatures. Reachable helper
 calls produce panic obligations even when their MIR body is unavailable. Same-named application
-helpers execute ordinary MIR. String reborrows before some expect calls remain UNKNOWN.
+helpers execute ordinary MIR. Literal messages can cross shared reborrows; string content
+operations remain UNKNOWN.
 
 Computed float encodings keep stable symbols, but their numeric/bit relations are deferred until
 a query references those symbols. Query construction follows exact symbol tokens transitively
 and includes all relations if tokenization is uncertain. Numeric float expressions and ordinary
 path conditions remain unchanged; exported queries include every required relation. This avoids
 solving unused representation constraints during numeric-only path exploration.
+
+Evaluated static string literals can pass through shared dereferences, reborrows, arguments and
+returns as opaque immutable values. This reaches Option expect panic boundaries without modeling
+string contents, lengths, equality or pointer identity. Mutable string-reference storage remains
+UNKNOWN.

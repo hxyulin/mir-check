@@ -699,3 +699,12 @@ On the development host, one warm-up plus three measured release runs of the ori
 fixture improved from a 4.887-second median UNKNOWN result to a 0.056-second median PROVED result.
 Other analysis processes were active; this is a small-case measurement rather than a general
 speed guarantee.
+
+## Stage 38: immutable static string transport
+
+Evaluated literal strings can move through shared dereferences/reborrows, nested arguments and
+returns using the existing opaque marker. Option expect can now reach its compiler-identified
+panic helper. Strings receive no length, content, equality or pointer semantics; mutable
+string-reference storage remains unknown. Original host/ARM regressions check guarded/unbounded
+expect paths, application helper identities and rejected unsupported operations. A guard mutation
+refutes, and native execution independently checks the shared-reference cases.

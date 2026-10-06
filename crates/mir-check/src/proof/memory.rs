@@ -283,8 +283,11 @@ impl<'tcx> Engine<'tcx> {
         mutable: bool,
     ) -> Result<Value, String> {
         let value = self.place(state, place)?;
-        if !mutable && matches!(value, Value::Bytes { .. }) {
+        if !mutable && matches!(value, Value::Bytes { .. } | Value::StaticText) {
             return Ok(value);
+        }
+        if mutable && matches!(value, Value::StaticText) {
+            return Err("mutable static string reference storage is not modeled".to_owned());
         }
         let (allocation, projection, writable) = self.memory_path(state, place)?;
         if mutable && !writable {

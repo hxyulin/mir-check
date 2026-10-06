@@ -268,3 +268,7 @@ the encoding. Query construction follows exact symbol dependencies transitively;
 lexical forms conservatively include all encoding equalities. This relies on every binary32/64
 numeric SMT value having an IEEE encoding, including the existing NaN overapproximation. Ordinary
 path constraints remain mandatory, and query limits apply after required relations are included.
+
+Static string transport keeps an opaque immutable literal value. Shared reborrows and returned
+references preserve that marker; length/content/equality/pointer operations and mutable storage
+remain unsupported. It does not provide general string reasoning.

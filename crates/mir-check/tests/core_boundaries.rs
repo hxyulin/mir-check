@@ -67,13 +67,19 @@ fn compiler_option_helpers_refute_panics_and_unit_returns_keep_primitive_effects
     let entries = [
         ("known_ticket", ProofStatus::Proved),
         ("optional_ticket", ProofStatus::Refuted),
-        ("expected_ticket", ProofStatus::Unknown),
+        ("expected_ticket", ProofStatus::Refuted),
         ("guarded_ticket", ProofStatus::Proved),
         ("application_helper_names", ProofStatus::Proved),
-        ("application_message_helper", ProofStatus::Unknown),
+        ("application_message_helper", ProofStatus::Proved),
         ("application_nonreturning_helper", ProofStatus::Unknown),
         ("bad_application_helper_names", ProofStatus::Refuted),
         ("primitive_advance", ProofStatus::Proved),
+        ("guarded_expected_ticket", ProofStatus::Proved),
+        ("nested_message_helper", ProofStatus::Proved),
+        ("returned_message_helper", ProofStatus::Proved),
+        ("opaque_literal_length", ProofStatus::Unknown),
+        ("opaque_literal_content", ProofStatus::Unknown),
+        ("mutable_message_storage", ProofStatus::Unknown),
         ("unresolved_ticket", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
@@ -94,7 +100,7 @@ fn compiler_option_helpers_refute_panics_and_unit_returns_keep_primitive_effects
                 "{target:?} {name}: {:?}",
                 proof.obligations
             );
-            if name == "optional_ticket" {
+            if name == "optional_ticket" || name == "expected_ticket" {
                 assert!(
                     proof
                         .obligations
@@ -178,5 +184,33 @@ fn ticket_guards_and_unit_returning_effects_match_native_rust() {
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn changing_the_expected_ticket_guard_refutes_the_panic_check() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let original = "if available {\n        ticket.expect";
+    assert!(source.contains(original));
+    let directory = Directory::new();
+    let path = directory.0.join("core_boundaries.rs");
+    std::fs::write(
+        &path,
+        source.replace(original, "if !available {\n        ticket.expect"),
+    )
+    .unwrap();
+    let (output, report) = verify(&path, &["guarded_expected_ticket"], None);
+    assert!(!output.status.success());
+    assert_eq!(
+        report
+            .functions
+            .iter()
+            .find(|f| f.name == "guarded_expected_ticket")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap()
+            .status,
+        ProofStatus::Refuted
     );
 }

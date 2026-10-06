@@ -265,3 +265,7 @@ queries. Exact symbol dependency closure includes the required relations for com
 transformed and selected bit roundtrips. Wrong roundtrip assertions refute; native IEEE cases and
 copy-correlation regressions check the retained encodings. Arithmetic NaN payload overapproximation
 remains unchanged.
+
+Opaque static string transport now supports guarded Option expect and nested shared arguments.
+Unguarded expect calls refute; changed guards also refute. String length/content operations and
+mutable string-reference storage remain UNKNOWN.
