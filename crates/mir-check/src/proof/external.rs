@@ -64,9 +64,10 @@ impl<'tcx> Engine<'tcx> {
             let low = byte * 8;
             let high = low + 7;
             data = format!(
-                "(store {data} (_ bv{index} {pointer_bits}) ((_ extract {high} {low}) {expression}))"
+                "(store {data} (_ bv{index} {pointer_bits}) ((_ extract {high} {low}) encoded_integer))"
             );
         }
+        data = format!("(let ((encoded_integer {expression})) {data})");
         self.record_model(callee, "integer endian encoding; exact byte extraction");
         Ok(Some(Value::Bytes {
             length: Box::new(symbolic::integer(u128::from(count), pointer_bits, false)),

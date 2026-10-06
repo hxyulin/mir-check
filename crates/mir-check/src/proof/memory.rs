@@ -431,6 +431,35 @@ impl<'tcx> Engine<'tcx> {
             return Ok(());
         };
         if let MemoryProjection::Slice { offset, length } = projection {
+            if let Some((
+                MemoryProjection::Slice {
+                    offset: inner_offset,
+                    length: inner_length,
+                },
+                tail,
+            )) = rest.split_first()
+            {
+                self.memory_projection(storage.clone(), projection, conditions)?;
+                let valid_offset =
+                    symbolic::binary("le", (**inner_offset).clone(), (**length).clone())?
+                        .boolean()?;
+                let available =
+                    symbolic::binary("sub", (**length).clone(), (**inner_offset).clone())?;
+                let valid_length =
+                    symbolic::binary("le", (**inner_length).clone(), available)?.boolean()?;
+                let safe = format!("(and {valid_offset} {valid_length})");
+                if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&safe)]].concat())? {
+                    return Err("nested byte view lacks proven region bounds".to_owned());
+                }
+                let absolute =
+                    symbolic::binary("add", (**offset).clone(), (**inner_offset).clone())?;
+                let mut translated = vec![MemoryProjection::Slice {
+                    offset: Box::new(absolute),
+                    length: inner_length.clone(),
+                }];
+                translated.extend_from_slice(tail);
+                return self.write_projection(storage, &translated, value, conditions);
+            }
             if let Some((MemoryProjection::Index(index), tail)) = rest.split_first() {
                 // Prove the parent region before translating its element address.
                 self.memory_projection(storage.clone(), projection, conditions)?;
@@ -561,20 +590,24 @@ impl<'tcx> Engine<'tcx> {
             }
             _ => None,
         };
-        let mut copied = data.clone();
+        // SMT let bindings evaluate their values outside the binding scope. Nested copies
+        // therefore cannot capture these names in an earlier array expression.
+        let mut copied = "byte_copy_destination".to_owned();
         for index in 0..fixed_length.unwrap_or(count) {
             let cell = format!("(_ bv{index} {bits})");
-            let target = format!("(bvadd {offset} {cell})");
+            let target = format!("(bvadd byte_copy_offset {cell})");
             let byte = if fixed_length.is_some() {
-                format!("(select {source} {cell})")
+                format!("(select byte_copy_source {cell})")
             } else {
                 format!(
-                    "(ite (bvult {cell} {length}) (select {source} {cell}) (select {data} {target}))"
+                    "(ite (bvult {cell} byte_copy_length) (select byte_copy_source {cell}) (select byte_copy_destination {target}))"
                 )
             };
             copied = format!("(store {copied} {target} {byte})");
         }
-        *data = copied;
+        *data = format!(
+            "(let ((byte_copy_source {source}) (byte_copy_destination {data}) (byte_copy_offset {offset}) (byte_copy_length {length})) {copied})"
+        );
         if data.len() > MAX_QUERY_BYTES {
             return Err("byte view expression exceeds the query-size budget".to_owned());
         }

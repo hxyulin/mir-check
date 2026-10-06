@@ -749,3 +749,10 @@ inputs exclude surrogates and values above U+10FFFF. The actual core NonZero get
 modeled scalar; unrelated get methods execute normal MIR. No constructor invariants are inferred for
 other structs. Original host/ARM roots, native valid-domain cases, bound failures and a changed
 divisor exercise these extensions. Exhausted or unresolved domains remain UNKNOWN.
+
+## Stage 43: share byte source expressions
+
+Byte region copies and integer endian conversion bind their source expression once with scoped SMT
+lets instead of repeating it for each byte. This preserves source snapshots, disjoint writes and
+byte order while avoiding expression growth. Resource caps remain enforced. Original numerical
+byte-buffer regressions and native cases exercise compact views and subsequent parent reads.

@@ -297,3 +297,6 @@ Incompatible namespaces still reset. Query construction skips unused deferred-en
 Root input budgets are 512 values, 16 nested levels, 256 non-byte array elements and 64 enum
 variants. Unicode char and integer pattern domains preserve compiler validity constraints;
 the exact core NonZero getter exposes the modeled scalar. Unsupported domains remain UNKNOWN.
+
+Nested byte views compose region offsets, and byte copies/endian conversions share source
+expressions through scoped SMT bindings. Query-size limits remain enforced.

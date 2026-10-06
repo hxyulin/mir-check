@@ -532,7 +532,7 @@ impl<'tcx> Engine<'tcx> {
             let count = bits / 8;
             let pointer_bits = self.tcx.sess.target.pointer_width;
             let mut bytes: Vec<_> = (0..count)
-                .map(|index| format!("(select {data} (_ bv{index} {pointer_bits}))"))
+                .map(|index| format!("(select decoded_bytes (_ bv{index} {pointer_bits}))"))
                 .collect();
             if little {
                 bytes.reverse();
@@ -542,6 +542,7 @@ impl<'tcx> Engine<'tcx> {
             for byte in bytes {
                 expression = format!("(concat {expression} {byte})");
             }
+            let expression = format!("(let ((decoded_bytes {data})) {expression})");
             self.record_model(callee, "integer endian decoding; exact byte concatenation");
             return Ok(Some(Value::Int {
                 expression,
