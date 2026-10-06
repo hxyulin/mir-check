@@ -166,3 +166,25 @@ Wrong element assertions and reachable callback panics refute. Order/short-circu
 refute, and 4,096 host cases agree with direct array formulas. Unbounded loops and unsupported
 views remain UNKNOWN. Compiler-layout-derived singleton tags let optimized residual enums finish
 without inventing initialized payloads; ordinary unavailable storage reads still fail.
+
+## Mutable slice iteration
+
+Mutable iterators retain a writable source reference and yield projections into that allocation.
+Forward/reverse traversal and skips share the cursor machinery with immutable iterators. Local
+byte-array views are attached to typed storage; subsequent byte copies update that same storage.
+Mutable enumerate and IntoIterator adapters preserve the source reference, with checked counter
+increments under the active overflow configuration. Unwrapping a known Some mutable payload
+preserves its tracked reference. These explicit models are recorded separately from body calls.
+
+Host/ARM tests prove disjoint element writes, final-array postconditions, tuple updates, bounded
+byte-slice clearing, byte-prefix writes followed by copies, mutable predicate short-circuiting
+and six-by-six diagonal matrix initialization. A wrong-column mutation and incorrect alias or
+overflow assertions refute. Two sets of 4,096 host cases compare reads and writes with direct
+formulas. Ambiguous composite writes and general mutable iterator returns remain UNKNOWN;
+no broad raw-pointer, captured-reference or root-alias model was added.
+
+Borrowed fixed-array/slice IntoIterator factories also use these cursor models; owned array
+iterators remain separate. Compiler-identified primitive finiteness is exact IEEE NaN/infinity
+classification. Host/ARM tests compare f64 classification with abs < infinity and refute an
+unconstrained finiteness assertion. This avoids spending MIR steps on the helper implementation
+inside each callback while preserving the predicate's meaning.

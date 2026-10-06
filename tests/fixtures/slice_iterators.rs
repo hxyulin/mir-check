@@ -50,6 +50,15 @@ pub fn enumerate(values: [u16; 3]) {
     assert!(count == 3);
 }
 
+pub fn borrowed_array(values: [u16; 3]) {
+    let mut count = 0;
+    for (i, value) in (&values).into_iter().enumerate() {
+        assert!(*value == values[i]);
+        count += 1;
+    }
+    assert!(count == 3);
+}
+
 pub fn adapters(values: [u8; 3]) {
     let mut reversed = values.iter().copied().rev();
     assert!(reversed.next().unwrap() == values[2]);
@@ -124,6 +133,17 @@ pub fn shared_cells() {
 pub fn floats(values: [f32; 3]) {
     let finite = values.iter().all(|value| value.is_finite());
     assert!(finite == (values[0].is_finite() && values[1].is_finite() && values[2].is_finite()));
+}
+
+pub fn float_classes(value: f64) {
+    assert!(value.is_finite() == (value.abs() < f64::INFINITY));
+    assert!((-0.0_f64).is_finite() && f64::MIN_POSITIVE.is_finite());
+    assert!(!f64::NAN.is_finite() && !f64::INFINITY.is_finite());
+    assert!(!f64::NEG_INFINITY.is_finite());
+}
+
+pub fn bad_finite(value: f64) {
+    assert!(value.is_finite());
 }
 
 pub fn composite(values: [(u16, bool); 3]) {

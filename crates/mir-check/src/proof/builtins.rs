@@ -149,6 +149,29 @@ impl<'tcx> Engine<'tcx> {
                         .skip_norm_wip(),
                 )
                 .is_some()
+            && name == Symbol::intern("is_finite")
+            && signature.inputs().len() == 1
+            && self.float_type(signature.inputs()[0]).is_some()
+            && signature.output().is_bool()
+        {
+            let [Value::Float { expression, .. }] = values else {
+                return Err("float finiteness requires a modeled float".to_owned());
+            };
+            self.record_model(callee, "IEEE floating-point finiteness classification");
+            return Ok(Some(Value::Bool(format!(
+                "(and (not (fp.isNaN {expression})) (not (fp.isInfinite {expression})))"
+            ))));
+        }
+        if self.tcx.crate_name(callee.krate) == Symbol::intern("core")
+            && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+            && self
+                .float_type(
+                    self.tcx
+                        .type_of(parent)
+                        .instantiate(self.tcx, args)
+                        .skip_norm_wip(),
+                )
+                .is_some()
             && name == Symbol::intern("clamp")
             && signature.inputs().len() == 3
             && signature
@@ -417,7 +440,7 @@ impl<'tcx> Engine<'tcx> {
         let Value::Bytes {
             length: owner_len,
             data: old,
-        } = state.locals[*owner].as_ref().ok_or("copy owner is dead")?
+        } = self.local(state, *owner)?
         else {
             return Err("copy destination storage is not modeled".to_owned());
         };
@@ -433,10 +456,15 @@ impl<'tcx> Engine<'tcx> {
             );
             data = format!("(store {data} {cell} {value})");
         }
-        state.locals[*owner] = Some(Value::Bytes {
-            length: owner_len.clone(),
+        let value = Value::Bytes {
+            length: owner_len,
             data,
-        });
+        };
+        if let Some(allocation) = state.addresses[*owner] {
+            state.memory[allocation] = Some(value);
+        } else {
+            state.locals[*owner] = Some(value);
+        }
         Ok(Value::Unit)
     }
 }

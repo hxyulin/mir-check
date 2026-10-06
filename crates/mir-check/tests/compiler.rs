@@ -2415,6 +2415,7 @@ fn slice_iterators_preserve_order_cursors_and_predicate_calls_on_host_and_arm() 
         ("skips", ProofStatus::Proved),
         ("clone_cursor", ProofStatus::Proved),
         ("enumerate", ProofStatus::Proved),
+        ("borrowed_array", ProofStatus::Proved),
         ("adapters", ProofStatus::Proved),
         ("bounded_bytes", ProofStatus::Proved),
         ("all_any", ProofStatus::Proved),
@@ -2423,6 +2424,8 @@ fn slice_iterators_preserve_order_cursors_and_predicate_calls_on_host_and_arm() 
         ("predicate_effects", ProofStatus::Proved),
         ("shared_cells", ProofStatus::Proved),
         ("floats", ProofStatus::Proved),
+        ("float_classes", ProofStatus::Proved),
+        ("bad_finite", ProofStatus::Refuted),
         ("composite", ProofStatus::Proved),
         ("units", ProofStatus::Proved),
         ("bad_order", ProofStatus::Refuted),
@@ -2498,31 +2501,107 @@ fn changing_iterator_order_or_short_circuit_behavior_refutes_the_passing_roots()
 #[test]
 fn slice_iterator_proofs_agree_with_exhaustive_host_cases() {
     let directory = Directory::new();
-    let binary = directory.0.join("slice-iterator-tests");
-    let build = Command::new("rustup")
-        .args([
-            "run",
-            "nightly-2026-09-22",
-            "rustc",
-            "--edition=2024",
-            "--test",
-        ])
-        .arg(fixture("slice_iterators.rs"))
-        .arg("-o")
-        .arg(&binary)
-        .output()
+    let profile = Path::new(env!("CARGO_BIN_EXE_mir-check")).parent().unwrap();
+    let library = find_contract_library(profile).unwrap();
+    for file in ["slice_iterators.rs", "mutable_iterators.rs"] {
+        let binary = directory.0.join("slice-iterator-tests");
+        let build = Command::new("rustup")
+            .args([
+                "run",
+                "nightly-2026-09-22",
+                "rustc",
+                "--edition=2024",
+                "--test",
+            ])
+            .arg(fixture(file))
+            .arg("--extern")
+            .arg(format!("mir_contracts={}", library.display()))
+            .arg("-L")
+            .arg(format!("dependency={}", profile.join("deps").display()))
+            .arg("-o")
+            .arg(&binary)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{file}: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+        let run = Command::new(binary).output().unwrap();
+        assert!(
+            run.status.success(),
+            "{file}: {}",
+            String::from_utf8_lossy(&run.stdout)
+        );
+    }
+}
+
+#[test]
+fn mutable_slice_iterators_preserve_source_writes_and_disjoint_elements_on_host_and_arm() {
+    let entries = [
+        ("set_all", ProofStatus::Proved),
+        ("borrowed_array", ProofStatus::Proved),
+        ("disjoint", ProofStatus::Proved),
+        ("diagonal", ProofStatus::Proved),
+        ("pairs", ProofStatus::Proved),
+        ("prefix_bytes", ProofStatus::Proved),
+        ("bounded_bytes", ProofStatus::Proved),
+        ("mutable_predicate", ProofStatus::Proved),
+        ("bad_alias", ProofStatus::Refuted),
+        ("bad_overflow", ProofStatus::Refuted),
+        ("ambiguous", ProofStatus::Unknown),
+        ("escaping", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let args = target
+            .map(|target| vec!["--target", target])
+            .unwrap_or_default();
+        let names: Vec<_> = entries.iter().map(|(name, _)| *name).collect();
+        let (output, report) = verify_vendored(&fixture("mutable_iterators.rs"), &names, &args);
+        assert!(!output.status.success());
+        for (name, expected) in entries {
+            let proof = report
+                .functions
+                .iter()
+                .find(|f| f.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                proof.status,
+                expected,
+                "{target:?} {name}: {:?}",
+                proof
+                    .obligations
+                    .iter()
+                    .map(|o| (&o.detail, o.status))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn changing_mutable_enumeration_writes_to_the_wrong_column_refutes_the_matrix() {
+    let source = std::fs::read_to_string(fixture("mutable_iterators.rs")).unwrap();
+    let original = "row[i] =";
+    assert!(source.contains(original));
+    let directory = Directory::new();
+    let path = directory.0.join("mutable_iterators.rs");
+    std::fs::write(&path, source.replace(original, "row[(i + 1) % 6] =")).unwrap();
+    let (output, report) = verify_vendored(&path, &["diagonal"], &[]);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "diagonal")
+        .unwrap()
+        .proof
+        .as_ref()
         .unwrap();
-    assert!(
-        build.status.success(),
-        "{}",
-        String::from_utf8_lossy(&build.stderr)
-    );
-    let run = Command::new(binary).output().unwrap();
-    assert!(
-        run.status.success(),
-        "{}",
-        String::from_utf8_lossy(&run.stdout)
-    );
+    assert_eq!(proof.status, ProofStatus::Refuted);
+    assert!(proof.obligations.iter().any(|o| o.model.is_some()));
 }
 
 #[test]

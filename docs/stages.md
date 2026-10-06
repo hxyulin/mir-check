@@ -449,3 +449,20 @@ ordinary/zero-sized/composite values, bounded byte slices, cursor exhaustion and
 Incorrect assertions/callbacks and order/short-circuit mutations refute; 4,096 host cases agree
 with direct formulas. Unsupported views and unbounded loops stay unknown. There are 78 compiler
 integration tests and one metadata test.
+
+## Stage 25: mutable slice projections and enumeration
+
+Mutable slice cursors yield references into existing typed allocations, preserving writes through
+forward/reverse traversal and callbacks. Mutable enumeration and iterator passthrough are explicit
+core models with counter-overflow obligations. Known Some mutable payloads preserve reference
+identity on unwrap. Legacy byte views attach to typed storage and later copies use that storage.
+
+Host/ARM tests prove array postconditions, independent element writes, tuple and byte updates,
+short-circuiting and six-by-six matrix initialization. Wrong writes, alias assertions and unchecked
+increments refute. A wrong-column mutation refutes; independent runtime tests cover 4,096 mutable
+cases alongside the 4,096 immutable cases. Ambiguous composite writes and mutable returns remain
+unknown. There are 80 compiler integration tests and one metadata test.
+
+Borrowed array/slice IntoIterator factories use the same cursor models. Exact primitive float
+finiteness classification reduces helper-call steps in numeric predicates, with host/ARM cases
+covering NaN, infinities, signed zero and an unconstrained assertion that must refute.

@@ -55,33 +55,79 @@ impl<'tcx> Engine<'tcx> {
         let name = self.tcx.item_name(callee);
         let parent = self.tcx.parent(callee);
         let inherent = matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false });
+        let borrowed_into_iter = name == Symbol::intern("into_iter")
+            && matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: true })
+            && self.tcx.get_diagnostic_item(Symbol::intern("IntoIterator"))
+                == Some(
+                    self.tcx
+                        .impl_trait_ref(parent)
+                        .instantiate(self.tcx, instance.args)
+                        .skip_norm_wip()
+                        .def_id,
+                );
         if inherent
+            && name == Symbol::intern("unwrap")
+            && signature.inputs().len() == 1
+            && matches!(signature.inputs()[0].kind(), ty::Adt(def, _)
+                if self.tcx.lang_items().get(LangItem::Option) == Some(def.did()))
+            && let [
+                Value::Adt {
+                    is_option: true,
+                    variant: 1,
+                    fields,
+                    ..
+                },
+            ] = values
+            && let [(_, value)] = fields.as_slice()
+            && value.contains_mutable()
+        {
+            self.record_model(
+                callee,
+                "known Some payload; preserves tracked mutable references",
+            );
+            return Ok(Some(vec![Return {
+                value: value.clone(),
+                conditions: state.conditions.clone(),
+                memory: state.memory.clone(),
+            }]));
+        }
+        if (inherent || borrowed_into_iter)
             && signature.inputs().len() == 1
             && let Some(mutable) = self.slice_iterator_kind(signature.output())
             && let ty::Ref(_, slice, mutability) = signature.inputs()[0].kind()
-            && matches!(slice.kind(), ty::Slice(_))
+            && matches!(slice.kind(), ty::Slice(_) | ty::Array(..))
             && mutability.is_mut() == mutable
-            && matches!(name.as_str(), "iter" | "iter_mut" | "new")
+            && (matches!(name.as_str(), "iter" | "iter_mut" | "new") || borrowed_into_iter)
         {
-            if mutable {
-                return Err("mutable slice iteration is not modeled yet".to_owned());
-            }
             let [source] = values else {
                 return Err("iterator constructor arity mismatch".to_owned());
             };
             let snapshot = self.snapshot(source, &state.memory, &state.conditions, 0)?;
-            let back = match snapshot {
-                Value::Bytes { length, .. } => *length,
-                Value::Elements(elements) => self.iterator_index(elements.len() as u128),
+            let (source, back) = match snapshot {
+                Value::MutableBytes { owner, length } => (
+                    self.borrow(
+                        state,
+                        Place::from(rustc_middle::mir::Local::from_usize(owner)),
+                        mutable,
+                    )?,
+                    *length,
+                ),
+                Value::Bytes { length, .. } => (source.clone(), *length),
+                Value::Elements(elements) => {
+                    (source.clone(), self.iterator_index(elements.len() as u128))
+                }
                 _ => return Err("iterator needs modeled slice storage".to_owned()),
             };
+            if mutable && !matches!(source, Value::Reference { mutable: true, .. }) {
+                return Err("mutable iterator needs tracked writable slice storage".to_owned());
+            }
             self.record_model(
                 callee,
                 "slice iterator; ordered elements and tracked cursor",
             );
             return Ok(Some(vec![Return {
                 value: Value::SliceIterator {
-                    source: Box::new(source.clone()),
+                    source: Box::new(source),
                     front: Box::new(self.iterator_index(0)),
                     back: Box::new(back),
                     mutable,
@@ -97,6 +143,16 @@ impl<'tcx> Engine<'tcx> {
             ty::Ref(_, ty, _) => *ty,
             _ => *first,
         };
+        if let Some(results) = self.mutable_iterator_adapter(
+            instance,
+            values,
+            receiver_ty,
+            signature.output(),
+            state,
+            site,
+        )? {
+            return Ok(Some(results));
+        }
         if self.slice_iterator_kind(receiver_ty).is_none() {
             return Ok(None);
         }
@@ -201,6 +257,163 @@ impl<'tcx> Engine<'tcx> {
             conditions: state.conditions.clone(),
             memory: state.memory.clone(),
         }]))
+    }
+
+    fn mutable_iterator_adapter(
+        &mut self,
+        instance: ty::Instance<'tcx>,
+        values: &[Value],
+        receiver_ty: Ty<'tcx>,
+        output: Ty<'tcx>,
+        state: &State,
+        site: (DefId, Span),
+    ) -> Result<Option<Vec<Return>>, String> {
+        let callee = instance.def_id();
+        let parent = self.tcx.parent(callee);
+        let trait_id = if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: true }) {
+            Some(
+                self.tcx
+                    .impl_trait_ref(parent)
+                    .instantiate(self.tcx, instance.args)
+                    .skip_norm_wip()
+                    .def_id,
+            )
+        } else if self.tcx.def_kind(parent) == DefKind::Trait {
+            Some(parent)
+        } else {
+            None
+        };
+        let name = self.tcx.item_name(callee);
+        let enumerate = self.tcx.get_diagnostic_item(Symbol::intern("Enumerate"));
+        let wrapped = match receiver_ty.kind() {
+            ty::Adt(def, args) if Some(def.did()) == enumerate => {
+                self.slice_iterator_kind(args.type_at(0)) == Some(true)
+            }
+            _ => false,
+        };
+        let mutable = self.slice_iterator_kind(receiver_ty) == Some(true);
+        if !mutable && !wrapped {
+            return Ok(None);
+        }
+        let receiver = values
+            .first()
+            .ok_or("mutable iterator receiver is missing")?;
+        if name == Symbol::intern("into_iter")
+            && trait_id.is_some()
+            && trait_id == self.tcx.get_diagnostic_item(Symbol::intern("IntoIterator"))
+            && output == receiver_ty
+        {
+            self.record_model(callee, "mutable slice iterator passthrough");
+            return Ok(Some(vec![Return {
+                value: receiver.clone(),
+                conditions: state.conditions.clone(),
+                memory: state.memory.clone(),
+            }]));
+        }
+        if mutable
+            && name == Symbol::intern("enumerate")
+            && trait_id.is_some()
+            && trait_id == self.tcx.get_diagnostic_item(Symbol::intern("Iterator"))
+            && matches!(output.kind(), ty::Adt(def, _) if Some(def.did()) == enumerate)
+        {
+            self.record_model(
+                callee,
+                "mutable slice enumeration; tracked cursor and checked count",
+            );
+            return Ok(Some(vec![Return {
+                value: self.constructed(
+                    output,
+                    0,
+                    vec![receiver.clone(), self.iterator_index(0)],
+                )?,
+                conditions: state.conditions.clone(),
+                memory: state.memory.clone(),
+            }]));
+        }
+        if !wrapped
+            || name != Symbol::intern("next")
+            || trait_id.is_none()
+            || trait_id != self.tcx.get_diagnostic_item(Symbol::intern("Iterator"))
+        {
+            return Ok(None);
+        }
+        let snapshot = self.snapshot(receiver, &state.memory, &state.conditions, 0)?;
+        let Value::Adt { fields, .. } = snapshot else {
+            return Err("mutable enumerate state is not modeled".to_owned());
+        };
+        let [(_, iterator), (_, count)] = fields.as_slice() else {
+            return Err("mutable enumerate fields are not modeled".to_owned());
+        };
+        let Value::Reference {
+            allocation,
+            projection,
+            mutable: true,
+        } = receiver
+        else {
+            return Err("mutable enumerate needs writable cursor storage".to_owned());
+        };
+        self.record_model(
+            callee,
+            "mutable slice enumeration; tracked cursor and checked count",
+        );
+        let mut results = Vec::new();
+        for iteration in self.iterator_step(
+            iterator.clone(),
+            self.iterator_index(0),
+            false,
+            state.conditions.clone(),
+            state.memory.clone(),
+        )? {
+            let mut memory = iteration.memory;
+            let mut conditions = iteration.conditions;
+            let mut inner_projection = projection.clone();
+            inner_projection.push(MemoryProjection::Field(0));
+            self.store_iterator(
+                &Value::Reference {
+                    allocation: *allocation,
+                    projection: inner_projection,
+                    mutable: true,
+                },
+                iteration.iterator,
+                &mut memory,
+                &conditions,
+            )?;
+            let value = if let Some(item) = iteration.item {
+                let Value::Tuple(sum) =
+                    symbolic::binary("checked_add", count.clone(), self.iterator_index(1))?
+                else {
+                    return Err("enumerate count is not modeled".to_owned());
+                };
+                if self.tcx.sess.overflow_checks() {
+                    let safe = symbolic::not(&sum[1].boolean()?);
+                    self.require(
+                        site.0,
+                        site.1,
+                        &conditions,
+                        &safe,
+                        ObligationKind::PanicSafety,
+                        "enumerate counter must not overflow".to_owned(),
+                    )?;
+                    conditions.push(safe);
+                }
+                let mut count_projection = projection.clone();
+                count_projection.push(MemoryProjection::Field(1));
+                let storage = memory
+                    .get_mut(*allocation)
+                    .and_then(Option::as_mut)
+                    .ok_or("enumerate storage is dead")?;
+                self.write_projection(storage, &count_projection, sum[0].clone(), &conditions)?;
+                self.constructed(output, 1, vec![Value::Tuple(vec![count.clone(), item])])?
+            } else {
+                self.constructed(output, 0, vec![])?
+            };
+            results.push(Return {
+                value,
+                conditions,
+                memory,
+            });
+        }
+        Ok(Some(results))
     }
 
     fn iterator_index(&self, index: u128) -> Value {

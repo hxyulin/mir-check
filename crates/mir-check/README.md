@@ -178,3 +178,14 @@ at the deciding element. Symbolic byte slices work when paths finish within the 
 unbounded loops, unsupported iterator views and raw pointer operations remain unknown.
 Compiler layouts supply constant tags for single-variant enum representations, including the
 uninhabited residual optimized by core's question-mark implementation.
+
+Mutable slice iterators yield projected references into typed source storage, including local
+byte arrays, bounded byte-slice roots and composite array elements. Mutable enumeration preserves
+that storage and checks the counter under the active overflow policy. Known Some payloads retain
+tracked mutable references when unwrapped. Legacy byte-copy views read and update addressed
+storage, so iteration followed by copy_from_slice preserves the latest data. General mutable
+returns, captured mutable references and ambiguous composite writes remain unsupported.
+
+Borrowed fixed arrays and slices implement IntoIterator through the same tracked cursor models.
+Primitive core f32/f64 finiteness uses exact NaN/infinity classification, reducing the MIR steps
+needed by numeric iterator predicates without weakening their conditions.
