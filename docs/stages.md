@@ -786,3 +786,16 @@ arithmetic and reachable panic counterexamples. The flattening regression proves
 unchecked multiplication and remains UNKNOWN at its raw-pointer boundary. Native replay covers all
 u8 operand pairs and larger signed/unsigned boundaries; a changed reconstruction refutes. No
 unsafe source or foreign-body assumptions are added.
+
+
+## Stage 46: stop refuted roots after their first counterexample
+
+Verification stops a selected root after its first refuted obligation, retaining that query and
+model. Other selected roots still run. The all-failures option continues the former exploration
+policy under the same resource limits; it does not promise an exhaustive list of failures.
+
+Reports include a default-compatible stopped_after_counterexample flag, and compact/verbose output
+identifies early stops. Cargo forwards the policy to compiler invocations and clears inherited
+settings when the option is absent. Original host/ARM cases compare both policies, preserve
+positive and unknown roots, replay native failures and expose a late failure after removing its
+earlier guard. Caller contracts and postconditions remain checked in either mode.

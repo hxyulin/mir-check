@@ -252,6 +252,9 @@ pub fn render_report(report: &Report, verbose: bool, colored: bool) -> String {
                     );
                 }
             }
+            if proof.stopped_after_counterexample {
+                let _ = writeln!(output, "    stopped after first counterexample");
+            }
             if proof.status == ProofStatus::ProvedWithAssumptions {
                 for trusted in &proof.trusted_calls {
                     let _ = writeln!(
@@ -365,6 +368,19 @@ pub fn render_totals(reports: &[Report], success: bool, colored: bool, elapsed_s
     }
     if refuted > 0 {
         output.push_str("  REFUTED is a failing translated obligation; check its root domain.\n");
+    }
+    let stopped = reports
+        .iter()
+        .flat_map(|report| &report.functions)
+        .filter_map(|function| function.proof.as_ref())
+        .filter(|proof| proof.stopped_after_counterexample)
+        .count();
+    if stopped > 0 {
+        let _ = writeln!(
+            output,
+            "  {stopped} roots stopped after their first counterexample. \
+             Re-run verification with --all-failures to continue them."
+        );
     }
     if assumed > 0 {
         output.push_str(

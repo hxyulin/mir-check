@@ -284,3 +284,17 @@ reference shapes, mutable fields, unresolved generics and enum/struct slices rem
 The checker stops a root at its first unsupported operation, so its reported reason need not
 enumerate every gap in that function. A solver assignment is a counterexample to the translated
 obligation; runtime replay tests provide separate evidence for the confirmed fixture failures.
+
+## Further counterexamples
+
+By default, each refuted root stops after its first counterexample, while other selected roots
+continue. Use `--all-failures` with direct or Cargo verification to collect further obligations:
+
+```sh
+cd examples/contracts
+cargo mir-check --verify --all-failures --entry bounded_increment --lib
+```
+
+Normal execution and solver budgets still apply, so this does not promise every possible failure.
+Reports retain full queries and models and mark roots that stopped early. Reading saved reports
+does not resume verification; re-run the original command with this option to continue exploration.

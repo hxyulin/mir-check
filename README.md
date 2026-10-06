@@ -229,6 +229,10 @@ unsupported
 operations produce UNKNOWN. A selected-root proof also does not establish absence of undefined
 behavior, allocation failure, stack exhaustion, interrupt races or hardware timing failures.
 
+Refuted roots stop at their first counterexample while the other selected roots continue. Add
+`--all-failures` to collect further obligations under the same resource limits. Raw reports retain
+the first failing query and model and indicate when exploration stopped early.
+
 The default execution limits are 8,192 steps and 16 active call frames per root. Finite recursion
 can complete within those limits; unfinished paths remain UNKNOWN. Each root retains a 30-second
 budget and a 200,000-byte query limit. Incremental solver scopes, exact constant folding and a

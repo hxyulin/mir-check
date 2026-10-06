@@ -310,3 +310,8 @@ other structs. Non-null pointer patterns and unresolved generics remain UNKNOWN.
 Query construction skips encoding dependency scans when there are no deferred encodings and borrows
 condition strings rather than cloning an intermediate list. Byte views and endian conversion use
 scoped SMT bindings to share source expressions, with the usual size budgets still enforced.
+
+Refuted roots stop after their first counterexample by default; remaining selected roots still
+run. --all-failures continues collecting obligations under the existing budgets. Reports include
+stopped_after_counterexample, and saved reports without that field still deserialize. CLI and
+Cargo modes share this policy. A counterexample retains its full query and model.

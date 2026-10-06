@@ -80,6 +80,12 @@ preserving reports. Schema version 8 counts root outcomes separately from unsele
 distinct interpreted instances, and groups unknown obligations by reason. These are analysis
 counts, not runtime coverage or whole-crate safety percentages.
 
+Once an obligation refutes, that root stops by default with its counterexample query and model.
+The checker continues every other selected root. `--all-failures` collects further obligations
+under the normal budgets; it does not guarantee every failure will be found. A report's
+`stopped_after_counterexample` flag distinguishes an early stop from continued exploration.
+Saved reports predating the flag read it as false.
+
 ## Loops and limits
 
 Loops repeat the interpreter over successive states. This can prove small finite domains, such as

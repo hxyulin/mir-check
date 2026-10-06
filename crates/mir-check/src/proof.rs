@@ -57,13 +57,19 @@ struct Engine<'tcx> {
     started: std::time::Instant,
     proof: Proof,
     config: mir_check::ContractConfig,
+    all_failures: bool,
     resolved_contracts: BTreeMap<String, DefId>,
     solver: std::cell::RefCell<Solver>,
     bodies:
         std::cell::RefCell<std::collections::HashMap<ty::Instance<'tcx>, std::rc::Rc<Body<'tcx>>>>,
 }
 
-pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) -> Proof {
+pub fn verify(
+    tcx: TyCtxt<'_>,
+    id: DefId,
+    config: &mir_check::ContractConfig,
+    all_failures: bool,
+) -> Proof {
     let mut engine = Engine {
         tcx,
         declarations: Vec::new(),
@@ -74,6 +80,7 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) ->
         building_mutable_input: false,
         started: std::time::Instant::now(),
         config: config.clone(),
+        all_failures,
         resolved_contracts: BTreeMap::new(),
         solver: std::cell::RefCell::new(Solver::default()),
         bodies: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -86,10 +93,13 @@ pub fn verify(tcx: TyCtxt<'_>, id: DefId, config: &mir_check::ContractConfig) ->
             obligations: Vec::new(),
             trusted_calls: Vec::new(),
             matched_contracts: Vec::new(),
+            stopped_after_counterexample: false,
         },
     };
     let result = engine.root(id);
-    if let Err(reason) = result {
+    if let Err(reason) = result
+        && !engine.proof.stopped_after_counterexample
+    {
         engine.unknown(id, tcx.def_span(id), reason);
     }
     engine.proof.status = if engine
@@ -483,6 +493,10 @@ impl<'tcx> Engine<'tcx> {
         });
         if status == ProofStatus::Unknown {
             return Err("solver could not discharge an obligation".to_owned());
+        }
+        if status == ProofStatus::Refuted && !self.all_failures {
+            self.proof.stopped_after_counterexample = true;
+            return Err("root stopped after its first counterexample".to_owned());
         }
         Ok(())
     }

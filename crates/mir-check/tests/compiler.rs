@@ -579,16 +579,28 @@ fn cargo_analysis_revisits_a_crate_and_forwards_feature_selection() {
 }
 
 fn verify_contract(name: &str, rustc_args: &[&str]) -> (Output, Report) {
+    verify_contract_with_failures(name, rustc_args, false)
+}
+
+fn verify_contract_with_failures(
+    name: &str,
+    rustc_args: &[&str],
+    all_failures: bool,
+) -> (Output, Report) {
     let directory = Directory::new();
     let profile = Path::new(env!("CARGO_BIN_EXE_mir-check")).parent().unwrap();
     let library = find_contract_library(profile).unwrap();
     let external = format!("mir_contracts={}", library.display());
     let mut args = vec!["--extern", external.as_str(), "-Coverflow-checks=yes"];
     args.extend_from_slice(rustc_args);
+    let mut checker_args = vec!["--verify", "--entry", name];
+    if all_failures {
+        checker_args.push("--all-failures");
+    }
     let output = analyze_from(
         &fixture("verified_contracts.rs"),
         &directory,
-        &["--verify", "--entry", name],
+        &checker_args,
         &args,
     );
     let report = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -728,6 +740,24 @@ fn annotations_are_never_trusted_in_place_of_body_or_postcondition_proofs() {
             );
         }
         if name == "use_lying_postcondition" {
+            assert!(proof.stopped_after_counterexample);
+            let (output, report) = verify_contract_with_failures(name, &[], true);
+            assert!(!output.status.success());
+            let proof = report
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert_eq!(proof.status, ProofStatus::Refuted);
+            assert!(!proof.stopped_after_counterexample);
+            assert!(proof.obligations.iter().any(|obligation| matches!(
+                obligation.kind,
+                mir_check::ObligationKind::Postcondition
+            ) && obligation.status
+                == ProofStatus::Refuted));
             assert!(proof.obligations.iter().any(|obligation| matches!(
                 obligation.kind,
                 mir_check::ObligationKind::PanicSafety

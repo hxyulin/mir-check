@@ -146,6 +146,8 @@ pub struct Function {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Proof {
     pub status: ProofStatus,
+    #[serde(default)]
+    pub stopped_after_counterexample: bool,
     pub assumptions: Vec<String>,
     pub inputs: std::collections::BTreeMap<String, String>,
     pub models: Vec<String>,
@@ -431,6 +433,9 @@ pub fn render(report: &Report) -> String {
         }
         if let Some(proof) = &function.proof {
             let _ = writeln!(output, "    verification: {}", proof.status.label());
+            if proof.stopped_after_counterexample {
+                let _ = writeln!(output, "      stopped after first counterexample");
+            }
             for (name, expression) in &proof.inputs {
                 let _ = writeln!(output, "      input {name}: {expression}");
             }
