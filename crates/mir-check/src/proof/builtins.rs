@@ -114,6 +114,14 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
+        if self.tcx.is_intrinsic(callee, Symbol::intern("cold_path"))
+            && signature.inputs().is_empty()
+            && signature.output().is_unit()
+            && values.is_empty()
+        {
+            self.record_model(callee, "optimization-only cold path marker");
+            return Ok(Some(Value::Unit));
+        }
         if let Some(value) = self.core_endian_encoding(callee, args, signature, values)? {
             return Ok(Some(value));
         }

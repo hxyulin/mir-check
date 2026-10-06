@@ -1107,6 +1107,9 @@ impl<'tcx> Engine<'tcx> {
     ) -> Result<Value, String> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => self.place(state, *place),
+            Operand::RuntimeChecks(checks) => {
+                Ok(Value::Bool(checks.value(self.tcx.sess).to_string()))
+            }
             Operand::Constant(constant) => {
                 let ty = constant.const_.ty();
                 if matches!(ty.kind(), ty::FnDef(..)) {
@@ -1129,7 +1132,6 @@ impl<'tcx> Engine<'tcx> {
                 }
                 self.constant(id, constant.const_, constant.span)
             }
-            other => Err(format!("unsupported operand {other:?}")),
         }
     }
 
@@ -1200,6 +1202,32 @@ impl<'tcx> Engine<'tcx> {
                 let left = self.operand(id, body, state, &operands.0)?;
                 let right = self.operand(id, body, state, &operands.1)?;
                 let operation = match operation {
+                    BinOp::AddUnchecked | BinOp::SubUnchecked | BinOp::MulUnchecked => {
+                        let checked = match operation {
+                            BinOp::AddUnchecked => "checked_add",
+                            BinOp::SubUnchecked => "checked_sub",
+                            BinOp::MulUnchecked => "checked_mul",
+                            _ => unreachable!(),
+                        };
+                        let Value::Tuple(mut fields) = symbolic::binary(checked, left, right)?
+                        else {
+                            return Err("unchecked arithmetic needs integer operands".to_owned());
+                        };
+                        let overflow = fields.pop().ok_or("missing overflow result")?.boolean()?;
+                        let safe = symbolic::not(&overflow);
+                        self.require(
+                            id,
+                            self.tcx.def_span(id),
+                            &state.conditions,
+                            &safe,
+                            ObligationKind::Validity,
+                            format!("MIR {operation:?} must not overflow"),
+                        )?;
+                        state.conditions.push(safe);
+                        return fields
+                            .pop()
+                            .ok_or_else(|| "missing arithmetic result".to_owned());
+                    }
                     BinOp::Shl => return symbolic::shift(true, left, right),
                     BinOp::Shr => return symbolic::shift(false, left, right),
                     BinOp::Add => "add",

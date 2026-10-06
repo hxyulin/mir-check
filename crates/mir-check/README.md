@@ -18,6 +18,15 @@ Function-item callbacks resolve static trait dispatch before requesting MIR. Fix
 from_fn, iterator predicates and folds execute the concrete implementation, including its panic
 paths, rather than requesting the bodyless trait method declaration.
 
+
+Unchecked MIR integer addition, subtraction and multiplication generate validity obligations:
+their mathematical result must fit the operand type on the current path before analysis continues.
+Guarded core operations such as unsigned checked_add/checked_sub retain their real bodies. The
+compiler cold_path intrinsic is an optimization-only marker. RuntimeChecks operands use the pinned
+compiler session's exact UB, overflow and contract-check settings; disabled runtime UB checks do
+not remove unchecked-arithmetic validity obligations. Unmodeled raw-pointer continuations remain
+unknown.
+
 The adapter reads local typed runtime MIR using the pinned compiler and disables MIR
 optimization. It collects function locations, block counts, pending contracts, MIR checks, panic
 language-item calls and unknown call/drop boundaries. Optional entry selection shows structural

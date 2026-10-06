@@ -768,3 +768,21 @@ Host/ARM regressions complete 1,024-iteration loops and refute a failure after t
 A longer unfinished loop remains UNKNOWN. Existing bounded-recursion and call-depth failures retain
 their outcomes. This increases exploration capacity without adding loop invariants or termination
 proofs.
+
+
+## Stage 45: guarded unchecked arithmetic and compiler check operands
+
+Unchecked MIR AddUnchecked, SubUnchecked and MulUnchecked operations check signed/unsigned
+overflow using the existing widened bit-vector arithmetic. Each operation emits a validity
+obligation before its result is used; only the non-overflow domain continues. Disabling runtime UB
+checks never assumes that unchecked arithmetic is valid. A compiler-identified, signature-checked
+cold_path intrinsic models its optimization-only semantics so checked-add overflow branches can
+return None.
+
+RuntimeChecks operands delegate to the pinned compiler's RuntimeChecks::value for the active
+session, matching code generation for UB, overflow and compiler contract checks. Host/ARM
+regressions exercise independent UB/overflow settings, all unsigned widths, signed checked
+arithmetic and reachable panic counterexamples. The flattening regression proves core's guarded
+unchecked multiplication and remains UNKNOWN at its raw-pointer boundary. Native replay covers all
+u8 operand pairs and larger signed/unsigned boundaries; a changed reconstruction refutes. No
+unsafe source or foreign-body assumptions are added.
