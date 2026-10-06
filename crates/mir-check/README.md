@@ -50,6 +50,13 @@ interpreted body instances; neither count claims runtime or whole-crate coverage
 The report model uses std and serde. No compiler types escape the adapter, so JSON consumers
 do not need rustc internals. Inventory remains separate from the opt-in proof engine.
 
+The smt module supplies a typed term DAG for the encoding migration. Analysis contexts intern
+Boolean, bit-vector, floating-point and array nodes, reject mixed contexts and invalid operand
+sorts, and fold supported closed terms structurally. The bounded printer preserves repeated
+subexpressions through scoped lets. Z3 remains the solver and the subprocess protocol is unchanged.
+The MIR interpreter still uses its existing string representation until its consumers migrate;
+the new module alone does not change proof outcomes or analysis limits.
+
 Proof mode interprets a restricted subset of typed MIR, uses exact SMT bit-vectors for integers and
 SMT floating-point operations for f32/f64 and follows actual arguments and return values through
 concrete local and available dependency calls. Z3 runs as a subprocess. Every reachable panic

@@ -2,6 +2,7 @@
 
 pub mod cli;
 mod config;
+pub mod smt;
 pub use config::{ContractConfig, FunctionContract};
 
 use serde::{Deserialize, Serialize};

@@ -814,3 +814,18 @@ transmute diagnostics identify source and destination types, with unsupported la
 UNKNOWN. Original host/ARM, native branch cases, invalid aliases and a guard mutation exercise
 these changes. Integer power reaches actual checked_pow MIR but remains unknown at a niche
 transmute rather than receiving an unchecked summary.
+
+## Stage 48: typed term DAG and bounded SMT printer
+
+A root-scoped context interns typed Boolean, bit-vector, floating-point and array terms. Node
+construction validates sorts, widths, arity and context identity before simplification. Supported
+closed Boolean/integer terms fold structurally; wide arithmetic retains its exact solver encoding.
+Floating-point numeric equality is separate from structural equality, preserving NaN and signed
+zero. The printer visits the DAG iteratively and emits scoped lets when sharing reduces output.
+Output budgets fail explicitly instead of emitting incomplete expressions.
+
+Differential tests check all 55 operator encodings and 3,150 closed arithmetic/comparison boundary
+cases against Z3, validate array reads/writes and conversions, reject malformed constructions and
+check a changed arithmetic formula fails equivalence. Repeated doubling stays compact through 256
+levels rather than expanding exponentially. This is the representation foundation; existing MIR
+consumers still use strings pending migration. No new language coverage or loop proofs are claimed.

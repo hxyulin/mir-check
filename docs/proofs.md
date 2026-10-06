@@ -13,6 +13,15 @@ atomic Ordering uses its actual compiler enum. Contract expressions use syn synt
 including scoped post-state references. Strings remain appropriate for source selectors,
 diagnostics and the separately generated SMT protocol.
 
+A typed, interned term DAG is available for the encoding migration. Its nodes carry explicit sorts
+and operator enums; construction checks arity, widths and analysis-context identity before folding.
+The printer introduces scoped lets when sharing saves bytes and enforces an output byte budget.
+Closed Boolean and at-most-128-bit integer operations fold structurally; larger widened arithmetic
+and floating-point operations retain exact solver terms. Numeric fp.eq is kept distinct from SMT
+equality, including NaN and signed-zero behavior. Z3 differential tests exercise the operators and
+constant boundaries. The interpreter has not yet migrated its string-valued expressions to this
+module, so the current execution and query limits below remain unchanged.
+
 Language items identify compiler hooks rather than all language operations. Broad support also
 requires complete MIR operations, memory/ownership rules, calls and intrinsics. Even complete
 semantic support can leave a proof unfinished because loops, recursion, path growth or solver
