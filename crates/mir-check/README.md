@@ -224,3 +224,12 @@ Post-state contract detection parses syn expressions and distinguishes free fina
 from field names, comments and local Option bindings. Compiler-provided Symbols still identify
 methods or variants when diagnostic items are unavailable; these are exact names within an
 already identified compiler type/trait, not substring matches over MIR.
+
+Compiler ArrayIntoIter models share bounded cursor storage with slice iteration. Owned elements
+must contain no tracked identities or destructors and fit 128 elements/256 values. Models cover
+forward/reverse skips, count/last, all/any and ordered fold/rfold callbacks. Ordinary sum MIR now
+uses typed noncapturing closure constants and the cursor fold model. Captured constant closures,
+including zero-sized captures, remain unknown. Iterator by_ref/IntoIterator preserve writable
+cursor references; consuming methods update the original cursor. Wrapper drop glue is harmless
+only when it has no own destructor and all drop-requiring fields are harmless owned iterators.
+Owned element Clone, iterator views and user destructors remain unknown.

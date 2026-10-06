@@ -83,6 +83,24 @@ impl<'tcx> Engine<'tcx> {
             return Ok(symbolic::integer(bits, width, signed));
         }
         match ty.kind() {
+            ty::Closure(id, args) => {
+                if !args.as_closure().upvar_tys().is_empty() {
+                    return Err("unsupported constant closure with captures".to_owned());
+                }
+                if self.tcx.def_kind(*id) != DefKind::Closure
+                    || operand.layout.fields.count() != 0
+                    || operand.layout.size.bytes() != 0
+                {
+                    return Err("unsupported constant closure layout".to_owned());
+                }
+                Ok(Value::Adt {
+                    name: self.tcx.def_path_str(*id),
+                    variant: 0,
+                    is_option: false,
+                    discriminant: 0,
+                    fields: Vec::new(),
+                })
+            }
             ty::Adt(def, _) if def.is_struct() || def.is_enum() => {
                 let variant = ecx
                     .read_discriminant(operand)

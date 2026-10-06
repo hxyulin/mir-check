@@ -553,3 +553,24 @@ Application types and functions with library-like names execute their actual bod
 Cell/atomic regressions preserve their outcomes. AST tests distinguish free post-state paths,
 fields, comments and shadowing Option bindings. Ordinary source selectors and report strings
 remain text interfaces; they do not determine MIR instruction semantics.
+
+## Stage 30: owned array cursors, folds and evaluated closure constants
+
+Compiler ArrayIntoIter uses the existing typed cursor representation without modeling general
+MaybeUninit or transmute. Owned elements have no tracked identities or destructors and fit the
+128-element/256-value limits. Models preserve order, skips, count/last, checked predicates,
+fold/rfold callbacks and writable reference passthrough. Harmless wrapper drop glue follows typed
+fields only when no user destructor can execute. Owned Clone and iterator views remain unknown.
+
+Shared slice fold/rfold execute actual callback bodies and propagate accumulator, conditions and
+memory. Ordinary sum MIR proceeds through evaluated noncapturing closure constants, whose typed
+upvars, zero fields and zero-sized layout are checked. Captured constant closures remain unknown,
+including zero-sized captures. The coverage work caught a cursor-state bug: count through a
+mutable shared iterator reference must exhaust the original cursor. Positive and negative
+borrowed-consumption regressions now cover count, last, fold and reference passthrough.
+
+The owned fixture checks 29 roots on host/ARM: 13 prove, nine refute and seven remain unknown.
+The closure fixture checks 15 roots: eight prove, four refute and three remain unknown. Native
+replay, failing callback/call bounds, element-order and fold-seed mutations exercise these models;
+the closure suite checks 1,024 inputs and independently replays four panics. Unsupported views,
+captured constant environments, destructors and stateful owned callback captures stay unknown.

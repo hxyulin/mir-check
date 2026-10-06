@@ -28,6 +28,7 @@ mod interior;
 mod iterators;
 mod library;
 mod memory;
+mod owned_iterators;
 
 #[derive(Clone)]
 struct State {
@@ -778,6 +779,25 @@ impl<'tcx> Engine<'tcx> {
                     }
                     let configured = self.specification(instance)?.is_some();
                     if !configured
+                        && let Some(results) = self.owned_iterator_call(
+                            instance,
+                            &values,
+                            &mut state,
+                            &stack,
+                            (id, terminator.source_info.span),
+                        )?
+                    {
+                        let target = target.ok_or("owned iterator call has no return edge")?;
+                        for result in results {
+                            let mut continuation = state.clone();
+                            continuation.conditions = result.conditions;
+                            continuation.memory = result.memory;
+                            self.write(&mut continuation, *destination, result.value)?;
+                            queue.push_back((target, continuation));
+                        }
+                        continue;
+                    }
+                    if !configured
                         && let Some(results) = self.iterator_call(
                             instance,
                             &values,
@@ -875,10 +895,9 @@ impl<'tcx> Engine<'tcx> {
                     }
                 }
                 TerminatorKind::Drop { place, target, .. } => {
-                    if place
-                        .ty(&body.local_decls, self.tcx)
-                        .ty
-                        .needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
+                    let ty = place.ty(&body.local_decls, self.tcx).ty;
+                    if ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
+                        && !self.is_owned_no_drop_iterator(ty)
                     {
                         return Err("destructor behavior is unmodeled".to_owned());
                     }

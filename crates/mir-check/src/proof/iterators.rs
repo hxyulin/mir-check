@@ -2,11 +2,11 @@ use super::*;
 use rustc_span::Symbol;
 use symbolic::MemoryProjection;
 
-struct Iteration {
-    iterator: Value,
-    item: Option<Value>,
-    conditions: Vec<String>,
-    memory: Vec<Option<Value>>,
+pub(super) struct Iteration {
+    pub(super) iterator: Value,
+    pub(super) item: Option<Value>,
+    pub(super) conditions: Vec<String>,
+    pub(super) memory: Vec<Option<Value>>,
 }
 
 impl<'tcx> Engine<'tcx> {
@@ -177,18 +177,47 @@ impl<'tcx> Engine<'tcx> {
         let iterator_trait = self.tcx.get_diagnostic_item(Symbol::intern("Iterator"));
         let clone_trait = self.tcx.lang_items().get(LangItem::Clone);
         let supported = match name.as_str() {
-            "next" | "nth" | "count" | "size_hint" | "all" | "any" => {
+            "next" | "nth" | "count" | "size_hint" | "all" | "any" | "fold" | "by_ref" => {
                 trait_id.is_some() && trait_id == iterator_trait
             }
-            "next_back" | "nth_back" => trait_id
-                .is_some_and(|id| self.tcx.def_path_str(id) == "core::iter::DoubleEndedIterator"),
-            "len" => trait_id
-                .is_some_and(|id| self.tcx.def_path_str(id) == "core::iter::ExactSizeIterator"),
+            "into_iter" => {
+                trait_id.is_some()
+                    && trait_id == self.tcx.get_diagnostic_item(Symbol::intern("IntoIterator"))
+            }
+            "next_back" | "nth_back" | "rfold" => trait_id.is_some_and(|id| {
+                self.tcx.def_kind(id) == DefKind::Trait
+                    && id.krate == shared.krate
+                    && self.tcx.item_name(id) == Symbol::intern("DoubleEndedIterator")
+            }),
+            "len" => trait_id.is_some_and(|id| {
+                self.tcx.def_kind(id) == DefKind::Trait
+                    && id.krate == shared.krate
+                    && self.tcx.item_name(id) == Symbol::intern("ExactSizeIterator")
+            }),
             "clone" => trait_id.is_some() && trait_id == clone_trait,
             _ => false,
         };
         if !supported {
             return Ok(None);
+        }
+        if matches!(name.as_str(), "by_ref" | "into_iter") {
+            if signature.inputs().len() != 1
+                || signature.output() != signature.inputs()[0]
+                || !matches!(signature.output().kind(), ty::Ref(_, _, mutability)
+                    if mutability.is_mut())
+                || !matches!(receiver, Value::Reference { mutable: true, .. })
+            {
+                return Ok(None);
+            }
+            self.record_model(
+                callee,
+                "slice iterator; preserves the writable cursor reference",
+            );
+            return Ok(Some(vec![Return {
+                value: receiver.clone(),
+                conditions: state.conditions.clone(),
+                memory: state.memory.clone(),
+            }]));
         }
         self.record_model(
             callee,
@@ -199,7 +228,32 @@ impl<'tcx> Engine<'tcx> {
                 .iterator_predicate(instance, values, iterator, state, stack, site)
                 .map(Some);
         }
+        if matches!(name.as_str(), "fold" | "rfold") {
+            return self
+                .iterator_fold(instance, values, iterator, state, stack, site)
+                .map(Some);
+        }
         let remaining = symbolic::binary("sub", (**back).clone(), (**front).clone())?;
+        if name == Symbol::intern("count")
+            && matches!(receiver, Value::Reference { mutable: true, .. })
+        {
+            let Value::SliceIterator {
+                source,
+                back,
+                mutable,
+                ..
+            } = &iterator
+            else {
+                return Err("slice iterator state is not modeled".to_owned());
+            };
+            let exhausted = Value::SliceIterator {
+                source: source.clone(),
+                front: back.clone(),
+                back: back.clone(),
+                mutable: *mutable,
+            };
+            self.store_iterator(receiver, exhausted, &mut state.memory, &state.conditions)?;
+        }
         let value = match name.as_str() {
             "len" | "count" => remaining,
             "size_hint" => {
@@ -416,11 +470,11 @@ impl<'tcx> Engine<'tcx> {
         Ok(Some(results))
     }
 
-    fn iterator_index(&self, index: u128) -> Value {
+    pub(super) fn iterator_index(&self, index: u128) -> Value {
         symbolic::integer(index, u32::from(self.tcx.sess.target.pointer_width), false)
     }
 
-    fn store_iterator(
+    pub(super) fn store_iterator(
         &self,
         receiver: &Value,
         iterator: Value,
@@ -442,7 +496,7 @@ impl<'tcx> Engine<'tcx> {
         self.write_projection(storage, projection, iterator, conditions)
     }
 
-    fn iterator_step(
+    pub(super) fn iterator_step(
         &mut self,
         iterator: Value,
         skip: Value,
@@ -541,7 +595,7 @@ impl<'tcx> Engine<'tcx> {
         Ok(results)
     }
 
-    fn iterator_predicate(
+    pub(super) fn iterator_predicate(
         &mut self,
         instance: ty::Instance<'tcx>,
         values: &[Value],

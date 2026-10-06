@@ -190,10 +190,10 @@ containing a shared byte slice.
 | Arithmetic | Exact integer operations and population counts; IEEE f32/f64 arithmetic, comparisons and saturating casts |
 | Interior mutation | Scalar Cell aliases/calls and conservative integer atomic counters with checked orderings |
 | Mutable storage | One mutable root receiver, projected writes, reborrows and state propagation through calls |
-| Calls | Concrete generics, static traits, available dependency MIR, function items and read-only closures |
+| Calls | Concrete generics, static traits, available dependency MIR, function items, read-only closures and noncapturing evaluated closure constants |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation and completely unrolled finite loops |
 | Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map/from_fn, float abs/min/max/clamp and static formatting arguments |
-| Slice iteration | Ordered reads/writes, forward/reverse cursors, skipping, lengths, shared clones and checked all/any callbacks |
+| Iteration | Shared/mutable slices and owned arrays; cursor operations, checked predicates and ordered fold/rfold callbacks |
 | Contracts | Caller bounds, entry preconditions and postconditions on actual returns |
 
 Integer/bool/float arrays support symbolic bounded indices and array/slice pattern projections.

@@ -54,6 +54,9 @@ at most 128 bytes; other constant arrays/slices have at most 16 elements. Exhaus
 | Closures and function items | Read-only captures and supported generic Fn/FnOnce calls | Mutable captures and function pointers are unsupported |
 | Array map | Explicit traversal model, executing each actual callable body in index order | At most 16 elements; general iterators remain gaps |
 | Array from_fn | Execute actual callbacks in ascending index order, with conditions and tracked effects | At most 128 owned elements and 256 values; drops, identity-bearing results and mutable captures remain UNKNOWN |
+| Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; identities, user destructors, clone and views remain UNKNOWN |
+| Iterator fold/sum | Execute actual fold/rfold callbacks with accumulator, order and memory effects; sum uses ordinary MIR | Unfinished folds, mutable callback environments and unsupported element/call shapes remain UNKNOWN |
+| Evaluated closure constants | Typed noncapturing, zero-field, zero-sized closure values | Captured constants, including zero-sized captures, remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, comparisons, casts, boolean casts, bit operations and shifts | Optional overflow checks depend on build settings |
 | Float operations | Nearest-even add/subtract/multiply/divide, negation, comparisons and saturating casts | NaN, infinities and signed zero are preserved numerically; raw NaN payloads are not modeled |
 | Drop | Skip a concrete value only if rustc says it needs no drop | Destructor execution remains UNKNOWN |
@@ -194,8 +197,21 @@ overflow assertions refute. Two sets of 4,096 host cases compare reads and write
 formulas. Ambiguous composite writes and general mutable iterator returns remain UNKNOWN;
 no broad raw-pointer, captured-reference or root-alias model was added.
 
-Borrowed fixed-array/slice IntoIterator factories also use these cursor models; owned array
-iterators remain separate. Compiler-identified primitive finiteness is exact IEEE NaN/infinity
+Borrowed fixed-array/slice IntoIterator factories also use these cursor models; owned arrays have
+a compiler-identified model over the same cursor representation. Compiler-identified primitive
+finiteness is exact IEEE NaN/infinity
 classification. Host/ARM tests compare f64 classification with abs < infinity and refute an
 unconstrained finiteness assertion. This avoids spending MIR steps on the helper implementation
 inside each callback while preserving the predicate's meaning.
+
+Owned array cursors preserve value order, forward/reverse skips, count/last, checked predicate
+callbacks and fold/rfold. Callback bodies execute rather than supplying assumed results. Shared
+slice folds and ordinary sum bodies use the same callback execution. Consuming count/last/fold
+through a mutable iterator reference updates that original cursor; by_ref and IntoIterator
+passthrough preserve its reference. Owned iterator clone stays unknown because element Clone
+implementations may execute user code.
+
+Harmless owned iterator drop glue is recognized only when elements need no drop and every
+drop-requiring field of a wrapper is itself harmless. A wrapper with its own destructor remains
+unknown. Evaluated noncapturing closures require compiler-confirmed empty upvars, zero fields
+and zero-sized layout. Captured constant environments are not fabricated, even when zero-sized.
