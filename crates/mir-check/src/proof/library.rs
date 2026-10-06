@@ -39,7 +39,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         instance: ty::Instance<'tcx>,
         values: Vec<Value>,
-        mut conditions: Vec<String>,
+        mut conditions: Vec<Term>,
         memory: Vec<Option<Value>>,
         stack: &[DefId],
         site: (DefId, Span),
@@ -147,12 +147,12 @@ impl<'tcx> Engine<'tcx> {
             let width = width
                 .try_to_target_usize(self.tcx)
                 .ok_or("unknown chunk width")?;
-            let safe = if width == 0 { "false" } else { "true" };
+            let safe = self.terms.boolean(width != 0);
             self.require(
                 site.0,
                 site.1,
                 &state.conditions,
-                safe,
+                &safe,
                 ObligationKind::PanicSafety,
                 "as_chunks_mut requires a nonzero chunk width".to_owned(),
             )?;
@@ -172,8 +172,8 @@ impl<'tcx> Engine<'tcx> {
             let [Value::Bytes { length, .. }] = values else {
                 return Err("as_chunks_mut requires modeled byte slice storage".to_owned());
             };
-            let Some(crate::solver::ground::Constant::BitVec { value: length, .. }) =
-                crate::solver::ground::constant(&length.integer()?.0)
+            let Some(symbolic::Constant::BitVec { value: length, .. }) =
+                symbolic::constant(&length.integer()?.0)
             else {
                 return Err("as_chunks_mut needs a fixed slice length".to_owned());
             };
@@ -190,8 +190,13 @@ impl<'tcx> Engine<'tcx> {
             });
             let mut remainder_projection = projection.clone();
             remainder_projection.push(symbolic::MemoryProjection::Slice {
-                offset: Box::new(symbolic::integer(covered, bits, false)),
-                length: Box::new(symbolic::integer(length - covered, bits, false)),
+                offset: Box::new(symbolic::integer(&self.terms, covered, bits, false)),
+                length: Box::new(symbolic::integer(
+                    &self.terms,
+                    length - covered,
+                    bits,
+                    false,
+                )),
             });
             self.record_model(
                 callee,
@@ -266,12 +271,14 @@ impl<'tcx> Engine<'tcx> {
                 return Err("slice conversion requires a modeled byte slice".to_owned());
             };
             let target_length = symbolic::integer(
+                &self.terms,
                 count as u128,
                 u32::from(self.tcx.sess.target.pointer_width),
                 false,
             );
             let equal =
-                symbolic::binary("eq", (**length).clone(), target_length.clone())?.boolean()?;
+                symbolic::binary(&self.terms, "eq", (**length).clone(), target_length.clone())?
+                    .boolean()?;
             let error_ty = parameters.type_at(1);
             let ty::Adt(error, error_args) = error_ty.kind() else {
                 return Err("slice conversion error type is not modeled".to_owned());
@@ -380,19 +387,28 @@ impl<'tcx> Engine<'tcx> {
                 let value = if matches!(signature.output().kind(), ty::Array(element, _)
                     if *element == self.tcx.types.u8)
                 {
-                    let bits = self.tcx.sess.target.pointer_width;
+                    let bits = u32::from(self.tcx.sess.target.pointer_width);
                     let length = elements.len() as u128;
-                    let mut data =
-                        format!("((as const (Array (_ BitVec {bits}) (_ BitVec 8))) (_ bv0 8))");
+                    let mut data = self.terms.apply(
+                        Op::ConstArray { index_bits: bits },
+                        &[self.terms.bit_vector(0, 8)?],
+                    )?;
                     for (index, element) in elements.into_iter().enumerate() {
                         let (expression, width, signed) = element.integer()?;
                         if width != 8 || signed {
                             return Err("mapped byte has the wrong type".to_owned());
                         }
-                        data = format!("(store {data} (_ bv{index} {bits}) {expression})");
+                        data = self.terms.apply(
+                            Op::Store,
+                            &[
+                                data.clone(),
+                                self.terms.bit_vector(index as u128, bits)?,
+                                expression.clone(),
+                            ],
+                        )?;
                     }
                     Value::Bytes {
-                        length: Box::new(symbolic::integer(length, u32::from(bits), false)),
+                        length: Box::new(symbolic::integer(&self.terms, length, bits, false)),
                         data,
                     }
                 } else {
@@ -481,6 +497,7 @@ impl<'tcx> Engine<'tcx> {
                     continue;
                 }
                 let index = symbolic::integer(
+                    &self.terms,
                     u128::from(index),
                     u32::from(self.tcx.sess.target.pointer_width),
                     false,
@@ -509,18 +526,32 @@ impl<'tcx> Engine<'tcx> {
         let mut results = Vec::new();
         for (elements, _, conditions, memory) in pending {
             let value = if *element == self.tcx.types.u8 {
-                let bits = self.tcx.sess.target.pointer_width;
-                let mut data =
-                    format!("((as const (Array (_ BitVec {bits}) (_ BitVec 8))) (_ bv0 8))");
+                let bits = u32::from(self.tcx.sess.target.pointer_width);
+                let mut data = self.terms.apply(
+                    Op::ConstArray { index_bits: bits },
+                    &[self.terms.bit_vector(0, 8)?],
+                )?;
                 for (index, element) in elements.into_iter().enumerate() {
                     let (expression, width, signed) = element.integer()?;
                     if width != 8 || signed {
                         return Err("generated byte has the wrong type".to_owned());
                     }
-                    data = format!("(store {data} (_ bv{index} {bits}) {expression})");
+                    data = self.terms.apply(
+                        Op::Store,
+                        &[
+                            data.clone(),
+                            self.terms.bit_vector(index as u128, bits)?,
+                            expression.clone(),
+                        ],
+                    )?;
                 }
                 Value::Bytes {
-                    length: Box::new(symbolic::integer(u128::from(count), u32::from(bits), false)),
+                    length: Box::new(symbolic::integer(
+                        &self.terms,
+                        u128::from(count),
+                        bits,
+                        false,
+                    )),
                     data,
                 }
             } else {
@@ -551,14 +582,19 @@ impl<'tcx> Engine<'tcx> {
         match value {
             Value::Elements(elements) if elements.len() as u64 == count => Ok(elements.clone()),
             Value::Bytes { data, .. } if *element == self.tcx.types.u8 => {
-                let bits = self.tcx.sess.target.pointer_width;
+                let bits = u32::from(self.tcx.sess.target.pointer_width);
                 Ok((0..count)
-                    .map(|index| Value::Int {
-                        expression: format!("(select {data} (_ bv{index} {bits}))"),
-                        bits: 8,
-                        signed: false,
+                    .map(|index| {
+                        Ok(Value::Int {
+                            expression: self.terms.apply(
+                                Op::Select,
+                                &[data.clone(), self.terms.bit_vector(index as u128, bits)?],
+                            )?,
+                            bits: 8,
+                            signed: false,
+                        })
                     })
-                    .collect())
+                    .collect::<Result<Vec<_>, String>>()?)
             }
             _ => Err("array storage does not match its instantiated type".to_owned()),
         }

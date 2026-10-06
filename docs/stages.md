@@ -829,3 +829,23 @@ cases against Z3, validate array reads/writes and conversions, reject malformed 
 check a changed arithmetic formula fails equivalence. Repeated doubling stays compact through 256
 levels rather than expanding exponentially. This is the representation foundation; existing MIR
 consumers still use strings pending migration. No new language coverage or loop proofs are claimed.
+
+## Stage 49: interpret MIR with typed terms
+
+Symbolic scalar values, byte arrays, path conditions, contract predicates and float encoding
+constraints now carry interned terms. Arithmetic, casts, integer intrinsics, population counts,
+endian conversion, byte-region copies and atomic ordering use typed operators. Byte offset views
+lower to capture-free array lambdas inside the printer. Persistent state snapshots retain immutable
+nodes, and copies no longer need manually named source lets. Deferred float encoding constraints
+follow structural symbol dependencies, including cycles, rather than lexing SMT text.
+
+Production proofs no longer parse or fold string expressions. Structural constant decisions
+validate assertion types and contexts first. Full query budgets apply during printing, including
+declarations, assertion wrappers and the prelude. Reports retain standalone text scripts; the Z3
+subprocess, assumptions policy and analysis limits remain unchanged.
+
+The operator differential suite covers 57 encodings. Host/ARM byte, float and integer fixtures
+retain their outcomes with smaller queries. An original repeated-signal fixture proves a 20-step wrapping
+calculation that previously hit the query-size cap; a changed scale refutes and an unresolved
+callback remains UNKNOWN. Native replay covers integer boundaries and the changed assertion.
+This changes representation and sharing, not language coverage, type invariants or loop induction.

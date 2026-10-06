@@ -1,4 +1,4 @@
-use super::symbolic::{self, Value};
+use super::symbolic::{self, Context, Op, Term, Value};
 use std::collections::BTreeMap;
 use syn::{BinOp, Expr, Lit, UnOp};
 
@@ -53,23 +53,25 @@ enum ScalarType {
 }
 
 pub fn predicate(
+    context: &Context,
     text: &str,
     bindings: &BTreeMap<String, Value>,
     pointer_bits: u32,
-) -> Result<String, String> {
+) -> Result<Term, String> {
     let expression = syn::parse_str::<Expr>(text).map_err(|error| error.to_string())?;
-    evaluate(&expression, bindings, pointer_bits, None)?.boolean()
+    evaluate(context, &expression, bindings, pointer_bits, None)?.boolean()
 }
 
 fn evaluate(
+    context: &Context,
     expression: &Expr,
     bindings: &BTreeMap<String, Value>,
     pointer_bits: u32,
     expected: Option<ScalarType>,
 ) -> Result<Value, String> {
     match expression {
-        Expr::Paren(expr) => evaluate(&expr.expr, bindings, pointer_bits, expected),
-        Expr::Group(expr) => evaluate(&expr.expr, bindings, pointer_bits, expected),
+        Expr::Paren(expr) => evaluate(context, &expr.expr, bindings, pointer_bits, expected),
+        Expr::Group(expr) => evaluate(context, &expr.expr, bindings, pointer_bits, expected),
         Expr::Path(expr) if expr.qself.is_none() && expr.path.get_ident().is_some() => {
             let name = expr.path.get_ident().unwrap().to_string();
             bindings
@@ -82,7 +84,7 @@ fn evaluate(
                 syn::Member::Named(name) => name.to_string(),
                 syn::Member::Unnamed(index) => index.index.to_string(),
             };
-            evaluate(&expr.base, bindings, pointer_bits, None)?.field(&name)
+            evaluate(context, &expr.base, bindings, pointer_bits, None)?.field(&name)
         }
         Expr::Index(expr) => {
             let Expr::Lit(index) = expr.index.as_ref() else {
@@ -91,11 +93,17 @@ fn evaluate(
             let Lit::Int(index) = &index.lit else {
                 return Err("contract array index must be an integer literal".to_owned());
             };
-            literal(index, false, pointer_bits, Some((pointer_bits, false)))?;
+            literal(
+                context,
+                index,
+                false,
+                pointer_bits,
+                Some((pointer_bits, false)),
+            )?;
             let index = index
                 .base10_parse::<usize>()
                 .map_err(|error| error.to_string())?;
-            match evaluate(&expr.expr, bindings, pointer_bits, None)? {
+            match evaluate(context, &expr.expr, bindings, pointer_bits, None)? {
                 Value::Elements(elements) => elements
                     .get(index)
                     .cloned()
@@ -105,10 +113,10 @@ fn evaluate(
                     if signed || bits != pointer_bits {
                         return Err("contract byte length must be target usize".to_owned());
                     }
-                    let Some(crate::solver::ground::Constant::BitVec {
+                    let Some(symbolic::Constant::BitVec {
                         value: length,
                         bits,
-                    }) = crate::solver::ground::constant(&length)
+                    }) = symbolic::constant(&length)
                     else {
                         return Err("contract byte indexing needs a fixed array length".to_owned());
                     };
@@ -116,7 +124,10 @@ fn evaluate(
                         return Err("contract byte array index is out of bounds".to_owned());
                     }
                     Ok(Value::Int {
-                        expression: format!("(select {data} (_ bv{index} {pointer_bits}))"),
+                        expression: context.apply(
+                            Op::Select,
+                            &[data, context.bit_vector(index as u128, pointer_bits)?],
+                        )?,
                         bits: 8,
                         signed: false,
                     })
@@ -135,7 +146,8 @@ fn evaluate(
                 .to_string();
             if matches!(name.as_str(), "f32" | "f64") {
                 return symbolic::float_cast(
-                    evaluate(&expr.expr, bindings, pointer_bits, None)?,
+                    context,
+                    evaluate(context, &expr.expr, bindings, pointer_bits, None)?,
                     if name == "f32" { 32 } else { 64 },
                 );
             }
@@ -155,13 +167,14 @@ fn evaluate(
                 _ => return Err("unsupported contract cast target".to_owned()),
             };
             symbolic::cast(
-                evaluate(&expr.expr, bindings, pointer_bits, None)?,
+                context,
+                evaluate(context, &expr.expr, bindings, pointer_bits, None)?,
                 target.0,
                 target.1,
             )
         }
         Expr::Match(expr) => {
-            let option = evaluate(&expr.expr, bindings, pointer_bits, None)?;
+            let option = evaluate(context, &expr.expr, bindings, pointer_bits, None)?;
             if let Value::Enum {
                 discriminant,
                 variants,
@@ -192,19 +205,21 @@ fn evaluate(
                         };
                         inner.insert(name, value.clone());
                     }
-                    let result = evaluate(&arm.body, &inner, pointer_bits, expected)?.boolean()?;
+                    let result =
+                        evaluate(context, &arm.body, &inner, pointer_bits, expected)?.boolean()?;
                     let active = symbolic::binary(
+                        context,
                         "eq",
                         (**discriminant).clone(),
-                        symbolic::integer(*number, bits, signed),
+                        symbolic::integer(context, *number, bits, signed),
                     )?
                     .boolean()?;
-                    cases.push(format!("(and {active} {result})"));
+                    cases.push(context.apply(Op::And, &[active, result])?);
                 }
                 if !seen.iter().all(|arm| *arm) {
                     return Err("nonexhaustive Option contract match".to_owned());
                 }
-                return Ok(Value::Bool(format!("(or {})", cases.join(" "))));
+                return Ok(Value::Bool(context.apply(Op::Or, &cases)?));
             }
             let Value::Adt {
                 variant,
@@ -231,7 +246,13 @@ fn evaluate(
                         };
                         inner.insert(name, value.clone());
                     }
-                    selected = Some(evaluate(&arm.body, &inner, pointer_bits, expected)?);
+                    selected = Some(evaluate(
+                        context,
+                        &arm.body,
+                        &inner,
+                        pointer_bits,
+                        expected,
+                    )?);
                 }
             }
             if !seen.iter().all(|arm| *arm) {
@@ -240,14 +261,21 @@ fn evaluate(
             selected.ok_or("unknown Option contract variant".to_owned())
         }
         Expr::Lit(expr) => match &expr.lit {
-            Lit::Bool(value) => Ok(Value::Bool(value.value.to_string())),
-            Lit::Int(value) => literal(value, false, pointer_bits, integer_expected(expected)?),
-            Lit::Float(value) => float_literal(value, false, expected),
+            Lit::Bool(value) => Ok(Value::Bool(context.boolean(value.value))),
+            Lit::Int(value) => literal(
+                context,
+                value,
+                false,
+                pointer_bits,
+                integer_expected(expected)?,
+            ),
+            Lit::Float(value) => float_literal(context, value, false, expected),
             _ => Err("unsupported contract literal".to_owned()),
         },
         Expr::Unary(expr) => match expr.op {
             UnOp::Not(_) => {
-                let value = evaluate(&expr.expr, bindings, pointer_bits, None)?.boolean()?;
+                let value =
+                    evaluate(context, &expr.expr, bindings, pointer_bits, None)?.boolean()?;
                 Ok(Value::Bool(symbolic::not(&value)))
             }
             UnOp::Neg(_) => {
@@ -256,10 +284,14 @@ fn evaluate(
                     return Err("contract negation only supports numeric literals".to_owned());
                 };
                 match &lit.lit {
-                    Lit::Int(value) => {
-                        literal(value, true, pointer_bits, integer_expected(expected)?)
-                    }
-                    Lit::Float(value) => float_literal(value, true, expected),
+                    Lit::Int(value) => literal(
+                        context,
+                        value,
+                        true,
+                        pointer_bits,
+                        integer_expected(expected)?,
+                    ),
+                    Lit::Float(value) => float_literal(context, value, true, expected),
                     _ => Err("expected a numeric literal".to_owned()),
                 }
             }
@@ -278,27 +310,42 @@ fn evaluate(
                 _ => return Err("contract arithmetic and mutation are unsupported".to_owned()),
             };
             if matches!(expr.op, BinOp::And(_) | BinOp::Or(_)) {
-                let left = evaluate(&expr.left, bindings, pointer_bits, None)?.boolean()?;
-                let right = evaluate(&expr.right, bindings, pointer_bits, None)?.boolean()?;
-                return symbolic::binary(operation, Value::Bool(left), Value::Bool(right));
+                let left =
+                    evaluate(context, &expr.left, bindings, pointer_bits, None)?.boolean()?;
+                let right =
+                    evaluate(context, &expr.right, bindings, pointer_bits, None)?.boolean()?;
+                return symbolic::binary(context, operation, Value::Bool(left), Value::Bool(right));
             }
             let (left, right) = if untyped_number(&expr.left) && !untyped_number(&expr.right) {
-                let right = evaluate(&expr.right, bindings, pointer_bits, None)?;
-                let left = evaluate(&expr.left, bindings, pointer_bits, scalar_type(&right))?;
+                let right = evaluate(context, &expr.right, bindings, pointer_bits, None)?;
+                let left = evaluate(
+                    context,
+                    &expr.left,
+                    bindings,
+                    pointer_bits,
+                    scalar_type(&right),
+                )?;
                 (left, right)
             } else {
-                let left = evaluate(&expr.left, bindings, pointer_bits, None)?;
-                let right = evaluate(&expr.right, bindings, pointer_bits, scalar_type(&left))?;
+                let left = evaluate(context, &expr.left, bindings, pointer_bits, None)?;
+                let right = evaluate(
+                    context,
+                    &expr.right,
+                    bindings,
+                    pointer_bits,
+                    scalar_type(&left),
+                )?;
                 (left, right)
             };
-            symbolic::binary(operation, left, right)
+            symbolic::binary(context, operation, left, right)
         }
         Expr::MethodCall(expr)
             if expr.method == "len" && expr.args.is_empty() && expr.turbofish.is_none() =>
         {
-            match evaluate(&expr.receiver, bindings, pointer_bits, None)? {
+            match evaluate(context, &expr.receiver, bindings, pointer_bits, None)? {
                 Value::Bytes { length, .. } => Ok(*length),
                 Value::Elements(elements) => Ok(symbolic::integer(
+                    context,
                     elements.len() as u128,
                     pointer_bits,
                     false,
@@ -356,6 +403,7 @@ fn integer_expected(expected: Option<ScalarType>) -> Result<Option<IntegerType>,
 }
 
 fn float_literal(
+    context: &Context,
     literal: &syn::LitFloat,
     negative: bool,
     expected: Option<ScalarType>,
@@ -394,7 +442,7 @@ fn float_literal(
         }
         u128::from(if negative { -value } else { value }.to_bits())
     };
-    Ok(symbolic::float(raw, bits))
+    Ok(symbolic::float(context, raw, bits))
 }
 
 fn untyped_number(expression: &Expr) -> bool {
@@ -412,6 +460,7 @@ fn untyped_number(expression: &Expr) -> bool {
 }
 
 fn literal(
+    context: &Context,
     literal: &syn::LitInt,
     negative: bool,
     pointer_bits: u32,
@@ -465,7 +514,7 @@ fn literal(
     } else {
         magnitude
     };
-    Ok(symbolic::integer(value, bits, signed))
+    Ok(symbolic::integer(context, value, bits, signed))
 }
 
 #[cfg(test)]
@@ -499,16 +548,30 @@ mod tests {
     fn byte_contract_indices_require_fixed_target_lengths_and_valid_literal_bounds() {
         use super::{BTreeMap, Value, predicate, symbolic};
         for bits in [32, 64] {
+            let context = &symbolic::Context::default();
             let mut bindings = BTreeMap::new();
             bindings.insert(
                 "bytes".to_owned(),
                 Value::Bytes {
-                    length: Box::new(symbolic::integer(3, bits, false)),
-                    data: "buffer".to_owned(),
+                    length: Box::new(symbolic::integer(context, 3, bits, false)),
+                    data: context
+                        .symbol(
+                            0,
+                            symbolic::Sort::Array(
+                                Box::new(symbolic::Sort::BitVec(bits)),
+                                Box::new(symbolic::Sort::BitVec(8)),
+                            ),
+                        )
+                        .unwrap(),
                 },
             );
-            let valid = predicate("bytes[2] == 7_u8", &bindings, bits).unwrap();
-            assert!(valid.contains(&format!("(select buffer (_ bv2 {bits}))")));
+            let valid = predicate(context, "bytes[2] == 7_u8", &bindings, bits).unwrap();
+            assert!(
+                valid
+                    .smt(200_000)
+                    .unwrap()
+                    .contains(&format!("(select v0 (_ bv2 {bits}))"))
+            );
             for expression in [
                 "bytes[3] == 7",
                 "bytes[0_i32] == 7",
@@ -516,27 +579,35 @@ mod tests {
                 "bytes[1 + 1] == 7",
             ] {
                 assert!(
-                    predicate(expression, &bindings, bits).is_err(),
+                    predicate(context, expression, &bindings, bits).is_err(),
                     "{expression}"
                 );
             }
             for length in [
                 Value::Int {
-                    expression: "n".to_owned(),
+                    expression: context.symbol(1, symbolic::Sort::BitVec(bits)).unwrap(),
                     bits,
                     signed: false,
                 },
-                symbolic::integer(3, bits, true),
-                symbolic::integer(3, 8, false),
+                symbolic::integer(context, 3, bits, true),
+                symbolic::integer(context, 3, 8, false),
             ] {
                 bindings.insert(
                     "bytes".to_owned(),
                     Value::Bytes {
                         length: Box::new(length),
-                        data: "buffer".to_owned(),
+                        data: context
+                            .symbol(
+                                0,
+                                symbolic::Sort::Array(
+                                    Box::new(symbolic::Sort::BitVec(bits)),
+                                    Box::new(symbolic::Sort::BitVec(8)),
+                                ),
+                            )
+                            .unwrap(),
                     },
                 );
-                assert!(predicate("bytes[0] == 7", &bindings, bits).is_err());
+                assert!(predicate(context, "bytes[0] == 7", &bindings, bits).is_err());
             }
         }
     }

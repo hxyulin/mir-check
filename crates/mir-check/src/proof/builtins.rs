@@ -34,18 +34,22 @@ impl<'tcx> Engine<'tcx> {
         else {
             return value;
         };
-        let raw_bits = self.fresh(&format!("(_ BitVec {bits})"));
+        let raw_bits = self.fresh(Sort::BitVec(bits));
         let Value::Float {
             expression: decoded,
             ..
-        } = symbolic::float_from_bits(raw_bits.clone(), bits)
+        } = symbolic::float_from_bits(&self.terms, raw_bits.clone(), bits)
         else {
             unreachable!("bit decoding constructs a float");
         };
         // SMT represents all NaN encodings as one value. This equality allows every
         // NaN payload/sign while fixing the exact encoding of other IEEE values.
-        self.float_encodings
-            .insert(raw_bits.clone(), format!("(= {decoded} {expression})"));
+        self.float_encodings.insert(
+            raw_bits.symbol_index().expect("fresh encoding symbol"),
+            self.terms
+                .apply(Op::Equal, &[decoded, expression.clone()])
+                .expect("matching float encoding sorts"),
+        );
         Value::Float {
             expression,
             bits,
@@ -99,6 +103,7 @@ impl<'tcx> Engine<'tcx> {
             return match receiver {
                 Value::Bytes { length, .. } => Ok(Some((**length).clone())),
                 Value::Elements(elements) => Ok(Some(symbolic::integer(
+                    &self.terms,
                     elements.len() as u128,
                     u32::from(self.tcx.sess.target.pointer_width),
                     false,
@@ -138,7 +143,7 @@ impl<'tcx> Engine<'tcx> {
                 callee,
                 "static-value optimization hint; independent Boolean per call",
             );
-            return Ok(Some(Value::Bool(self.fresh("Bool"))));
+            return Ok(Some(Value::Bool(self.fresh(Sort::Bool))));
         }
         if let Some(value) = self.core_endian_encoding(callee, args, signature, values)? {
             return Ok(Some(value));
@@ -155,18 +160,29 @@ impl<'tcx> Engine<'tcx> {
                 return Err("population count requires one modeled integer".to_owned());
             };
             let (expression, bits, _) = value.integer()?;
-            let mut terms: Vec<_> = (0..bits)
-                .map(|bit| format!("((_ zero_extend 31) ((_ extract {bit} {bit}) {expression}))"))
-                .collect();
+            let mut terms = (0..bits)
+                .map(|bit| {
+                    let value = self.terms.apply(
+                        Op::Extract {
+                            high: bit,
+                            low: bit,
+                        },
+                        std::slice::from_ref(&expression),
+                    )?;
+                    self.terms.apply(Op::ZeroExtend(31), &[value])
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             while terms.len() > 1 {
                 terms = terms
                     .chunks(2)
                     .map(|pair| match pair {
-                        [left, right] => format!("(bvadd {left} {right})"),
-                        [only] => only.clone(),
+                        [left, right] => {
+                            self.terms.apply(Op::BvAdd, &[left.clone(), right.clone()])
+                        }
+                        [only] => Ok(only.clone()),
                         _ => unreachable!("pairs have one or two elements"),
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, String>>()?;
             }
             self.record_model(callee, "exact integer population count");
             return Ok(Some(Value::Int {
@@ -192,11 +208,22 @@ impl<'tcx> Engine<'tcx> {
             };
             self.record_model(callee, "IEEE floating-point absolute value");
             return Ok(Some(Value::Float {
-                expression: format!("(fp.abs {expression})"),
+                expression: self
+                    .terms
+                    .apply(Op::FpAbs, std::slice::from_ref(expression))?,
                 bits: *bits,
-                raw_bits: raw_bits.as_ref().map(|raw| {
-                    format!("(bvand {raw} (_ bv{} {bits}))", (1_u128 << (bits - 1)) - 1)
-                }),
+                raw_bits: raw_bits
+                    .as_ref()
+                    .map(|raw| {
+                        self.terms.apply(
+                            Op::BvAnd,
+                            &[
+                                raw.clone(),
+                                self.terms.bit_vector((1_u128 << (bits - 1)) - 1, *bits)?,
+                            ],
+                        )
+                    })
+                    .transpose()?,
             }));
         }
         let float_min = ["minimum_number_nsz_f32", "minimum_number_nsz_f64"]
@@ -226,18 +253,34 @@ impl<'tcx> Engine<'tcx> {
             else {
                 return Err("float min/max requires modeled floats".to_owned());
             };
-            let comparison = if float_min { "fp.lt" } else { "fp.gt" };
-            let tie = self.fresh("Bool");
+            let comparison = if float_min { Op::FpLt } else { Op::FpGt };
+            let tie = self.fresh(Sort::Bool);
             self.record_model(
                 callee,
                 "IEEE min/max; numeric NaN fallback and either signed-zero tie",
             );
+            let order = self
+                .terms
+                .apply(comparison, &[left.clone(), right.clone()])?;
+            let ordered = self
+                .terms
+                .apply(Op::Ite, &[order, left.clone(), right.clone()])?;
+            let tied = self
+                .terms
+                .apply(Op::Ite, &[tie, left.clone(), right.clone()])?;
+            let equal = self
+                .terms
+                .apply(Op::FpEqual, &[left.clone(), right.clone()])?;
+            let numeric = self.terms.apply(Op::Ite, &[equal, tied, ordered])?;
+            let right_nan = self.terms.apply(Op::FpIsNaN, std::slice::from_ref(right))?;
+            let right_result = self
+                .terms
+                .apply(Op::Ite, &[right_nan, left.clone(), numeric])?;
+            let left_nan = self.terms.apply(Op::FpIsNaN, std::slice::from_ref(left))?;
             let result = Value::Float {
-                expression: format!(
-                    "(ite (fp.isNaN {left}) {right} (ite (fp.isNaN {right}) {left} \
-                     (ite (fp.eq {left} {right}) (ite {tie} {left} {right}) \
-                     (ite ({comparison} {left} {right}) {left} {right}))))"
-                ),
+                expression: self
+                    .terms
+                    .apply(Op::Ite, &[left_nan, right.clone(), right_result])?,
                 bits: *bits,
                 raw_bits: None,
             };
@@ -302,7 +345,11 @@ impl<'tcx> Engine<'tcx> {
                     callee,
                     "exact floating-point construction from storage bits",
                 );
-                return Ok(Some(symbolic::float_from_bits(expression, bits)));
+                return Ok(Some(symbolic::float_from_bits(
+                    &self.terms,
+                    expression,
+                    bits,
+                )));
             }
         }
         if self
@@ -328,9 +375,16 @@ impl<'tcx> Engine<'tcx> {
                 return Err("float finiteness requires a modeled float".to_owned());
             };
             self.record_model(callee, "IEEE floating-point finiteness classification");
-            return Ok(Some(Value::Bool(format!(
-                "(and (not (fp.isNaN {expression})) (not (fp.isInfinite {expression})))"
-            ))));
+            let nan = self
+                .terms
+                .apply(Op::FpIsNaN, std::slice::from_ref(expression))?;
+            let infinite = self
+                .terms
+                .apply(Op::FpIsInfinite, std::slice::from_ref(expression))?;
+            return Ok(Some(Value::Bool(self.terms.apply(
+                Op::And,
+                &[symbolic::not(&nan), symbolic::not(&infinite)],
+            )?)));
         }
         if self
             .tcx
@@ -374,7 +428,7 @@ impl<'tcx> Engine<'tcx> {
             else {
                 return Err("float clamp requires three modeled floats".to_owned());
             };
-            let safe = format!("(fp.leq {min} {max})");
+            let safe = self.terms.apply(Op::FpLe, &[min.clone(), max.clone()])?;
             self.record_model(
                 callee,
                 "IEEE floating-point clamp with checked ordered bounds",
@@ -388,22 +442,33 @@ impl<'tcx> Engine<'tcx> {
                 "float clamp bounds must be ordered and neither bound may be NaN".to_owned(),
             )?;
             state.conditions.push(safe);
+            let below = self
+                .terms
+                .apply(Op::FpLt, &[expression.clone(), min.clone()])?;
+            let above = self
+                .terms
+                .apply(Op::FpGt, &[expression.clone(), max.clone()])?;
+            let upper = self
+                .terms
+                .apply(Op::Ite, &[above.clone(), max.clone(), expression.clone()])?;
+            let result = self
+                .terms
+                .apply(Op::Ite, &[below.clone(), min.clone(), upper])?;
+            let raw_bits = raw_bits
+                .as_ref()
+                .zip(min_raw.as_ref())
+                .zip(max_raw.as_ref())
+                .map(|((raw, min_raw), max_raw)| {
+                    let upper = self
+                        .terms
+                        .apply(Op::Ite, &[above, max_raw.clone(), raw.clone()])?;
+                    self.terms.apply(Op::Ite, &[below, min_raw.clone(), upper])
+                })
+                .transpose()?;
             return Ok(Some(Value::Float {
-                expression: format!(
-                    "(ite (fp.lt {expression} {min}) {min} \
-                     (ite (fp.gt {expression} {max}) {max} {expression}))"
-                ),
+                expression: result,
                 bits: *bits,
-                raw_bits: raw_bits
-                    .as_ref()
-                    .zip(min_raw.as_ref())
-                    .zip(max_raw.as_ref())
-                    .map(|((raw, min_raw), max_raw)| {
-                        format!(
-                            "(ite (fp.lt {expression} {min}) {min_raw} \
-                         (ite (fp.gt {expression} {max}) {max_raw} {raw}))"
-                        )
-                    }),
+                raw_bits,
             }));
         }
         if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
@@ -464,7 +529,8 @@ impl<'tcx> Engine<'tcx> {
                 Value::Bytes { length, .. } => &**length,
                 _ => return Err("range receiver is not modeled".to_owned()),
             };
-            let safe = symbolic::binary("le", end.clone(), length.clone())?.boolean()?;
+            let safe =
+                symbolic::binary(&self.terms, "le", end.clone(), length.clone())?.boolean()?;
             self.require(
                 caller,
                 span,
@@ -486,6 +552,7 @@ impl<'tcx> Engine<'tcx> {
                 let mut projection = projection.clone();
                 projection.push(symbolic::MemoryProjection::Slice {
                     offset: Box::new(symbolic::integer(
+                        &self.terms,
                         0,
                         u32::from(self.tcx.sess.target.pointer_width),
                         false,
@@ -524,7 +591,12 @@ impl<'tcx> Engine<'tcx> {
                 return Err("conversion arity mismatch".to_owned());
             };
             self.record_model(callee, "lossless integer conversion");
-            return Ok(Some(symbolic::cast(value.clone(), bits, signed)?));
+            return Ok(Some(symbolic::cast(
+                &self.terms,
+                value.clone(),
+                bits,
+                signed,
+            )?));
         }
         let core = self
             .tcx
@@ -557,18 +629,26 @@ impl<'tcx> Engine<'tcx> {
                     && self.tcx.data_layout.endian == rustc_abi::Endian::Little);
             let count = bits / 8;
             let pointer_bits = self.tcx.sess.target.pointer_width;
-            let mut bytes: Vec<_> = (0..count)
-                .map(|index| format!("(select decoded_bytes (_ bv{index} {pointer_bits}))"))
-                .collect();
+            let mut bytes = (0..count)
+                .map(|index| {
+                    self.terms.apply(
+                        Op::Select,
+                        &[
+                            data.clone(),
+                            self.terms
+                                .bit_vector(u128::from(index), u32::from(pointer_bits))?,
+                        ],
+                    )
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             if little {
                 bytes.reverse();
             }
             let mut bytes = bytes.into_iter();
             let mut expression = bytes.next().ok_or("empty endian integer")?;
             for byte in bytes {
-                expression = format!("(concat {expression} {byte})");
+                expression = self.terms.apply(Op::Concat, &[expression, byte])?;
             }
-            let expression = format!("(let ((decoded_bytes {data})) {expression})");
             self.record_model(callee, "integer endian decoding; exact byte concatenation");
             return Ok(Some(Value::Int {
                 expression,
@@ -631,8 +711,13 @@ impl<'tcx> Engine<'tcx> {
         else {
             return Err("copy destination requires tracked writable byte storage".to_owned());
         };
-        let safe =
-            symbolic::binary("eq", (**length).clone(), (**source_length).clone())?.boolean()?;
+        let safe = symbolic::binary(
+            &self.terms,
+            "eq",
+            (**length).clone(),
+            (**source_length).clone(),
+        )?
+        .boolean()?;
         self.require(
             caller,
             span,

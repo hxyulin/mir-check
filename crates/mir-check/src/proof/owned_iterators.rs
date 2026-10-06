@@ -208,7 +208,7 @@ impl<'tcx> Engine<'tcx> {
                 .iterator_fold(instance, values, cursor, state, stack, site)
                 .map(Some);
         }
-        let remaining = symbolic::binary("sub", (**back).clone(), (**front).clone())?;
+        let remaining = symbolic::binary(&self.terms, "sub", (**back).clone(), (**front).clone())?;
         let value = match name.as_str() {
             "into_iter" => receiver.clone(),
             "by_ref" => {
@@ -240,7 +240,7 @@ impl<'tcx> Engine<'tcx> {
                 }
                 remaining
             }
-            "is_empty" => symbolic::binary("eq", remaining, self.iterator_index(0))?,
+            "is_empty" => symbolic::binary(&self.terms, "eq", remaining, self.iterator_index(0))?,
             "size_hint" => {
                 let ty::Tuple(fields) = signature.output().kind() else {
                     return Err("owned iterator size hint has unsupported type".to_owned());

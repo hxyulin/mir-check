@@ -172,7 +172,7 @@ impl<'tcx> Engine<'tcx> {
             return Ok(Some(Value::Unit));
         }
         let value = Value::Int {
-            expression: self.fresh(&format!("(_ BitVec {bits})")),
+            expression: self.fresh(Sort::BitVec(bits)),
             bits,
             signed,
         };
@@ -186,7 +186,7 @@ impl<'tcx> Engine<'tcx> {
         order: &Value,
         ordering_ty: Ty<'tcx>,
         allowed: &[&str],
-    ) -> Result<String, String> {
+    ) -> Result<Term, String> {
         let ordering = self
             .tcx
             .get_diagnostic_item(Symbol::intern("Ordering"))
@@ -225,10 +225,9 @@ impl<'tcx> Engine<'tcx> {
                     && def.discriminant_for_variant(self.tcx, index).val == *discriminant
             }) =>
             {
-                Ok(allowed_tags
-                    .iter()
-                    .any(|(index, _)| index == variant)
-                    .to_string())
+                Ok(self
+                    .terms
+                    .boolean(allowed_tags.iter().any(|(index, _)| index == variant)))
             }
             Value::Enum {
                 discriminant,
@@ -251,14 +250,15 @@ impl<'tcx> Engine<'tcx> {
                     .iter()
                     .map(|(_, tag)| {
                         symbolic::binary(
+                            &self.terms,
                             "eq",
                             (**discriminant).clone(),
-                            symbolic::integer(*tag, bits, signed),
+                            symbolic::integer(&self.terms, *tag, bits, signed),
                         )?
                         .boolean()
                     })
                     .collect::<Result<Vec<_>, String>>()?;
-                Ok(format!("(or {})", expressions.join(" ")))
+                self.terms.apply(Op::Or, &expressions)
             }
             _ => Err("atomic ordering is not modeled".to_owned()),
         }

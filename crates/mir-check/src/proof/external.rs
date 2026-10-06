@@ -57,20 +57,36 @@ impl<'tcx> Engine<'tcx> {
                 && self.tcx.data_layout.endian == rustc_abi::Endian::Little);
         let count = bits / 8;
         let pointer_bits = u32::from(self.tcx.sess.target.pointer_width);
-        let mut data =
-            format!("((as const (Array (_ BitVec {pointer_bits}) (_ BitVec 8))) (_ bv0 8))");
+        let mut data = self.terms.apply(
+            Op::ConstArray {
+                index_bits: pointer_bits,
+            },
+            &[self.terms.bit_vector(0, 8)?],
+        )?;
         for index in 0..count {
             let byte = if little { index } else { count - index - 1 };
             let low = byte * 8;
             let high = low + 7;
-            data = format!(
-                "(store {data} (_ bv{index} {pointer_bits}) ((_ extract {high} {low}) encoded_integer))"
-            );
+            let value = self
+                .terms
+                .apply(Op::Extract { high, low }, std::slice::from_ref(&expression))?;
+            data = self.terms.apply(
+                Op::Store,
+                &[
+                    data,
+                    self.terms.bit_vector(u128::from(index), pointer_bits)?,
+                    value,
+                ],
+            )?;
         }
-        data = format!("(let ((encoded_integer {expression})) {data})");
         self.record_model(callee, "integer endian encoding; exact byte extraction");
         Ok(Some(Value::Bytes {
-            length: Box::new(symbolic::integer(u128::from(count), pointer_bits, false)),
+            length: Box::new(symbolic::integer(
+                &self.terms,
+                u128::from(count),
+                pointer_bits,
+                false,
+            )),
             data,
         }))
     }

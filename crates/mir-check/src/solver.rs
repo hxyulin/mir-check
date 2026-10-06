@@ -9,7 +9,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_OUTPUT_BYTES: usize = 262_144;
 const MAX_CACHE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 1024;
+const MAX_QUERY_BYTES: usize = 200_000;
 
+#[cfg(test)]
 pub(crate) mod ground;
 
 pub enum Answer {
@@ -28,29 +30,35 @@ pub struct Query {
     text: String,
     declarations: Vec<String>,
     assertions: Vec<String>,
+    ground: Option<bool>,
 }
 
 impl Query {
+    #[cfg(test)]
     pub fn new(declarations: &[String], conditions: &[String], failure: &str) -> Self {
-        Self::from_assertions(
+        let mut seen = std::collections::HashSet::new();
+        let mut query = Self::from_assertions(
             declarations,
-            conditions.iter().map(String::as_str).chain([failure]),
-        )
+            conditions
+                .iter()
+                .map(String::as_str)
+                .chain([failure])
+                .filter(|assertion| *assertion != "true" && seen.insert(*assertion)),
+        );
+        query.ground = ground::feasible(query.text());
+        query
     }
 
     fn from_assertions<'a>(
         declarations: &[String],
         assertions: impl Iterator<Item = &'a str>,
     ) -> Self {
-        let mut seen = std::collections::HashSet::new();
-        let assertions = assertions
-            .filter(|assertion| *assertion != "true" && seen.insert(*assertion))
-            .map(str::to_owned)
-            .collect();
+        let assertions = assertions.map(str::to_owned).collect();
         let mut query = Self {
             text: prelude().to_owned(),
             declarations: declarations.to_vec(),
             assertions,
+            ground: None,
         };
         for declaration in &query.declarations {
             query.text.push_str(declaration);
@@ -63,83 +71,75 @@ impl Query {
         query
     }
 
-    pub fn with_bindings(
-        declarations: &[String],
-        conditions: &[String],
-        failure: &str,
-        bindings: &std::collections::BTreeMap<String, String>,
-    ) -> Self {
-        if bindings.is_empty() {
-            return Self::new(declarations, conditions, failure);
-        }
-        let mut pending: Vec<&str> = conditions
-            .iter()
-            .map(String::as_str)
-            .chain([failure])
-            .collect();
-        let mut included = std::collections::BTreeSet::new();
-        while let Some(expression) = pending.pop() {
-            let Some(symbols) = expression_symbols(expression) else {
-                return Self::from_assertions(
-                    declarations,
-                    conditions
-                        .iter()
-                        .chain(bindings.values())
-                        .map(String::as_str)
-                        .chain([failure]),
-                );
-            };
-            for symbol in symbols {
-                if let Some(constraint) = bindings.get(symbol)
-                    && included.insert(symbol)
-                {
-                    pending.push(constraint);
-                }
-            }
-        }
-        Self::from_assertions(
-            declarations,
-            conditions
-                .iter()
-                .map(String::as_str)
-                .chain(included.into_iter().map(|symbol| bindings[symbol].as_str()))
-                .chain([failure]),
-        )
-    }
-
     pub fn text(&self) -> &str {
         &self.text
     }
-}
 
-fn expression_symbols(expression: &str) -> Option<Vec<&str>> {
-    let mut symbols = Vec::new();
-    let mut start = None;
-    let mut depth = 0_usize;
-    for (position, byte) in expression.bytes().enumerate() {
-        if !byte.is_ascii()
-            || (byte.is_ascii_control() && !matches!(byte, b'\t' | b'\r' | b'\n'))
-            || matches!(byte, b';' | b'"' | b'|' | b'\\')
+    pub fn from_terms(
+        context: &mir_check::smt::Context,
+        conditions: &[mir_check::smt::Term],
+        failure: &mir_check::smt::Term,
+        bindings: &std::collections::BTreeMap<u32, mir_check::smt::Term>,
+    ) -> Result<Self, String> {
+        use mir_check::smt::{Constant, Sort};
+        let mut pending: Vec<_> = conditions.iter().chain([failure]).collect();
+        let mut included = std::collections::BTreeSet::new();
+        if !bindings.is_empty() {
+            while let Some(term) = pending.pop() {
+                for symbol in term.symbols() {
+                    if let Some(binding) = bindings.get(&symbol)
+                        && included.insert(symbol)
+                    {
+                        pending.push(binding);
+                    }
+                }
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut ground = Some(true);
+        let mut assertions = Vec::new();
+        let declarations = context.declarations();
+        let mut bytes = prelude().len()
+            + "(check-sat)\n".len()
+            + declarations
+                .iter()
+                .map(|line| line.len() + 1)
+                .sum::<usize>();
+        if bytes > MAX_QUERY_BYTES {
+            return Err("symbolic query size limit reached".to_owned());
+        }
+        for term in conditions
+            .iter()
+            .chain(included.into_iter().map(|symbol| &bindings[&symbol]))
+            .chain([failure])
         {
-            return None;
-        }
-        if byte.is_ascii_whitespace() || matches!(byte, b'(' | b')') {
-            if let Some(start) = start.take() {
-                symbols.push(&expression[start..position]);
+            if term.sort() != &Sort::Bool || !term.belongs_to(context) {
+                return Err("query requires Boolean terms from its analysis context".to_owned());
             }
-            match byte {
-                b'(' => depth = depth.checked_add(1)?,
-                b')' => depth = depth.checked_sub(1)?,
-                _ => {}
+            match term.constant() {
+                Some(Constant::Bool(true)) => continue,
+                Some(Constant::Bool(false)) => ground = Some(false),
+                Some(Constant::BitVec(_) | Constant::Rounding(_)) => {
+                    return Err("query assertion has a non-Boolean constant".to_owned());
+                }
+                None if ground != Some(false) => ground = None,
+                None => {}
             }
-        } else {
-            start.get_or_insert(position);
+            if seen.insert(term.id()) {
+                let budget = MAX_QUERY_BYTES
+                    .checked_sub(bytes + "(assert )\n".len())
+                    .ok_or("symbolic query size limit reached")?;
+                let text = term
+                    .smt(budget)
+                    .map_err(|_| "symbolic query size limit reached".to_owned())?;
+                bytes += text.len() + "(assert )\n".len();
+                assertions.push(text);
+            }
         }
+        let mut query = Self::from_assertions(&declarations, assertions.iter().map(String::as_str));
+        query.ground = ground;
+        Ok(query)
     }
-    if let Some(start) = start {
-        symbols.push(&expression[start..]);
-    }
-    (depth == 0).then_some(symbols)
 }
 
 fn prelude() -> &'static str {
@@ -202,7 +202,7 @@ impl Solver {
             *decision
         } else {
             let decision = if !self.custom
-                && let Some(answer) = ground::feasible(query)
+                && let Some(answer) = ground_answer(query, structured)
             {
                 if answer {
                     Decision::Sat
@@ -227,7 +227,7 @@ impl Solver {
         if matches!(self.decisions.get(query), Some(Decision::Unsat)) {
             return Answer::Unsat;
         }
-        if !self.custom && ground::feasible(query) == Some(false) {
+        if !self.custom && ground_answer(query, structured) == Some(false) {
             self.remember(query, Decision::Unsat);
             return Answer::Unsat;
         }
@@ -355,6 +355,21 @@ impl Solver {
         }
         self.cache_bytes += query.len();
         self.decisions.insert(query.to_owned(), decision);
+    }
+}
+
+fn ground_answer(text: &str, query: Option<&Query>) -> Option<bool> {
+    if let Some(query) = query {
+        return query.ground;
+    }
+    #[cfg(test)]
+    {
+        ground::feasible(text)
+    }
+    #[cfg(not(test))]
+    {
+        let _ = text;
+        None
     }
 }
 
@@ -795,115 +810,123 @@ mod incremental_tests {
 #[cfg(test)]
 mod encoding_tests {
     use super::*;
+    use mir_check::smt::{Context, Op, Sort};
     use std::collections::BTreeMap;
 
     #[test]
-    fn absent_latent_encodings_preserve_queries_and_do_not_validate_unsupported_syntax() {
-        let declarations = ["(declare-const v0 Bool)".to_owned()];
-        let conditions = ["true".to_owned(), "v0".to_owned(), "v0".to_owned()];
-        for failure in ["(not v0)", "(= |v0| v0)", "missing", "(not v0"] {
-            let plain = Query::new(&declarations, &conditions, failure);
-            let deferred =
-                Query::with_bindings(&declarations, &conditions, failure, &BTreeMap::new());
-            assert_eq!(plain.text(), deferred.text());
-            assert_eq!(plain.assertions, deferred.assertions);
-        }
-        let mut solver = Solver {
-            custom: false,
-            ..Solver::default()
-        };
-        let invalid = Query::with_bindings(&declarations, &[], "missing", &BTreeMap::new());
-        assert!(matches!(solver.check_query(&invalid), Answer::Unknown(_)));
-        assert!(solver.decisions.is_empty());
+    fn typed_assertions_keep_domains_and_reject_invalid_contexts_before_folding() {
+        let context = Context::default();
+        let x = context.symbol(0, Sort::Bool).unwrap();
+        let not_x = context.apply(Op::Not, std::slice::from_ref(&x)).unwrap();
+        let query = Query::from_terms(
+            &context,
+            &[context.boolean(true), x.clone(), x.clone()],
+            &not_x,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(query.assertions, ["v0", "(not v0)"]);
+        assert!(matches!(
+            Solver::default().check_query(&query),
+            Answer::Unsat
+        ));
+        let other = Context::default().symbol(0, Sort::Bool).unwrap();
+        assert!(
+            Query::from_terms(
+                &context,
+                &[context.boolean(false)],
+                &other,
+                &BTreeMap::new()
+            )
+            .is_err()
+        );
+        let number = context.bit_vector(0, 8).unwrap();
+        assert!(Query::from_terms(&context, &[], &number, &BTreeMap::new()).is_err());
     }
 
     #[test]
-    fn latent_encodings_follow_exact_symbol_dependencies_without_matching_prefixes() {
-        let declarations = [
-            "(declare-const v1 (_ BitVec 8))".to_owned(),
-            "(declare-const v2 (_ BitVec 8))".to_owned(),
-            "(declare-const v10 (_ BitVec 8))".to_owned(),
-        ];
-        let bindings = BTreeMap::from([
-            ("v1".to_owned(), "(= v1 (_ bv41 8))".to_owned()),
-            ("v2".to_owned(), "(= v2 (bvadd v1 (_ bv1 8)))".to_owned()),
-            ("v10".to_owned(), "(= v10 (_ bv77 8))".to_owned()),
-        ]);
-        let query = Query::with_bindings(&declarations, &[], "(distinct v2 (_ bv42 8))", &bindings);
-        assert_eq!(
-            query.text(),
-            Query::new(
-                &declarations,
-                &[bindings["v1"].clone(), bindings["v2"].clone()],
-                "(distinct v2 (_ bv42 8))",
+    fn latent_encodings_follow_typed_symbol_dependencies_without_matching_prefixes() {
+        let context = Context::default();
+        let a = context.symbol(1, Sort::BitVec(8)).unwrap();
+        let b = context.symbol(2, Sort::BitVec(8)).unwrap();
+        let unused = context.symbol(10, Sort::BitVec(8)).unwrap();
+        let first = context
+            .apply(Op::Equal, &[a.clone(), context.bit_vector(41, 8).unwrap()])
+            .unwrap();
+        let add = context
+            .apply(Op::BvAdd, &[a, context.bit_vector(1, 8).unwrap()])
+            .unwrap();
+        let second = context.apply(Op::Equal, &[b.clone(), add]).unwrap();
+        let third = context
+            .apply(
+                Op::Equal,
+                &[unused.clone(), context.bit_vector(77, 8).unwrap()],
             )
-            .text()
-        );
-        assert!(
-            query
-                .assertions
-                .iter()
-                .any(|assertion| assertion == &bindings["v1"])
-        );
-        assert!(
-            query
-                .assertions
-                .iter()
-                .any(|assertion| assertion == &bindings["v2"])
-        );
-        assert!(
-            !query
-                .assertions
-                .iter()
-                .any(|assertion| assertion == &bindings["v10"])
-        );
-        let mut solver = Solver {
-            custom: false,
-            ..Solver::default()
-        };
+            .unwrap();
+        let bindings =
+            BTreeMap::from([(1, first.clone()), (2, second.clone()), (10, third.clone())]);
+        let equal = context
+            .apply(Op::Equal, &[b, context.bit_vector(42, 8).unwrap()])
+            .unwrap();
+        let failure = context.apply(Op::Not, &[equal]).unwrap();
+        let query = Query::from_terms(&context, &[], &failure, &bindings).unwrap();
+        assert!(query.assertions.contains(&first.smt(200_000).unwrap()));
+        assert!(query.assertions.contains(&second.smt(200_000).unwrap()));
+        assert!(!query.assertions.contains(&third.smt(200_000).unwrap()));
+        let mut solver = Solver::default();
         assert!(matches!(solver.check_query(&query), Answer::Unsat));
-        let missing_definition = Query::new(&declarations, &[], "(distinct v2 (_ bv42 8))");
-        assert!(matches!(
-            solver.check_query(&missing_definition),
-            Answer::Sat(_)
-        ));
-        let query = Query::with_bindings(&declarations, &[], "(= v10 (_ bv77 8))", &bindings);
+        let missing = Query::from_terms(&context, &[], &failure, &BTreeMap::new()).unwrap();
+        assert!(matches!(solver.check_query(&missing), Answer::Sat(_)));
+        let failure = context
+            .apply(Op::Equal, &[unused, context.bit_vector(77, 8).unwrap()])
+            .unwrap();
+        let query = Query::from_terms(&context, &[], &failure, &bindings).unwrap();
         assert_eq!(query.assertions.len(), 1);
-        assert_eq!(query.assertions[0], bindings["v10"]);
-        let unused = Query::with_bindings(&declarations, &[], "true", &bindings);
+        let unused = Query::from_terms(&context, &[], &context.boolean(true), &bindings).unwrap();
         assert!(unused.assertions.is_empty());
     }
 
     #[test]
-    fn latent_encoding_cycles_terminate_and_uncertain_lexing_includes_every_definition() {
+    fn latent_encoding_cycles_terminate_and_symbol_collection_is_structural() {
+        let context = Context::default();
+        let x = context.symbol(1, Sort::Bool).unwrap();
+        let y = context.symbol(2, Sort::Bool).unwrap();
         let bindings = BTreeMap::from([
-            ("v1".to_owned(), "(= v1 v2)".to_owned()),
-            ("v2".to_owned(), "(= v2 v1)".to_owned()),
+            (
+                1,
+                context.apply(Op::Equal, &[x.clone(), y.clone()]).unwrap(),
+            ),
+            (2, context.apply(Op::Equal, &[y, x.clone()]).unwrap()),
         ]);
-        let query = Query::with_bindings(&[], &[], "v1", &bindings);
+        let query = Query::from_terms(&context, &[], &x, &bindings).unwrap();
         assert_eq!(query.assertions.len(), 3);
-        for expression in [
-            "(= |v1| v1)",
-            "(= \"v1\" \"v2\")",
-            "true ; v1",
-            "(= v1 v2",
-            "(= v1 v2))",
-            "(= v1 \\v2)",
-            "(= v1 café)",
-            "true\u{0000}",
-            "true\u{000b}",
-            "true\u{000c}",
-            "true\u{007f}",
-        ] {
-            let query = Query::with_bindings(&[], &[], expression, &bindings);
-            for binding in bindings.values() {
-                assert!(
-                    query
-                        .assertions
-                        .iter()
-                        .any(|assertion| assertion == binding)
-                );
-            }
+        assert!(matches!(
+            Solver::default().check_query(&query),
+            Answer::Sat(_)
+        ));
+    }
+
+    #[test]
+    fn typed_queries_enforce_the_whole_script_budget_and_keep_constant_failures_exact() {
+        let context = Context::default();
+        let x = context.symbol(0, Sort::Bool).unwrap();
+        let query = Query::from_terms(
+            &context,
+            &[x, context.boolean(false)],
+            &context.boolean(true),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(query.ground, Some(false));
+        assert!(matches!(
+            Solver::default().check_query(&query),
+            Answer::Unsat
+        ));
+        for index in 1..8000 {
+            context.symbol(index, Sort::Bool).unwrap();
         }
+        assert!(
+            Query::from_terms(&context, &[], &context.boolean(true), &BTreeMap::new()).is_err()
+        );
     }
 }

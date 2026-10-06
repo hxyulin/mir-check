@@ -1,4 +1,5 @@
-use super::{Value, not};
+use super::{Context, Op, Value, not};
+use mir_check::smt::Rounding;
 
 fn format(bits: u32) -> (u32, u32) {
     match bits {
@@ -8,20 +9,32 @@ fn format(bits: u32) -> (u32, u32) {
     }
 }
 
-pub fn float(raw: u128, bits: u32) -> Value {
-    float_from_bits(format!("(_ bv{raw} {bits})"), bits)
+pub fn float(context: &Context, raw: u128, bits: u32) -> Value {
+    float_from_bits(
+        context,
+        context.bit_vector(raw, bits).expect("float storage width"),
+        bits,
+    )
 }
 
-pub fn float_from_bits(raw_bits: String, bits: u32) -> Value {
+pub fn float_from_bits(context: &Context, raw_bits: super::Term, bits: u32) -> Value {
     let (exponent, significand) = format(bits);
     Value::Float {
-        expression: format!("((_ to_fp {exponent} {significand}) {raw_bits})"),
+        expression: context
+            .apply(
+                Op::FloatFromBits {
+                    exponent,
+                    significand,
+                },
+                std::slice::from_ref(&raw_bits),
+            )
+            .expect("matching float storage"),
         bits,
         raw_bits: Some(raw_bits),
     }
 }
 
-pub fn float_negate(value: Value) -> Result<Value, String> {
+pub fn float_negate(context: &Context, value: Value) -> Result<Value, String> {
     let Value::Float {
         expression,
         bits,
@@ -31,22 +44,33 @@ pub fn float_negate(value: Value) -> Result<Value, String> {
         return Err("floating-point negation requires a float".to_owned());
     };
     Ok(Value::Float {
-        expression: format!("(fp.neg {expression})"),
+        expression: context.apply(Op::FpNeg, &[expression])?,
         bits,
         raw_bits: raw_bits
-            .map(|raw| format!("(bvxor {raw} (_ bv{} {bits}))", 1_u128 << (bits - 1))),
+            .map(|raw| {
+                context.apply(
+                    Op::BvXor,
+                    &[raw, context.bit_vector(1_u128 << (bits - 1), bits)?],
+                )
+            })
+            .transpose()?,
     })
 }
 
-pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, String> {
+pub fn binary(
+    context: &Context,
+    operation: &str,
+    left: Value,
+    right: Value,
+) -> Result<Value, String> {
     let (
         Value::Float {
-            expression: left,
+            expression: a,
             bits,
             ..
         },
         Value::Float {
-            expression: right,
+            expression: b,
             bits: other,
             ..
         },
@@ -58,62 +82,90 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
         return Err("floating-point operand types do not match".to_owned());
     }
     let comparison = match operation {
-        "eq" => Some(format!("(fp.eq {left} {right})")),
-        "ne" => Some(not(&format!("(fp.eq {left} {right})"))),
-        "lt" => Some(format!("(fp.lt {left} {right})")),
-        "le" => Some(format!("(fp.leq {left} {right})")),
-        "gt" => Some(format!("(fp.gt {left} {right})")),
-        "ge" => Some(format!("(fp.geq {left} {right})")),
+        "eq" | "ne" => Some(Op::FpEqual),
+        "lt" => Some(Op::FpLt),
+        "le" => Some(Op::FpLe),
+        "gt" => Some(Op::FpGt),
+        "ge" => Some(Op::FpGe),
         _ => None,
     };
-    if let Some(expression) = comparison {
-        return Ok(Value::Bool(expression));
+    if let Some(op) = comparison {
+        let term = context.apply(op, &[a, b])?;
+        return Ok(Value::Bool(if operation == "ne" {
+            not(&term)
+        } else {
+            term
+        }));
     }
-    let operator = match operation {
-        "add" => "fp.add",
-        "sub" => "fp.sub",
-        "mul" => "fp.mul",
-        "div" => "fp.div",
+    let op = match operation {
+        "add" => Op::FpAdd,
+        "sub" => Op::FpSub,
+        "mul" => Op::FpMul,
+        "div" => Op::FpDiv,
         // SMT fp.rem uses the IEEE nearest-integer quotient, unlike Rust's %.
         _ => return Err(format!("unsupported floating-point operation {operation}")),
     };
     Ok(Value::Float {
-        expression: format!("({operator} RNE {left} {right})"),
+        expression: context.apply(op, &[context.rounding(Rounding::NearestEven), a, b])?,
         bits,
         raw_bits: None,
     })
 }
 
-pub fn float_cast(value: Value, bits: u32) -> Result<Value, String> {
+pub fn float_cast(context: &Context, value: Value, bits: u32) -> Result<Value, String> {
     let (exponent, significand) = format(bits);
-    let (operator, expression) = match value {
+    let (op, expression) = match value {
         Value::Int {
             expression, signed, ..
-        } => (if signed { "to_fp" } else { "to_fp_unsigned" }, expression),
+        } => (
+            if signed {
+                Op::SignedToFloat {
+                    exponent,
+                    significand,
+                }
+            } else {
+                Op::UnsignedToFloat {
+                    exponent,
+                    significand,
+                }
+            },
+            expression,
+        ),
         Value::Float {
             expression,
-            bits: old_bits,
+            bits: old,
             raw_bits,
         } => {
-            if bits == old_bits {
+            if bits == old {
                 return Ok(Value::Float {
                     expression,
                     bits,
                     raw_bits,
                 });
             }
-            ("to_fp", expression)
+            (
+                Op::FloatToFloat {
+                    exponent,
+                    significand,
+                },
+                expression,
+            )
         }
         _ => return Err("float conversion requires an integer or float".to_owned()),
     };
     Ok(Value::Float {
-        expression: format!("((_ {operator} {exponent} {significand}) RNE {expression})"),
+        expression: context.apply(op, &[context.rounding(Rounding::NearestEven), expression])?,
         bits,
         raw_bits: None,
     })
 }
 
-pub fn integer_cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
+pub fn integer_cast(
+    context: &Context,
+    value: Value,
+    bits: u32,
+    signed: bool,
+) -> Result<Value, String> {
     let Value::Float {
         expression,
         bits: source_bits,
@@ -125,10 +177,20 @@ pub fn integer_cast(value: Value, bits: u32, signed: bool) -> Result<Value, Stri
     let (exponent, significand) = format(source_bits);
     let magnitude_bits = bits + 1;
     let power = if signed { bits - 1 } else { bits };
-    let upper = format!(
-        "((_ to_fp_unsigned {exponent} {significand}) RNE \
-         (bvshl (_ bv1 {magnitude_bits}) (_ bv{power} {magnitude_bits})))"
-    );
+    let magnitude = context.apply(
+        Op::BvShiftLeft,
+        &[
+            context.bit_vector(1, magnitude_bits)?,
+            context.bit_vector(u128::from(power), magnitude_bits)?,
+        ],
+    )?;
+    let upper = context.apply(
+        Op::UnsignedToFloat {
+            exponent,
+            significand,
+        },
+        &[context.rounding(Rounding::NearestEven), magnitude],
+    )?;
     let max = if signed {
         (1_u128 << (bits - 1)) - 1
     } else if bits == 128 {
@@ -138,18 +200,34 @@ pub fn integer_cast(value: Value, bits: u32, signed: bool) -> Result<Value, Stri
     };
     let min = if signed { 1_u128 << (bits - 1) } else { 0 };
     let lower = if signed {
-        format!("(fp.neg {upper})")
+        context.apply(Op::FpNeg, std::slice::from_ref(&upper))?
     } else {
-        format!("(_ +zero {exponent} {significand})")
+        context.apply(
+            Op::PositiveZero {
+                exponent,
+                significand,
+            },
+            &[],
+        )?
     };
-    let convert = if signed { "fp.to_sbv" } else { "fp.to_ubv" };
+    let convert = context.apply(
+        if signed {
+            Op::FloatToSigned(bits)
+        } else {
+            Op::FloatToUnsigned(bits)
+        },
+        &[context.rounding(Rounding::TowardZero), expression.clone()],
+    )?;
+    let below = context.apply(Op::FpLe, &[expression.clone(), lower])?;
+    let low_result = context.apply(Op::Ite, &[below, context.bit_vector(min, bits)?, convert])?;
+    let above = context.apply(Op::FpGe, &[expression.clone(), upper])?;
+    let high_result = context.apply(
+        Op::Ite,
+        &[above, context.bit_vector(max, bits)?, low_result],
+    )?;
+    let nan = context.apply(Op::FpIsNaN, &[expression])?;
     Ok(Value::Int {
-        expression: format!(
-            "(ite (fp.isNaN {expression}) (_ bv0 {bits}) \
-             (ite (fp.geq {expression} {upper}) (_ bv{max} {bits}) \
-             (ite (fp.leq {expression} {lower}) (_ bv{min} {bits}) \
-             ((_ {convert} {bits}) RTZ {expression}))))"
-        ),
+        expression: context.apply(Op::Ite, &[nan, context.bit_vector(0, bits)?, high_result])?,
         bits,
         signed,
     })

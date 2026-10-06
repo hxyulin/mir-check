@@ -71,7 +71,7 @@ impl<'tcx> Engine<'tcx> {
                 return scalar
                     .to_bool()
                     .discard_err()
-                    .map(|value| Value::Bool(value.to_string()))
+                    .map(|value| Value::Bool(self.terms.boolean(value)))
                     .ok_or_else(|| "unsupported constant boolean".to_owned());
             }
             let bits = scalar
@@ -79,10 +79,10 @@ impl<'tcx> Engine<'tcx> {
                 .discard_err()
                 .ok_or("unsupported constant scalar bits")?;
             if let Some(width) = self.float_type(ty) {
-                return Ok(symbolic::float(bits, width));
+                return Ok(symbolic::float(&self.terms, bits, width));
             }
             let (width, signed) = self.integer_type(ty).ok_or("unsupported constant type")?;
-            return Ok(symbolic::integer(bits, width, signed));
+            return Ok(symbolic::integer(&self.terms, bits, width, signed));
         }
         match ty.kind() {
             ty::Closure(id, args) => {
@@ -161,14 +161,28 @@ impl<'tcx> Engine<'tcx> {
                     return Ok(Value::Elements(elements));
                 }
                 let width = u32::from(self.tcx.sess.target.pointer_width);
-                let mut data =
-                    format!("((as const (Array (_ BitVec {width}) (_ BitVec 8))) (_ bv0 8))");
+                let mut data = self.terms.apply(
+                    Op::ConstArray { index_bits: width },
+                    &[self.terms.bit_vector(0, 8)?],
+                )?;
                 for (index, element) in elements.iter().enumerate() {
                     let (expression, _, _) = element.integer()?;
-                    data = format!("(store {data} (_ bv{index} {width}) {expression})");
+                    data = self.terms.apply(
+                        Op::Store,
+                        &[
+                            data.clone(),
+                            self.terms.bit_vector(index as u128, width)?,
+                            expression.clone(),
+                        ],
+                    )?;
                 }
                 Ok(Value::Bytes {
-                    length: Box::new(symbolic::integer(u128::from(count), width, false)),
+                    length: Box::new(symbolic::integer(
+                        &self.terms,
+                        u128::from(count),
+                        width,
+                        false,
+                    )),
                     data,
                 })
             }

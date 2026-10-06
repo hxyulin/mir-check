@@ -84,6 +84,7 @@ enum Action<'a> {
     Term(&'a Term),
     Space,
     Close,
+    Text(String),
 }
 
 fn expression(root: &Term, shared: &HashSet<usize>, output: &mut Output) -> Result<(), String> {
@@ -98,6 +99,10 @@ fn expression(root: &Term, shared: &HashSet<usize>, output: &mut Output) -> Resu
                 output.push(")")?;
                 continue;
             }
+            Action::Text(text) => {
+                output.push(&text)?;
+                continue;
+            }
             Action::Term(term) => term,
         };
         if shared.contains(&term.node.id) {
@@ -107,6 +112,17 @@ fn expression(root: &Term, shared: &HashSet<usize>, output: &mut Output) -> Resu
         match &term.node.kind {
             Kind::Constant(value) => output.push(&literal(*value, term.sort()))?,
             Kind::Symbol(index) => output.push(&format!("v{index}"))?,
+            Kind::Apply(Op::ArrayOffset, children) => {
+                let name = format!("i{}", term.node.id);
+                output.push(&format!(
+                    "(lambda (({name} {})) (select ",
+                    sort(children[1].sort())
+                ))?;
+                pending.push(Action::Text(format!(" {name})))")));
+                pending.push(Action::Term(&children[1]));
+                pending.push(Action::Text(" (bvadd ".to_owned()));
+                pending.push(Action::Term(&children[0]));
+            }
             Kind::Apply(op, children) => {
                 output.push(&operator(*op, term.sort()))?;
                 pending.push(Action::Close);
@@ -149,6 +165,10 @@ pub(super) fn sort(sort: &Sort) -> String {
     }
 }
 
+pub(super) fn declaration(index: u32, value_sort: &Sort) -> String {
+    format!("(declare-const v{index} {})", sort(value_sort))
+}
+
 fn operator(op: Op, result_sort: &Sort) -> String {
     let name = match op {
         Op::Not => "not",
@@ -186,10 +206,12 @@ fn operator(op: Op, result_sort: &Sort) -> String {
         Op::Concat => "concat",
         Op::Select => "select",
         Op::Store => "store",
+        Op::ArrayOffset => "lambda",
         Op::ConstArray { .. } => return format!("((as const {})", sort(result_sort)),
         Op::FpNeg => "fp.neg",
         Op::FpAbs => "fp.abs",
         Op::FpIsNaN => "fp.isNaN",
+        Op::FpIsInfinite => "fp.isInfinite",
         Op::FpEqual => "fp.eq",
         Op::FpLt => "fp.lt",
         Op::FpLe => "fp.leq",

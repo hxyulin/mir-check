@@ -86,6 +86,11 @@ fn every_operator_prints_a_formula_equivalent_to_its_independent_smt_encoding() 
             "(select v6 v0)".to_owned(),
         ),
         (
+            Op::ArrayOffset,
+            vec![array.clone(), a.clone()],
+            "(lambda ((index (_ BitVec 8))) (select v6 (bvadd v0 index)))".to_owned(),
+        ),
+        (
             Op::Store,
             vec![array, a.clone(), b],
             "(store v6 v0 v1)".to_owned(),
@@ -150,6 +155,7 @@ fn every_operator_prints_a_formula_equivalent_to_its_independent_smt_encoding() 
         (Op::FpNeg, "fp.neg"),
         (Op::FpAbs, "fp.abs"),
         (Op::FpIsNaN, "fp.isNaN"),
+        (Op::FpIsInfinite, "fp.isInfinite"),
     ] {
         cases.push((op, vec![f.clone()], format!("({name} v4)")));
     }
@@ -174,7 +180,7 @@ fn every_operator_prints_a_formula_equivalent_to_its_independent_smt_encoding() 
             format!("({name} RNE v4 v5)"),
         ));
     }
-    assert_eq!(cases.len(), 55);
+    assert_eq!(cases.len(), 57);
     let mut script = String::from("(set-logic ALL)\n(set-option :timeout 5000)\n");
     for (index, sort) in [
         (0, "(_ BitVec 8)"),

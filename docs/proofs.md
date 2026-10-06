@@ -13,14 +13,16 @@ atomic Ordering uses its actual compiler enum. Contract expressions use syn synt
 including scoped post-state references. Strings remain appropriate for source selectors,
 diagnostics and the separately generated SMT protocol.
 
-A typed, interned term DAG is available for the encoding migration. Its nodes carry explicit sorts
-and operator enums; construction checks arity, widths and analysis-context identity before folding.
+A typed, interned term DAG carries symbolic values, path conditions and encoding constraints. Its
+nodes carry explicit sorts and operator enums; construction checks arity, widths and analysis-context identity before folding.
 The printer introduces scoped lets when sharing saves bytes and enforces an output byte budget.
 Closed Boolean and at-most-128-bit integer operations fold structurally; larger widened arithmetic
 and floating-point operations retain exact solver terms. Numeric fp.eq is kept distinct from SMT
 equality, including NaN and signed-zero behavior. Z3 differential tests exercise the operators and
-constant boundaries. The interpreter has not yet migrated its string-valued expressions to this
-module, so the current execution and query limits below remain unchanged.
+constant boundaries. Byte views are typed offset-array nodes, lowered to capture-free lambdas by
+the printer. The interpreter does not build or parse SMT expression strings. Query text is emitted
+at the solver boundary and for report input descriptions. Execution and query limits below remain
+unchanged; compact expressions can complete proofs that previously hit the query-size cap.
 
 Language items identify compiler hooks rather than all language operations. Broad support also
 requires complete MIR operations, memory/ownership rules, calls and intrinsics. Even complete
@@ -123,15 +125,15 @@ instantiated and normalized MIR bodies through Rc, keyed by the full compiler In
 not cache contracts, state or proof outcomes. Branch growth and complex solver queries can
 therefore remain expensive.
 
-A bounded in-process evaluator handles fully constant Boolean and bit-vector queries. It
-validates the complete script and every assertion before deciding, including types, widths and
-operator arity. Supported integer operations wrap at their declared width; signed comparisons
-and sign/zero extensions preserve that width's semantics. Parser limits, symbolic expressions,
-floating point, arrays and unsupported syntax fall back to Z3. Constant false failure conditions
-can discharge obligations directly; failing obligations still request a Z3 counterexample model.
-The same exact evaluator folds supported closed Boolean/bit-vector MIR expressions before
-larger symbolic terms are built. Unsupported expressions remain symbolic. This evaluator is part
-of the trusted implementation and has differential tests against Z3.
+Structural simplification folds supported closed Boolean and bit-vector terms after type and
+arity validation. Integer operations wrap at their declared width; signed comparisons and
+sign/zero extensions preserve that width's semantics. Closed arithmetic wider than 128 bits and
+floating-point operations retain solver terms. Query construction validates every relevant
+Boolean assertion and its context before recognizing an all-true domain or a false conjunct.
+Failing obligations still request a Z3 counterexample model. Symbolic questions go to Z3, with
+the existing decision cache and persistent subprocess. No symbolic search runs inside mir-check.
+The folder is part of the trusted implementation and has differential tests against Z3. The old
+string evaluator remains test-only for protocol regressions; production proofs do not use it.
 
 Setting MIR_CHECK_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
 existing -T:6 process option. This compatibility path relies on the executable honoring that

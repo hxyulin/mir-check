@@ -88,61 +88,77 @@ impl<'tcx> Engine<'tcx> {
                 Ok(expression)
             })
             .collect::<Result<Vec<_>, String>>()?;
-        let left = "integer_operand_0";
-        let right = "integer_operand_1";
+        let left = &arguments[0];
         let expression = match operation {
             IntegerIntrinsic::Min | IntegerIntrinsic::Max => {
-                let comparison = if signed { "bvslt" } else { "bvult" };
-                let (less, greater) = match operation {
-                    IntegerIntrinsic::Min => (left, right),
-                    IntegerIntrinsic::Max => (right, left),
-                    IntegerIntrinsic::SaturatingAdd
-                    | IntegerIntrinsic::SaturatingSub
-                    | IntegerIntrinsic::LeadingZeros
-                    | IntegerIntrinsic::TrailingZeros
-                    | IntegerIntrinsic::SwapBytes
-                    | IntegerIntrinsic::ReverseBits => unreachable!(),
+                let right = &arguments[1];
+                let comparison = self.terms.apply(
+                    if signed {
+                        Op::BvSignedLt
+                    } else {
+                        Op::BvUnsignedLt
+                    },
+                    &[left.clone(), right.clone()],
+                )?;
+                let (less, greater) = if matches!(operation, IntegerIntrinsic::Min) {
+                    (left, right)
+                } else {
+                    (right, left)
                 };
-                format!("(ite ({comparison} {left} {right}) {less} {greater})")
+                self.terms
+                    .apply(Op::Ite, &[comparison, less.clone(), greater.clone()])?
             }
             IntegerIntrinsic::SaturatingAdd | IntegerIntrinsic::SaturatingSub => {
-                saturation(left, right, bits, signed, operation)
+                saturation(&self.terms, left, &arguments[1], bits, signed, operation)?
             }
             IntegerIntrinsic::LeadingZeros | IntegerIntrinsic::TrailingZeros => {
-                let mut result = format!("(_ bv{bits} 32)");
+                let mut result = self.terms.bit_vector(u128::from(bits), 32)?;
                 for offset in 0..bits {
-                    let (bit, zeros) = match operation {
-                        IntegerIntrinsic::LeadingZeros => (offset, bits - offset - 1),
-                        IntegerIntrinsic::TrailingZeros => (bits - offset - 1, bits - offset - 1),
-                        IntegerIntrinsic::Min
-                        | IntegerIntrinsic::Max
-                        | IntegerIntrinsic::SaturatingAdd
-                        | IntegerIntrinsic::SaturatingSub
-                        | IntegerIntrinsic::SwapBytes
-                        | IntegerIntrinsic::ReverseBits => unreachable!(),
+                    let bit = if matches!(operation, IntegerIntrinsic::LeadingZeros) {
+                        offset
+                    } else {
+                        bits - offset - 1
                     };
-                    result = format!(
-                        "(ite (= ((_ extract {bit} {bit}) {left}) (_ bv1 1)) \
-                         (_ bv{zeros} 32) {result})"
-                    );
+                    let zeros = bits - offset - 1;
+                    let extracted = self.terms.apply(
+                        Op::Extract {
+                            high: bit,
+                            low: bit,
+                        },
+                        std::slice::from_ref(left),
+                    )?;
+                    let set = self
+                        .terms
+                        .apply(Op::Equal, &[extracted, self.terms.bit_vector(1, 1)?])?;
+                    result = self.terms.apply(
+                        Op::Ite,
+                        &[set, self.terms.bit_vector(u128::from(zeros), 32)?, result],
+                    )?;
                 }
                 result
             }
             IntegerIntrinsic::SwapBytes | IntegerIntrinsic::ReverseBits => {
-                let chunk_bits = match operation {
-                    IntegerIntrinsic::SwapBytes => 8,
-                    IntegerIntrinsic::ReverseBits => 1,
-                    IntegerIntrinsic::Min
-                    | IntegerIntrinsic::Max
-                    | IntegerIntrinsic::SaturatingAdd
-                    | IntegerIntrinsic::SaturatingSub
-                    | IntegerIntrinsic::LeadingZeros
-                    | IntegerIntrinsic::TrailingZeros => unreachable!(),
+                let chunk_bits = if matches!(operation, IntegerIntrinsic::SwapBytes) {
+                    8
+                } else {
+                    1
                 };
-                let mut result = format!("((_ extract {} 0) {left})", chunk_bits - 1);
+                let mut result = self.terms.apply(
+                    Op::Extract {
+                        high: chunk_bits - 1,
+                        low: 0,
+                    },
+                    std::slice::from_ref(left),
+                )?;
                 for low in (chunk_bits..bits).step_by(chunk_bits as usize) {
-                    let high = low + chunk_bits - 1;
-                    result = format!("(concat {result} ((_ extract {high} {low}) {left}))");
+                    let extracted = self.terms.apply(
+                        Op::Extract {
+                            high: low + chunk_bits - 1,
+                            low,
+                        },
+                        std::slice::from_ref(left),
+                    )?;
+                    result = self.terms.apply(Op::Concat, &[result, extracted])?;
                 }
                 result
             }
@@ -151,14 +167,8 @@ impl<'tcx> Engine<'tcx> {
             callee,
             "exact primitive integer min/max, saturation or bit transformation",
         );
-        let bindings = arguments
-            .iter()
-            .enumerate()
-            .map(|(index, argument)| format!("(integer_operand_{index} {argument})"))
-            .collect::<Vec<_>>()
-            .join(" ");
         Ok(Some(Value::Int {
-            expression: format!("(let ({bindings}) {expression})"),
+            expression,
             bits: if count { 32 } else { bits },
             signed: !count && signed,
         }))
@@ -166,41 +176,74 @@ impl<'tcx> Engine<'tcx> {
 }
 
 fn saturation(
-    left: &str,
-    right: &str,
+    context: &Context,
+    left: &Term,
+    right: &Term,
     bits: u32,
     signed: bool,
     operation: IntegerIntrinsic,
-) -> String {
-    let operator = match operation {
-        IntegerIntrinsic::SaturatingAdd => "bvadd",
-        IntegerIntrinsic::SaturatingSub => "bvsub",
+) -> Result<Term, String> {
+    let op = match operation {
+        IntegerIntrinsic::SaturatingAdd => Op::BvAdd,
+        IntegerIntrinsic::SaturatingSub => Op::BvSub,
         IntegerIntrinsic::Min
         | IntegerIntrinsic::Max
         | IntegerIntrinsic::LeadingZeros
         | IntegerIntrinsic::TrailingZeros
         | IntegerIntrinsic::SwapBytes
-        | IntegerIntrinsic::ReverseBits => unreachable!(),
+        | IntegerIntrinsic::ReverseBits => unreachable!("only saturating arithmetic is dispatched"),
     };
-    let extend = if signed { "sign_extend" } else { "zero_extend" };
-    let wide = format!("({operator} ((_ {extend} 1) {left}) ((_ {extend} 1) {right}))");
-    let result = format!("((_ extract {} 0) {wide})", bits - 1);
-    if signed {
-        let min = format!("(_ bv{} {bits})", 1_u128 << (bits - 1));
-        let max = format!("(_ bv{} {bits})", (1_u128 << (bits - 1)) - 1);
-        format!(
-            "(ite (bvslt {wide} ((_ sign_extend 1) {min})) {min} \
-                 (ite (bvsgt {wide} ((_ sign_extend 1) {max})) {max} {result}))"
-        )
-    } else if matches!(operation, IntegerIntrinsic::SaturatingSub) {
-        format!("(ite (bvult {left} {right}) (_ bv0 {bits}) {result})")
+    let extend = if signed {
+        Op::SignExtend(1)
     } else {
-        let maximum = if bits == 128 {
-            u128::MAX
-        } else {
-            (1_u128 << bits) - 1
-        };
-        let max = format!("(_ bv{maximum} {bits})");
-        format!("(ite (bvugt {wide} ((_ zero_extend 1) {max})) {max} {result})")
+        Op::ZeroExtend(1)
+    };
+    let wide = context.apply(
+        op,
+        &[
+            context.apply(extend, std::slice::from_ref(left))?,
+            context.apply(extend, std::slice::from_ref(right))?,
+        ],
+    )?;
+    let result = context.apply(
+        Op::Extract {
+            high: bits - 1,
+            low: 0,
+        },
+        std::slice::from_ref(&wide),
+    )?;
+    if signed {
+        let min = context.bit_vector(1_u128 << (bits - 1), bits)?;
+        let max = context.bit_vector((1_u128 << (bits - 1)) - 1, bits)?;
+        let above = context.apply(
+            Op::BvSignedGt,
+            &[
+                wide.clone(),
+                context.apply(Op::SignExtend(1), std::slice::from_ref(&max))?,
+            ],
+        )?;
+        let high_result = context.apply(Op::Ite, &[above, max, result])?;
+        let below = context.apply(
+            Op::BvSignedLt,
+            &[
+                wide,
+                context.apply(Op::SignExtend(1), std::slice::from_ref(&min))?,
+            ],
+        )?;
+        context.apply(Op::Ite, &[below, min, high_result])
+    } else if matches!(operation, IntegerIntrinsic::SaturatingSub) {
+        let underflow = context.apply(Op::BvUnsignedLt, &[left.clone(), right.clone()])?;
+        context.apply(Op::Ite, &[underflow, context.bit_vector(0, bits)?, result])
+    } else {
+        let maximum = u128::MAX >> (128 - bits);
+        let max = context.bit_vector(maximum, bits)?;
+        let overflow = context.apply(
+            Op::BvUnsignedGt,
+            &[
+                wide,
+                context.apply(Op::ZeroExtend(1), std::slice::from_ref(&max))?,
+            ],
+        )?;
+        context.apply(Op::Ite, &[overflow, max, result])
     }
 }

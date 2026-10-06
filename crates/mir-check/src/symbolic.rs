@@ -1,6 +1,8 @@
 mod floating;
-mod fold;
+#[cfg(test)]
+mod tests;
 pub use floating::{float, float_cast, float_from_bits, float_negate};
+pub use mir_check::smt::{Context, Op, Sort, Term};
 
 pub const MAX_REPEAT_VALUES: usize = 256;
 
@@ -21,20 +23,20 @@ pub enum MemoryProjection {
 
 #[derive(Clone, Debug)]
 pub enum Value {
-    Bool(String),
+    Bool(Term),
     Int {
-        expression: String,
+        expression: Term,
         bits: u32,
         signed: bool,
     },
     Float {
-        expression: String,
+        expression: Term,
         bits: u32,
-        raw_bits: Option<String>,
+        raw_bits: Option<Term>,
     },
     Bytes {
         length: Box<Value>,
-        data: String,
+        data: Term,
     },
     Adt {
         name: String,
@@ -162,14 +164,14 @@ impl Value {
             .map(|(_, value)| value.clone())
             .ok_or_else(|| format!("unknown contract field {name} in {ty_name}"))
     }
-    pub fn boolean(&self) -> Result<String, String> {
+    pub fn boolean(&self) -> Result<Term, String> {
         match self {
             Self::Bool(expression) => Ok(expression.clone()),
             _ => Err("expected a boolean expression".to_owned()),
         }
     }
 
-    pub fn integer(&self) -> Result<(String, u32, bool), String> {
+    pub fn integer(&self) -> Result<(Term, u32, bool), String> {
         match self {
             Self::Int {
                 expression,
@@ -181,90 +183,132 @@ impl Value {
     }
 }
 
-pub fn integer(value: u128, bits: u32, signed: bool) -> Value {
+pub fn integer(context: &Context, value: u128, bits: u32, signed: bool) -> Value {
     Value::Int {
-        expression: format!("(_ bv{value} {bits})"),
+        expression: context
+            .bit_vector(value, bits)
+            .expect("modeled integer width"),
         bits,
         signed,
     }
 }
 
-pub fn not(expression: &str) -> String {
-    format!("(not {expression})")
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Constant {
+    Bool(bool),
+    BitVec { value: u128, bits: u32 },
 }
 
-pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, String> {
-    binary_unfolded(operation, left, right).map(fold::fold)
-}
-
-fn binary_unfolded(operation: &str, left: Value, right: Value) -> Result<Value, String> {
-    if let (Value::Float { .. }, Value::Float { .. }) = (&left, &right) {
-        return floating::binary(operation, left, right);
+pub fn constant(expression: &Term) -> Option<Constant> {
+    use mir_check::smt::Constant as Scalar;
+    match expression.constant()? {
+        Scalar::Bool(value) => Some(Constant::Bool(value)),
+        Scalar::BitVec(value) => {
+            let Sort::BitVec(bits) = expression.sort() else {
+                return None;
+            };
+            Some(Constant::BitVec { value, bits: *bits })
+        }
+        Scalar::Rounding(_) => None,
     }
-    if let (Value::Bool(left), Value::Bool(right)) = (&left, &right) {
-        let expression = match operation {
-            "eq" => format!("(= {left} {right})"),
-            "ne" => not(&format!("(= {left} {right})")),
-            "and" => format!("(and {left} {right})"),
-            "or" => format!("(or {left} {right})"),
-            "xor" => format!("(xor {left} {right})"),
+}
+
+pub fn not(expression: &Term) -> Term {
+    expression
+        .context()
+        .apply(Op::Not, std::slice::from_ref(expression))
+        .expect("boolean safety condition")
+}
+
+pub fn binary(
+    context: &Context,
+    operation: &str,
+    left: Value,
+    right: Value,
+) -> Result<Value, String> {
+    if let (Value::Float { .. }, Value::Float { .. }) = (&left, &right) {
+        return floating::binary(context, operation, left, right);
+    }
+    if let (Value::Bool(a), Value::Bool(b)) = (&left, &right) {
+        let op = match operation {
+            "eq" | "ne" => Op::Equal,
+            "and" => Op::And,
+            "or" => Op::Or,
+            "xor" => Op::Xor,
             _ => return Err(format!("unsupported boolean operation {operation}")),
         };
-        return Ok(Value::Bool(expression));
+        let term = context.apply(op, &[a.clone(), b.clone()])?;
+        return Ok(Value::Bool(if operation == "ne" {
+            not(&term)
+        } else {
+            term
+        }));
     }
-    let (left, bits, signed) = left.integer()?;
-    let (right, right_bits, right_signed) = right.integer()?;
-    if bits != right_bits || signed != right_signed {
+    let (a, bits, signed) = left.integer()?;
+    let (b, other_bits, other_signed) = right.integer()?;
+    if bits != other_bits || signed != other_signed {
         return Err("integer operand types do not match".to_owned());
     }
-    let comparison = match operation {
-        "eq" => Some(format!("(= {left} {right})")),
-        "ne" => Some(not(&format!("(= {left} {right})"))),
-        "lt" => Some(format!(
-            "({} {left} {right})",
-            if signed { "bvslt" } else { "bvult" }
-        )),
-        "le" => Some(format!(
-            "({} {left} {right})",
-            if signed { "bvsle" } else { "bvule" }
-        )),
-        "gt" => Some(format!(
-            "({} {left} {right})",
-            if signed { "bvsgt" } else { "bvugt" }
-        )),
-        "ge" => Some(format!(
-            "({} {left} {right})",
-            if signed { "bvsge" } else { "bvuge" }
-        )),
-        _ => None,
-    };
-    if let Some(expression) = comparison {
-        return Ok(Value::Bool(expression));
-    }
-    let operator = match operation {
-        "add" | "checked_add" => "bvadd",
-        "sub" | "checked_sub" => "bvsub",
-        "mul" | "checked_mul" => "bvmul",
+    let op = match operation {
+        "eq" | "ne" => Op::Equal,
+        "lt" => {
+            if signed {
+                Op::BvSignedLt
+            } else {
+                Op::BvUnsignedLt
+            }
+        }
+        "le" => {
+            if signed {
+                Op::BvSignedLe
+            } else {
+                Op::BvUnsignedLe
+            }
+        }
+        "gt" => {
+            if signed {
+                Op::BvSignedGt
+            } else {
+                Op::BvUnsignedGt
+            }
+        }
+        "ge" => {
+            if signed {
+                Op::BvSignedGe
+            } else {
+                Op::BvUnsignedGe
+            }
+        }
+        "add" | "checked_add" => Op::BvAdd,
+        "sub" | "checked_sub" => Op::BvSub,
+        "mul" | "checked_mul" => Op::BvMul,
         "div" => {
             if signed {
-                "bvsdiv"
+                Op::BvSignedDiv
             } else {
-                "bvudiv"
+                Op::BvUnsignedDiv
             }
         }
         "rem" => {
             if signed {
-                "bvsrem"
+                Op::BvSignedRem
             } else {
-                "bvurem"
+                Op::BvUnsignedRem
             }
         }
-        "and" => "bvand",
-        "or" => "bvor",
-        "xor" => "bvxor",
+        "and" => Op::BvAnd,
+        "or" => Op::BvOr,
+        "xor" => Op::BvXor,
         _ => return Err(format!("unsupported integer operation {operation}")),
     };
-    let expression = format!("({operator} {left} {right})");
+    let expression = context.apply(op, &[a.clone(), b.clone()])?;
+    if *expression.sort() == Sort::Bool {
+        return Ok(Value::Bool(if operation == "ne" {
+            not(&expression)
+        } else {
+            expression
+        }));
+    }
     let result = Value::Int {
         expression: expression.clone(),
         bits,
@@ -272,41 +316,59 @@ fn binary_unfolded(operation: &str, left: Value, right: Value) -> Result<Value, 
     };
     if matches!(operation, "checked_add" | "checked_sub" | "checked_mul") {
         let extra = if operation == "checked_mul" { bits } else { 1 };
-        let extend = if signed { "sign_extend" } else { "zero_extend" };
-        let wide =
-            format!("({operator} ((_ {extend} {extra}) {left}) ((_ {extend} {extra}) {right}))");
-        let overflow = not(&format!("(= {wide} ((_ {extend} {extra}) {expression}))"));
+        let extend = if signed {
+            Op::SignExtend(extra)
+        } else {
+            Op::ZeroExtend(extra)
+        };
+        let wide = context.apply(
+            op,
+            &[context.apply(extend, &[a])?, context.apply(extend, &[b])?],
+        )?;
+        let extended = context.apply(extend, &[expression])?;
+        let overflow = not(&context.apply(Op::Equal, &[wide, extended])?);
         Ok(Value::Tuple(vec![result, Value::Bool(overflow)]))
     } else {
         Ok(result)
     }
 }
 
-pub fn cast(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
-    cast_unfolded(value, bits, signed).map(fold::fold)
-}
-
-fn cast_unfolded(value: Value, bits: u32, signed: bool) -> Result<Value, String> {
+pub fn cast(context: &Context, value: Value, bits: u32, signed: bool) -> Result<Value, String> {
     if matches!(value, Value::Float { .. }) {
-        return floating::integer_cast(value, bits, signed);
+        return floating::integer_cast(context, value, bits, signed);
     }
     if let Value::Bool(expression) = value {
         return Ok(Value::Int {
-            expression: format!("(ite {expression} (_ bv1 {bits}) (_ bv0 {bits}))"),
+            expression: context.apply(
+                Op::Ite,
+                &[
+                    expression,
+                    context.bit_vector(1, bits)?,
+                    context.bit_vector(0, bits)?,
+                ],
+            )?,
             bits,
             signed,
         });
     }
     let (expression, old_bits, old_signed) = value.integer()?;
     let expression = if bits < old_bits {
-        format!("((_ extract {} 0) {expression})", bits - 1)
+        context.apply(
+            Op::Extract {
+                high: bits - 1,
+                low: 0,
+            },
+            &[expression],
+        )?
     } else if bits > old_bits {
-        let extend = if old_signed {
-            "sign_extend"
-        } else {
-            "zero_extend"
-        };
-        format!("((_ {extend} {}) {expression})", bits - old_bits)
+        context.apply(
+            if old_signed {
+                Op::SignExtend(bits - old_bits)
+            } else {
+                Op::ZeroExtend(bits - old_bits)
+            },
+            &[expression],
+        )?
     } else {
         expression
     };
@@ -317,33 +379,47 @@ fn cast_unfolded(value: Value, bits: u32, signed: bool) -> Result<Value, String>
     })
 }
 
-pub fn shift(leftward: bool, left: Value, right: Value) -> Result<Value, String> {
-    shift_unfolded(leftward, left, right).map(fold::fold)
-}
-
-fn shift_unfolded(leftward: bool, left: Value, right: Value) -> Result<Value, String> {
+pub fn shift(
+    context: &Context,
+    leftward: bool,
+    left: Value,
+    right: Value,
+) -> Result<Value, String> {
     let (left, bits, signed) = left.integer()?;
-    let (right, _, _) = cast(right, bits, false)?.integer()?;
-    let amount = format!("(bvand {right} (_ bv{} {bits}))", bits - 1);
-    let operation = if leftward {
-        "bvshl"
+    let (right, _, _) = cast(context, right, bits, false)?.integer()?;
+    let amount = context.apply(
+        Op::BvAnd,
+        &[right, context.bit_vector(u128::from(bits - 1), bits)?],
+    )?;
+    let op = if leftward {
+        Op::BvShiftLeft
     } else if signed {
-        "bvashr"
+        Op::BvArithmeticShiftRight
     } else {
-        "bvlshr"
+        Op::BvLogicalShiftRight
     };
     Ok(Value::Int {
-        expression: format!("({operation} {left} {amount})"),
+        expression: context.apply(op, &[left, amount])?,
         bits,
         signed,
     })
 }
 
-pub fn select_element(elements: &[Value], index: &Value) -> Result<Value, String> {
+pub fn select_element(
+    context: &Context,
+    elements: &[Value],
+    index: &Value,
+) -> Result<Value, String> {
     let (index, index_bits, _) = index.integer()?;
     let mut result = elements.last().cloned().ok_or("empty array index")?;
     for (position, element) in elements.iter().enumerate().rev().skip(1) {
-        let condition = format!("(= {index} (_ bv{position} {index_bits}))");
+        let condition = context.apply(
+            Op::Equal,
+            &[
+                index.clone(),
+                context.bit_vector(position as u128, index_bits)?,
+            ],
+        )?;
         result = match (element, result) {
             (
                 Value::Int {
@@ -357,12 +433,12 @@ pub fn select_element(elements: &[Value], index: &Value) -> Result<Value, String
                     signed: other_signed,
                 },
             ) if *bits == other_bits && *signed == other_signed => Value::Int {
-                expression: format!("(ite {condition} {expression} {otherwise})"),
+                expression: context.apply(Op::Ite, &[condition, expression.clone(), otherwise])?,
                 bits: *bits,
                 signed: *signed,
             },
             (Value::Bool(expression), Value::Bool(otherwise)) => {
-                Value::Bool(format!("(ite {condition} {expression} {otherwise})"))
+                Value::Bool(context.apply(Op::Ite, &[condition, expression.clone(), otherwise])?)
             }
             (
                 Value::Float {
@@ -375,14 +451,19 @@ pub fn select_element(elements: &[Value], index: &Value) -> Result<Value, String
                     bits: other_bits,
                     raw_bits: other_raw_bits,
                 },
-            ) if *bits == other_bits => Value::Float {
-                expression: format!("(ite {condition} {expression} {otherwise})"),
-                bits: *bits,
-                raw_bits: raw_bits
+            ) if *bits == other_bits => {
+                let raw_bits = raw_bits
                     .as_ref()
                     .zip(other_raw_bits)
-                    .map(|(left, right)| format!("(ite {condition} {left} {right})")),
-            },
+                    .map(|(a, b)| context.apply(Op::Ite, &[condition.clone(), a.clone(), b]))
+                    .transpose()?;
+                Value::Float {
+                    expression: context
+                        .apply(Op::Ite, &[condition, expression.clone(), otherwise])?,
+                    bits: *bits,
+                    raw_bits,
+                }
+            }
             _ => return Err("array choice only models compatible scalar values".to_owned()),
         };
     }

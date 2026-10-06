@@ -5,7 +5,7 @@ use symbolic::MemoryProjection;
 pub(super) struct Iteration {
     pub(super) iterator: Value,
     pub(super) item: Option<Value>,
-    pub(super) conditions: Vec<String>,
+    pub(super) conditions: Vec<Term>,
     pub(super) memory: Vec<Option<Value>>,
 }
 
@@ -225,7 +225,7 @@ impl<'tcx> Engine<'tcx> {
                 .iterator_fold(instance, values, iterator, state, stack, site)
                 .map(Some);
         }
-        let remaining = symbolic::binary("sub", (**back).clone(), (**front).clone())?;
+        let remaining = symbolic::binary(&self.terms, "sub", (**back).clone(), (**front).clone())?;
         if name == Symbol::intern("count")
             && matches!(receiver, Value::Reference { mutable: true, .. })
         {
@@ -425,8 +425,12 @@ impl<'tcx> Engine<'tcx> {
                 &conditions,
             )?;
             let value = if let Some(item) = iteration.item {
-                let Value::Tuple(sum) =
-                    symbolic::binary("checked_add", count.clone(), self.iterator_index(1))?
+                let Value::Tuple(sum) = symbolic::binary(
+                    &self.terms,
+                    "checked_add",
+                    count.clone(),
+                    self.iterator_index(1),
+                )?
                 else {
                     return Err("enumerate count is not modeled".to_owned());
                 };
@@ -463,7 +467,12 @@ impl<'tcx> Engine<'tcx> {
     }
 
     pub(super) fn iterator_index(&self, index: u128) -> Value {
-        symbolic::integer(index, u32::from(self.tcx.sess.target.pointer_width), false)
+        symbolic::integer(
+            &self.terms,
+            index,
+            u32::from(self.tcx.sess.target.pointer_width),
+            false,
+        )
     }
 
     pub(super) fn store_iterator(
@@ -471,7 +480,7 @@ impl<'tcx> Engine<'tcx> {
         receiver: &Value,
         iterator: Value,
         memory: &mut [Option<Value>],
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<(), String> {
         let Value::Reference {
             allocation,
@@ -493,7 +502,7 @@ impl<'tcx> Engine<'tcx> {
         iterator: Value,
         skip: Value,
         reverse: bool,
-        conditions: Vec<String>,
+        conditions: Vec<Term>,
         memory: Vec<Option<Value>>,
     ) -> Result<Vec<Iteration>, String> {
         self.steps += 1;
@@ -509,8 +518,8 @@ impl<'tcx> Engine<'tcx> {
         else {
             return Err("expected modeled slice iterator".to_owned());
         };
-        let remaining = symbolic::binary("sub", (*back).clone(), (*front).clone())?;
-        let inside = symbolic::binary("lt", skip.clone(), remaining)?.boolean()?;
+        let remaining = symbolic::binary(&self.terms, "sub", (*back).clone(), (*front).clone())?;
+        let inside = symbolic::binary(&self.terms, "lt", skip.clone(), remaining)?.boolean()?;
         let mut results = Vec::new();
         let end = [conditions.clone(), vec![symbolic::not(&inside)]].concat();
         if self.feasible(&end)? {
@@ -530,12 +539,13 @@ impl<'tcx> Engine<'tcx> {
         if self.feasible(&conditions)? {
             let index = if reverse {
                 symbolic::binary(
+                    &self.terms,
                     "sub",
-                    symbolic::binary("sub", (*back).clone(), skip)?,
+                    symbolic::binary(&self.terms, "sub", (*back).clone(), skip)?,
                     self.iterator_index(1),
                 )?
             } else {
-                symbolic::binary("add", (*front).clone(), skip)?
+                symbolic::binary(&self.terms, "add", (*front).clone(), skip)?
             };
             let item = if let Value::Reference {
                 allocation,
@@ -554,7 +564,9 @@ impl<'tcx> Engine<'tcx> {
                 let snapshot = self.snapshot(&source, &memory, &conditions, 0)?;
                 match snapshot {
                     Value::Bytes { data, .. } => Value::Int {
-                        expression: format!("(select {data} {})", index.integer()?.0),
+                        expression: self
+                            .terms
+                            .apply(Op::Select, &[data.clone(), index.integer()?.0])?,
                         bits: 8,
                         signed: false,
                     },
@@ -568,7 +580,12 @@ impl<'tcx> Engine<'tcx> {
                 (front, Box::new(index))
             } else {
                 (
-                    Box::new(symbolic::binary("add", index, self.iterator_index(1))?),
+                    Box::new(symbolic::binary(
+                        &self.terms,
+                        "add",
+                        index,
+                        self.iterator_index(1),
+                    )?),
                     back,
                 )
             };
@@ -631,7 +648,7 @@ impl<'tcx> Engine<'tcx> {
                 )?;
                 let Some(item) = iteration.item else {
                     returns.push(Return {
-                        value: Value::Bool(all.to_string()),
+                        value: Value::Bool(self.terms.boolean(all)),
                         conditions: iteration.conditions,
                         memory,
                     });
@@ -655,7 +672,7 @@ impl<'tcx> Engine<'tcx> {
                     let stopped = [result.conditions.clone(), vec![symbolic::not(&keep)]].concat();
                     if self.feasible(&stopped)? {
                         returns.push(Return {
-                            value: Value::Bool((!all).to_string()),
+                            value: Value::Bool(self.terms.boolean(!all)),
                             conditions: stopped,
                             memory: result.memory.clone(),
                         });

@@ -50,7 +50,7 @@ impl<'tcx> Engine<'tcx> {
         pattern: ty::Pattern<'tcx>,
         value: &Value,
         depth: usize,
-    ) -> Result<String, String> {
+    ) -> Result<Term, String> {
         if depth >= MAX_INPUT_DEPTH {
             return Err("input pattern nesting limit reached".to_owned());
         }
@@ -62,13 +62,20 @@ impl<'tcx> Engine<'tcx> {
                         .try_to_leaf()
                         .filter(|scalar| scalar.size().bits() == u64::from(bits))
                         .map(|scalar| {
-                            symbolic::integer(scalar.to_bits(scalar.size()), bits, signed)
+                            symbolic::integer(
+                                &self.terms,
+                                scalar.to_bits(scalar.size()),
+                                bits,
+                                signed,
+                            )
                         })
                         .ok_or_else(|| "unevaluated or mismatched input pattern bound".to_owned())
                 };
-                let lower = symbolic::binary("ge", value.clone(), endpoint(start)?)?.boolean()?;
-                let upper = symbolic::binary("le", value.clone(), endpoint(end)?)?.boolean()?;
-                Ok(format!("(and {lower} {upper})"))
+                let lower = symbolic::binary(&self.terms, "ge", value.clone(), endpoint(start)?)?
+                    .boolean()?;
+                let upper = symbolic::binary(&self.terms, "le", value.clone(), endpoint(end)?)?
+                    .boolean()?;
+                self.terms.apply(Op::And, &[lower, upper])
             }
             ty::PatternKind::Or(patterns) => {
                 if patterns.is_empty() || patterns.len() > 64 {
@@ -78,7 +85,7 @@ impl<'tcx> Engine<'tcx> {
                     .iter()
                     .map(|pattern| self.input_pattern(pattern, value, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(format!("(or {})", alternatives.join(" ")))
+                self.terms.apply(Op::Or, &alternatives)
             }
             ty::PatternKind::NotNull => {
                 Err("non-null pointer input patterns remain unsupported".to_owned())

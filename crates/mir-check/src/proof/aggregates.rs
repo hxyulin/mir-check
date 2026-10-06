@@ -11,7 +11,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         id: DefId,
         ty: Ty<'tcx>,
-        conditions: &mut Vec<String>,
+        conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
         let ty::Adt(def, args) = ty.kind() else {
             return Err("expected an enum type".to_owned());
@@ -23,7 +23,7 @@ impl<'tcx> Engine<'tcx> {
             .integer_type(ty.discriminant_ty(self.tcx))
             .ok_or("unsupported enum discriminant type")?;
         let discriminant = Value::Int {
-            expression: self.fresh(&format!("(_ BitVec {bits})")),
+            expression: self.fresh(Sort::BitVec(bits)),
             bits,
             signed,
         };
@@ -37,9 +37,10 @@ impl<'tcx> Engine<'tcx> {
             let tag = def.discriminant_for_variant(self.tcx, index).val;
             valid.push(
                 symbolic::binary(
+                    &self.terms,
                     "eq",
                     discriminant.clone(),
-                    symbolic::integer(tag, bits, signed),
+                    symbolic::integer(&self.terms, tag, bits, signed),
                 )?
                 .boolean()?,
             );
@@ -59,7 +60,7 @@ impl<'tcx> Engine<'tcx> {
                 .collect::<Result<Vec<_>, _>>()?;
             variants.push(self.constructed(ty, index.as_usize(), fields)?);
         }
-        conditions.push(format!("(or {})", valid.join(" ")));
+        conditions.push(self.terms.apply(Op::Or, &valid)?);
         Ok(Value::Enum {
             discriminant: Box::new(discriminant),
             variants,
@@ -71,7 +72,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         id: DefId,
         ty: Ty<'tcx>,
-        conditions: &mut Vec<String>,
+        conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
         let ty::Adt(def, args) = ty.kind() else {
             return Err("expected a struct type".to_owned());
@@ -107,7 +108,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         id: DefId,
         ty: Ty<'tcx>,
-        conditions: &mut Vec<String>,
+        conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
         let ty::Array(element, count) = ty.kind() else {
             return Err("expected a fixed array input".to_owned());
@@ -146,17 +147,31 @@ impl<'tcx> Engine<'tcx> {
                     return Err("byte array model size limit reached".to_owned());
                 }
                 let bits = u32::from(self.tcx.sess.target.pointer_width);
-                let mut data =
-                    format!("((as const (Array (_ BitVec {bits}) (_ BitVec 8))) (_ bv0 8))");
+                let mut data = self.terms.apply(
+                    Op::ConstArray { index_bits: bits },
+                    &[self.terms.bit_vector(0, 8)?],
+                )?;
                 for (index, value) in values.iter().enumerate() {
                     let (expression, width, signed) = value.integer()?;
                     if width != 8 || signed {
                         return Err("non-byte array element".to_owned());
                     }
-                    data = format!("(store {data} (_ bv{index} {bits}) {expression})");
+                    data = self.terms.apply(
+                        Op::Store,
+                        &[
+                            data.clone(),
+                            self.terms.bit_vector(index as u128, bits)?,
+                            expression.clone(),
+                        ],
+                    )?;
                 }
                 Ok(Value::Bytes {
-                    length: Box::new(symbolic::integer(values.len() as u128, bits, false)),
+                    length: Box::new(symbolic::integer(
+                        &self.terms,
+                        values.len() as u128,
+                        bits,
+                        false,
+                    )),
                     data,
                 })
             }
@@ -211,16 +226,16 @@ impl<'tcx> Engine<'tcx> {
         &self,
         elements: &[Value],
         index: &Value,
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<Value, String> {
         let (expression, bits, signed) = index.integer()?;
         if signed || bits != u32::from(self.tcx.sess.target.pointer_width) {
             return Err("fixed array index type mismatch".to_owned());
         }
-        if let Some(super::super::solver::ground::Constant::BitVec {
+        if let Some(symbolic::Constant::BitVec {
             value,
             bits: constant_bits,
-        }) = super::super::solver::ground::constant(&expression)
+        }) = symbolic::constant(&expression)
             && constant_bits == bits
         {
             return usize::try_from(value)
@@ -229,12 +244,13 @@ impl<'tcx> Engine<'tcx> {
                 .cloned()
                 .ok_or_else(|| "array read lacks a proven bounds check".to_owned());
         }
-        let scalar_choice = symbolic::select_element(elements, index);
+        let scalar_choice = symbolic::select_element(&self.terms, elements, index);
         if scalar_choice.is_ok() {
             let bound = symbolic::binary(
+                &self.terms,
                 "lt",
                 index.clone(),
-                symbolic::integer(elements.len() as u128, bits, false),
+                symbolic::integer(&self.terms, elements.len() as u128, bits, false),
             )?
             .boolean()?;
             let mut outside = conditions.to_vec();
@@ -246,9 +262,10 @@ impl<'tcx> Engine<'tcx> {
         }
         for (position, element) in elements.iter().enumerate() {
             let equal = symbolic::binary(
+                &self.terms,
                 "eq",
                 index.clone(),
-                symbolic::integer(position as u128, bits, false),
+                symbolic::integer(&self.terms, position as u128, bits, false),
             )?
             .boolean()?;
             let mut different = conditions.to_vec();
@@ -258,9 +275,10 @@ impl<'tcx> Engine<'tcx> {
             }
         }
         let bound = symbolic::binary(
+            &self.terms,
             "lt",
             index.clone(),
-            symbolic::integer(elements.len() as u128, bits, false),
+            symbolic::integer(&self.terms, elements.len() as u128, bits, false),
         )?
         .boolean()?;
         let mut outside = conditions.to_vec();
@@ -268,7 +286,7 @@ impl<'tcx> Engine<'tcx> {
         if self.feasible(&outside)? {
             return Err("array read lacks a proven bounds check".to_owned());
         }
-        symbolic::select_element(elements, index).map_err(|_| {
+        symbolic::select_element(&self.terms, elements, index).map_err(|_| {
             "non-scalar array index is not uniquely determined on this path".to_owned()
         })
     }
@@ -284,7 +302,9 @@ impl<'tcx> Engine<'tcx> {
         let bits = u32::from(self.tcx.sess.target.pointer_width);
         let length = match &value {
             Value::Bytes { length, .. } => length.as_ref().clone(),
-            Value::Elements(elements) => symbolic::integer(elements.len() as u128, bits, false),
+            Value::Elements(elements) => {
+                symbolic::integer(&self.terms, elements.len() as u128, bits, false)
+            }
             _ => return Err("constant indexing needs a modeled array or slice".to_owned()),
         };
         let required = if from_end {
@@ -293,9 +313,10 @@ impl<'tcx> Engine<'tcx> {
             min_length
         };
         let long_enough = symbolic::binary(
+            &self.terms,
             "ge",
             length.clone(),
-            symbolic::integer(u128::from(required), bits, false),
+            symbolic::integer(&self.terms, u128::from(required), bits, false),
         )?
         .boolean()?;
         let mut too_short = state.conditions.clone();
@@ -303,16 +324,17 @@ impl<'tcx> Engine<'tcx> {
         if self.feasible(&too_short)? {
             return Err("constant index lacks a proven minimum length".to_owned());
         }
-        let offset = symbolic::integer(u128::from(offset), bits, false);
+        let offset = symbolic::integer(&self.terms, u128::from(offset), bits, false);
         let index = if from_end {
-            symbolic::binary("sub", length.clone(), offset)?
+            symbolic::binary(&self.terms, "sub", length.clone(), offset)?
         } else {
             offset
         };
         match value {
             Value::Elements(elements) => self.fixed_element(&elements, &index, &state.conditions),
             Value::Bytes { data, .. } => {
-                let inside = symbolic::binary("lt", index.clone(), length)?.boolean()?;
+                let inside =
+                    symbolic::binary(&self.terms, "lt", index.clone(), length)?.boolean()?;
                 let mut outside = state.conditions.clone();
                 outside.push(symbolic::not(&inside));
                 if self.feasible(&outside)? {
@@ -320,7 +342,9 @@ impl<'tcx> Engine<'tcx> {
                 }
                 let (expression, _, _) = index.integer()?;
                 Ok(Value::Int {
-                    expression: format!("(select {data} {expression})"),
+                    expression: self
+                        .terms
+                        .apply(Op::Select, &[data.clone(), expression.clone()])?,
                     bits: 8,
                     signed: false,
                 })
@@ -369,8 +393,10 @@ impl<'tcx> Engine<'tcx> {
         let (expression, _, _) = value.integer()?;
         let bits = u32::from(self.tcx.sess.target.pointer_width);
         Ok(Value::Bytes {
-            length: Box::new(symbolic::integer(count as u128, bits, false)),
-            data: format!("((as const (Array (_ BitVec {bits}) (_ BitVec 8))) {expression})"),
+            length: Box::new(symbolic::integer(&self.terms, count as u128, bits, false)),
+            data: self
+                .terms
+                .apply(Op::ConstArray { index_bits: bits }, &[expression])?,
         })
     }
 }

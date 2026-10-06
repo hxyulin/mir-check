@@ -1,6 +1,6 @@
 use super::contracts;
 use super::solver::{Answer, Query, Solver};
-use super::symbolic::{self, Value};
+use super::symbolic::{self, Context, Op, Sort, Term, Value};
 use mir_check::{Contract, ContractKind, Obligation, ObligationKind, Proof, ProofStatus};
 use rustc_attr_ir::{HasAttrs, LangItem};
 use rustc_hir::def::DefKind;
@@ -35,21 +35,22 @@ mod owned_iterators;
 #[derive(Clone)]
 struct State {
     locals: Vec<Option<Value>>,
-    conditions: Vec<String>,
+    conditions: Vec<Term>,
     addresses: Vec<Option<usize>>,
     memory: Vec<Option<Value>>,
 }
 
 struct Return {
     value: Value,
-    conditions: Vec<String>,
+    conditions: Vec<Term>,
     memory: Vec<Option<Value>>,
 }
 
 struct Engine<'tcx> {
     tcx: TyCtxt<'tcx>,
-    declarations: Vec<String>,
-    float_encodings: BTreeMap<String, String>,
+    terms: Context,
+    next_symbol: u32,
+    float_encodings: BTreeMap<u32, Term>,
     steps: usize,
     input_depth: usize,
     input_values: usize,
@@ -72,7 +73,8 @@ pub fn verify(
 ) -> Proof {
     let mut engine = Engine {
         tcx,
-        declarations: Vec::new(),
+        terms: Context::default(),
+        next_symbol: 0,
         float_encodings: BTreeMap::new(),
         steps: 0,
         input_depth: 0,
@@ -196,8 +198,12 @@ impl<'tcx> Engine<'tcx> {
         let description = match value {
             Value::Int { expression, .. }
             | Value::Float { expression, .. }
-            | Value::Bool(expression) => expression.clone(),
-            Value::Bytes { length, data } => format!("len={}, data={data}", length.integer()?.0),
+            | Value::Bool(expression) => expression.smt(MAX_QUERY_BYTES)?,
+            Value::Bytes { length, data } => format!(
+                "len={}, data={}",
+                length.integer()?.0.smt(MAX_QUERY_BYTES)?,
+                data.smt(MAX_QUERY_BYTES)?
+            ),
             Value::Adt { fields, .. } => {
                 for (field, value) in fields {
                     self.input_binding(&format!("{name}.{field}"), value)?;
@@ -279,8 +285,9 @@ impl<'tcx> Engine<'tcx> {
         Ok(bindings)
     }
 
-    fn predicate(&self, text: &str, bindings: &BTreeMap<String, Value>) -> Result<String, String> {
+    fn predicate(&self, text: &str, bindings: &BTreeMap<String, Value>) -> Result<Term, String> {
         contracts::predicate(
+            &self.terms,
             text,
             bindings,
             u32::from(self.tcx.sess.target.pointer_width),
@@ -288,10 +295,12 @@ impl<'tcx> Engine<'tcx> {
         .map_err(|reason| format!("contract `{text}`: {reason}"))
     }
 
-    fn fresh(&mut self, sort: &str) -> String {
-        let symbol = format!("v{}", self.declarations.len());
-        self.declarations
-            .push(format!("(declare-const {symbol} {sort})"));
+    fn fresh(&mut self, sort: Sort) -> Term {
+        let symbol = self
+            .terms
+            .symbol(self.next_symbol, sort)
+            .expect("modeled MIR sort");
+        self.next_symbol += 1;
         symbol
     }
 
@@ -299,7 +308,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         id: DefId,
         ty: Ty<'tcx>,
-        conditions: &mut Vec<String>,
+        conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
         if self.input_depth >= MAX_INPUT_DEPTH {
             return Err("input shape exceeds 16 levels of nesting".to_owned());
@@ -318,7 +327,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         id: DefId,
         ty: Ty<'tcx>,
-        conditions: &mut Vec<String>,
+        conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
         if let ty::Pat(base, pattern) = ty.kind() {
             let value = self.argument_value(id, *base, conditions)?;
@@ -327,20 +336,35 @@ impl<'tcx> Engine<'tcx> {
         }
         if ty.is_char() {
             let value = Value::Int {
-                expression: self.fresh("(_ BitVec 32)"),
+                expression: self.fresh(Sort::BitVec(32)),
                 bits: 32,
                 signed: false,
             };
-            let within =
-                symbolic::binary("le", value.clone(), symbolic::integer(0x10ffff, 32, false))?
-                    .boolean()?;
-            let below =
-                symbolic::binary("lt", value.clone(), symbolic::integer(0xd800, 32, false))?
-                    .boolean()?;
-            let above =
-                symbolic::binary("gt", value.clone(), symbolic::integer(0xdfff, 32, false))?
-                    .boolean()?;
-            conditions.push(format!("(and {within} (or {below} {above}))"));
+            let within = symbolic::binary(
+                &self.terms,
+                "le",
+                value.clone(),
+                symbolic::integer(&self.terms, 0x10ffff, 32, false),
+            )?
+            .boolean()?;
+            let below = symbolic::binary(
+                &self.terms,
+                "lt",
+                value.clone(),
+                symbolic::integer(&self.terms, 0xd800, 32, false),
+            )?
+            .boolean()?;
+            let above = symbolic::binary(
+                &self.terms,
+                "gt",
+                value.clone(),
+                symbolic::integer(&self.terms, 0xdfff, 32, false),
+            )?
+            .boolean()?;
+            conditions.push(self.terms.apply(
+                Op::And,
+                &[within, self.terms.apply(Op::Or, &[below, above])?],
+            )?);
             return Ok(value);
         }
         if let Some(value) = self.atomic_shape(ty) {
@@ -348,19 +372,17 @@ impl<'tcx> Engine<'tcx> {
         }
         if let Some((bits, signed)) = self.integer_type(ty) {
             return Ok(Value::Int {
-                expression: self.fresh(&format!("(_ BitVec {bits})")),
+                expression: self.fresh(Sort::BitVec(bits)),
                 bits,
                 signed,
             });
         }
         if let Some(bits) = self.float_type(ty) {
-            return Ok(symbolic::float_from_bits(
-                self.fresh(&format!("(_ BitVec {bits})")),
-                bits,
-            ));
+            let raw = self.fresh(Sort::BitVec(bits));
+            return Ok(symbolic::float_from_bits(&self.terms, raw, bits));
         }
         match ty.kind() {
-            ty::Bool => Ok(Value::Bool(self.fresh("Bool"))),
+            ty::Bool => Ok(Value::Bool(self.fresh(Sort::Bool))),
             ty::Tuple(fields) if fields.is_empty() => Ok(Value::Unit),
             ty::Tuple(fields) => Ok(Value::Tuple(
                 fields
@@ -392,15 +414,18 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         id: DefId,
         ty: Ty<'tcx>,
-        conditions: &mut Vec<String>,
+        conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
         let bits = u32::from(self.tcx.sess.target.pointer_width);
         let length = match ty.kind() {
             ty::Slice(element) if *element == self.tcx.types.u8 => {
-                let expression = self.fresh(&format!("(_ BitVec {bits})"));
+                let expression = self.fresh(Sort::BitVec(bits));
                 // Valid non-ZST byte slices occupy at most isize::MAX bytes.
                 let max = (1_u128 << (bits - 1)) - 1;
-                conditions.push(format!("(bvule {expression} (_ bv{max} {bits}))"));
+                conditions.push(self.terms.apply(
+                    Op::BvUnsignedLe,
+                    &[expression.clone(), self.terms.bit_vector(max, bits)?],
+                )?);
                 Value::Int {
                     expression,
                     bits,
@@ -411,7 +436,7 @@ impl<'tcx> Engine<'tcx> {
                 let length = length.try_to_target_usize(self.tcx).ok_or_else(|| {
                     format!("unevaluated array length in {}", self.tcx.def_path_str(id))
                 })?;
-                symbolic::integer(u128::from(length), bits, false)
+                symbolic::integer(&self.terms, u128::from(length), bits, false)
             }
             _ => {
                 return Err(format!(
@@ -419,7 +444,10 @@ impl<'tcx> Engine<'tcx> {
                 ));
             }
         };
-        let data = self.fresh(&format!("(Array (_ BitVec {bits}) (_ BitVec 8))"));
+        let data = self.fresh(Sort::Array(
+            Box::new(Sort::BitVec(bits)),
+            Box::new(Sort::BitVec(8)),
+        ));
         Ok(Value::Bytes {
             length: Box::new(length),
             data,
@@ -445,34 +473,29 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
-    fn query(&self, conditions: &[String], failure: &str) -> Result<Query, String> {
+    fn query(&self, conditions: &[Term], failure: &Term) -> Result<Query, String> {
         if self.started.elapsed().as_secs() >= MAX_ROOT_SECONDS {
             return Err("symbolic root exceeded the 30-second execution budget".to_owned());
         }
-        let query = Query::with_bindings(
-            &self.declarations,
-            conditions,
-            failure,
-            &self.float_encodings,
-        );
+        let query = Query::from_terms(&self.terms, conditions, failure, &self.float_encodings)?;
         if query.text().len() > MAX_QUERY_BYTES {
             return Err("symbolic query size limit reached".to_owned());
         }
         Ok(query)
     }
 
-    fn feasible(&self, conditions: &[String]) -> Result<bool, String> {
+    fn feasible(&self, conditions: &[Term]) -> Result<bool, String> {
         self.solver
             .borrow_mut()
-            .feasible_query(&self.query(conditions, "true")?)
+            .feasible_query(&self.query(conditions, &self.terms.boolean(true))?)
     }
 
     fn require(
         &mut self,
         id: DefId,
         span: Span,
-        conditions: &[String],
-        safe: &str,
+        conditions: &[Term],
+        safe: &Term,
         kind: ObligationKind,
         detail: String,
     ) -> Result<(), String> {
@@ -546,7 +569,7 @@ impl<'tcx> Engine<'tcx> {
         &mut self,
         instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
-        conditions: Vec<String>,
+        conditions: Vec<Term>,
         memory: Vec<Option<Value>>,
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
@@ -611,7 +634,9 @@ impl<'tcx> Engine<'tcx> {
             if self.steps > MAX_STEPS {
                 return Err("symbolic execution step limit reached".to_owned());
             }
-            state.conditions.retain(|condition| condition != "true");
+            state.conditions.retain(|condition| {
+                condition.constant() != Some(mir_check::smt::Constant::Bool(true))
+            });
             if !self.feasible(&state.conditions)? {
                 continue;
             }
@@ -639,9 +664,10 @@ impl<'tcx> Engine<'tcx> {
                                 _ => return Err("invalid boolean switch value".to_owned()),
                             },
                             Value::Int { bits, signed, .. } => symbolic::binary(
+                                &self.terms,
                                 "eq",
                                 value.clone(),
-                                symbolic::integer(number, *bits, *signed),
+                                symbolic::integer(&self.terms, number, *bits, *signed),
                             )?
                             .boolean()?,
                             _ => return Err("unsupported switch discriminant".to_owned()),
@@ -763,7 +789,7 @@ impl<'tcx> Engine<'tcx> {
                             id,
                             terminator.source_info.span,
                             &state.conditions,
-                            "false",
+                            &self.terms.boolean(false),
                             ObligationKind::PanicSafety,
                             "panic entry point is reachable".to_owned(),
                         )?;
@@ -1075,9 +1101,10 @@ impl<'tcx> Engine<'tcx> {
                     };
                     let (_, bits, signed) = discriminant.integer()?;
                     let equal = symbolic::binary(
+                        &self.terms,
                         "eq",
                         *discriminant,
-                        symbolic::integer(*tag, bits, signed),
+                        symbolic::integer(&self.terms, *tag, bits, signed),
                     )?
                     .boolean()?;
                     let mut wrong = state.conditions.clone();
@@ -1094,12 +1121,16 @@ impl<'tcx> Engine<'tcx> {
                     if signed || bits != length_bits {
                         return Err("byte index type mismatch".to_owned());
                     }
-                    let outside = format!("(bvuge {expression} {length_expression})");
+                    let outside = self
+                        .terms
+                        .apply(Op::BvUnsignedGe, &[expression.clone(), length_expression])?;
                     if self.feasible(&[state.conditions.clone(), vec![outside]].concat())? {
                         return Err("byte read lacks a proven bounds check".to_owned());
                     }
                     Value::Int {
-                        expression: format!("(select {data} {expression})"),
+                        expression: self
+                            .terms
+                            .apply(Op::Select, &[data.clone(), expression.clone()])?,
                         bits: 8,
                         signed: false,
                     }
@@ -1132,7 +1163,7 @@ impl<'tcx> Engine<'tcx> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => self.place(state, *place),
             Operand::RuntimeChecks(checks) => {
-                Ok(Value::Bool(checks.value(self.tcx.sess).to_string()))
+                Ok(Value::Bool(self.terms.boolean(checks.value(self.tcx.sess))))
             }
             Operand::Constant(constant) => {
                 let ty = constant.const_.ty();
@@ -1175,6 +1206,7 @@ impl<'tcx> Engine<'tcx> {
                 let length = match value {
                     Value::Bytes { length, .. } => *length,
                     Value::Elements(elements) => symbolic::integer(
+                        &self.terms,
                         elements.len() as u128,
                         u32::from(self.tcx.sess.target.pointer_width),
                         false,
@@ -1202,6 +1234,7 @@ impl<'tcx> Engine<'tcx> {
                     && index.as_usize() < def.variants().len()
                 {
                     return Ok(symbolic::integer(
+                        &self.terms,
                         def.discriminant_for_variant(self.tcx, index).val,
                         bits,
                         signed,
@@ -1210,7 +1243,7 @@ impl<'tcx> Engine<'tcx> {
                 let modeled = self.place(state, *place)?;
                 match modeled {
                     Value::Adt { discriminant, .. } => {
-                        Ok(symbolic::integer(discriminant, bits, signed))
+                        Ok(symbolic::integer(&self.terms, discriminant, bits, signed))
                     }
                     Value::Enum { discriminant, .. } => {
                         let (_, width, sign) = discriminant.integer()?;
@@ -1233,7 +1266,8 @@ impl<'tcx> Engine<'tcx> {
                             BinOp::MulUnchecked => "checked_mul",
                             _ => unreachable!(),
                         };
-                        let Value::Tuple(mut fields) = symbolic::binary(checked, left, right)?
+                        let Value::Tuple(mut fields) =
+                            symbolic::binary(&self.terms, checked, left, right)?
                         else {
                             return Err("unchecked arithmetic needs integer operands".to_owned());
                         };
@@ -1252,8 +1286,8 @@ impl<'tcx> Engine<'tcx> {
                             .pop()
                             .ok_or_else(|| "missing arithmetic result".to_owned());
                     }
-                    BinOp::Shl => return symbolic::shift(true, left, right),
-                    BinOp::Shr => return symbolic::shift(false, left, right),
+                    BinOp::Shl => return symbolic::shift(&self.terms, true, left, right),
+                    BinOp::Shr => return symbolic::shift(&self.terms, false, left, right),
                     BinOp::Add => "add",
                     BinOp::Sub => "sub",
                     BinOp::Mul => "mul",
@@ -1273,7 +1307,7 @@ impl<'tcx> Engine<'tcx> {
                     BinOp::Ge => "ge",
                     other => return Err(format!("unsupported binary operation {other:?}")),
                 };
-                let value = symbolic::binary(operation, left, right)?;
+                let value = symbolic::binary(&self.terms, operation, left, right)?;
                 Ok(self.materialize_float(value))
             }
             Rvalue::UnaryOp(operation, operand) => {
@@ -1284,7 +1318,9 @@ impl<'tcx> Engine<'tcx> {
                     value
                 };
                 match (operation, value) {
-                    (UnOp::Neg, value @ Value::Float { .. }) => symbolic::float_negate(value),
+                    (UnOp::Neg, value @ Value::Float { .. }) => {
+                        symbolic::float_negate(&self.terms, value)
+                    }
                     (UnOp::Not, Value::Bool(expression)) => {
                         Ok(Value::Bool(symbolic::not(&expression)))
                     }
@@ -1296,7 +1332,7 @@ impl<'tcx> Engine<'tcx> {
                             signed,
                         },
                     ) => Ok(Value::Int {
-                        expression: format!("(bvnot {expression})"),
+                        expression: self.terms.apply(Op::BvNot, &[expression])?,
                         bits,
                         signed,
                     }),
@@ -1308,13 +1344,14 @@ impl<'tcx> Engine<'tcx> {
                             signed: true,
                         },
                     ) => Ok(Value::Int {
-                        expression: format!("(bvneg {expression})"),
+                        expression: self.terms.apply(Op::BvNeg, &[expression])?,
                         bits,
                         signed: true,
                     }),
                     (UnOp::PtrMetadata, Value::MetadataPointer(length)) => Ok(*length),
                     (UnOp::PtrMetadata, Value::Bytes { length, .. }) => Ok(*length),
                     (UnOp::PtrMetadata, Value::Elements(elements)) => Ok(symbolic::integer(
+                        &self.terms,
                         elements.len() as u128,
                         u32::from(self.tcx.sess.target.pointer_width),
                         false,
@@ -1327,10 +1364,11 @@ impl<'tcx> Engine<'tcx> {
                 let (bits, signed) = self
                     .integer_type(*target)
                     .ok_or("unsupported cast target")?;
-                symbolic::cast(value, bits, signed)
+                symbolic::cast(&self.terms, value, bits, signed)
             }
             Rvalue::Cast(CastKind::IntToFloat | CastKind::FloatToFloat, operand, target) => {
                 let value = symbolic::float_cast(
+                    &self.terms,
                     self.operand(id, body, state, operand)?,
                     self.float_type(*target)
                         .ok_or("unsupported float cast target")?,
@@ -1350,7 +1388,11 @@ impl<'tcx> Engine<'tcx> {
                     && let Some(bits) = self.float_type(*target)
                     && bits == source_bits
                 {
-                    return Ok(symbolic::float_from_bits(value.integer()?.0, bits));
+                    return Ok(symbolic::float_from_bits(
+                        &self.terms,
+                        value.integer()?.0,
+                        bits,
+                    ));
                 }
                 Err(format!(
                     "unsupported transmute from {source:?} to {target:?}"
@@ -1360,7 +1402,12 @@ impl<'tcx> Engine<'tcx> {
                 let (bits, signed) = self
                     .integer_type(*target)
                     .ok_or("unsupported cast target")?;
-                symbolic::cast(self.operand(id, body, state, operand)?, bits, signed)
+                symbolic::cast(
+                    &self.terms,
+                    self.operand(id, body, state, operand)?,
+                    bits,
+                    signed,
+                )
             }
             Rvalue::Cast(CastKind::PointerCoercion(..), operand, target) => {
                 let ty::Ref(_, element, mutability) = target.kind() else {

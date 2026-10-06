@@ -19,7 +19,7 @@ impl<'tcx> Engine<'tcx> {
         &self,
         values: &[Value],
         memory: &[Option<Value>],
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<Vec<Value>, String> {
         values
             .iter()
@@ -31,7 +31,7 @@ impl<'tcx> Engine<'tcx> {
         &self,
         value: &Value,
         memory: &[Option<Value>],
-        conditions: &[String],
+        conditions: &[Term],
         depth: usize,
     ) -> Result<Value, String> {
         if depth >= 16 {
@@ -95,7 +95,7 @@ impl<'tcx> Engine<'tcx> {
         &self,
         reference: &Value,
         memory: &[Option<Value>],
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<Value, String> {
         let Value::Reference {
             allocation,
@@ -118,19 +118,25 @@ impl<'tcx> Engine<'tcx> {
                 let bits = u32::from(self.tcx.sess.target.pointer_width);
                 self.memory_bounds(
                     index,
-                    &symbolic::integer(*count as u128, bits, false),
+                    &symbolic::integer(&self.terms, *count as u128, bits, false),
                     conditions,
                 )?;
                 let offset = symbolic::binary(
+                    &self.terms,
                     "mul",
                     (**index).clone(),
-                    symbolic::integer(*width as u128, bits, false),
+                    symbolic::integer(&self.terms, *width as u128, bits, false),
                 )?;
                 value = self.memory_projection(
                     value,
                     &MemoryProjection::Slice {
                         offset: Box::new(offset),
-                        length: Box::new(symbolic::integer(*width as u128, bits, false)),
+                        length: Box::new(symbolic::integer(
+                            &self.terms,
+                            *width as u128,
+                            bits,
+                            false,
+                        )),
                     },
                     conditions,
                 )?;
@@ -146,7 +152,7 @@ impl<'tcx> Engine<'tcx> {
         &self,
         value: Value,
         projection: &MemoryProjection,
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<Value, String> {
         match (projection, value) {
             (MemoryProjection::Field(index), Value::Adt { fields, .. }) => fields
@@ -184,9 +190,13 @@ impl<'tcx> Engine<'tcx> {
                     return Err("memory enum payload missing".to_owned());
                 };
                 let (_, bits, signed) = discriminant.integer()?;
-                let equal =
-                    symbolic::binary("eq", *discriminant, symbolic::integer(*tag, bits, signed))?
-                        .boolean()?;
+                let equal = symbolic::binary(
+                    &self.terms,
+                    "eq",
+                    *discriminant,
+                    symbolic::integer(&self.terms, *tag, bits, signed),
+                )?
+                .boolean()?;
                 if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&equal)]].concat())? {
                     return Err("memory downcast lacks a proven variant check".to_owned());
                 }
@@ -198,7 +208,9 @@ impl<'tcx> Engine<'tcx> {
             (MemoryProjection::Index(index), Value::Bytes { data, length }) => {
                 self.memory_bounds(index, &length, conditions)?;
                 Ok(Value::Int {
-                    expression: format!("(select {data} {})", index.integer()?.0),
+                    expression: self
+                        .terms
+                        .apply(Op::Select, &[data.clone(), index.integer()?.0])?,
                     bits: 8,
                     signed: false,
                 })
@@ -211,23 +223,24 @@ impl<'tcx> Engine<'tcx> {
                 },
             ) => {
                 let valid_offset =
-                    symbolic::binary("le", (**offset).clone(), (*capacity).clone())?.boolean()?;
-                let available = symbolic::binary("sub", (*capacity).clone(), (**offset).clone())?;
+                    symbolic::binary(&self.terms, "le", (**offset).clone(), (*capacity).clone())?
+                        .boolean()?;
+                let available =
+                    symbolic::binary(&self.terms, "sub", (*capacity).clone(), (**offset).clone())?;
                 let valid_length =
-                    symbolic::binary("le", (**length).clone(), available)?.boolean()?;
-                let safe = format!("(and {valid_offset} {valid_length})");
+                    symbolic::binary(&self.terms, "le", (**length).clone(), available)?
+                        .boolean()?;
+                let safe = self.terms.apply(Op::And, &[valid_offset, valid_length])?;
                 if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&safe)]].concat())? {
                     return Err("byte view lacks proven region bounds".to_owned());
                 }
-                let (offset, bits, signed) = offset.integer()?;
+                let (offset, _bits, signed) = offset.integer()?;
                 if signed {
                     return Err("signed byte view offset".to_owned());
                 }
                 Ok(Value::Bytes {
                     length: length.clone(),
-                    data: format!(
-                        "(lambda ((view_index (_ BitVec {bits}))) (select {data} (bvadd {offset} view_index)))"
-                    ),
+                    data: self.terms.apply(Op::ArrayOffset, &[data, offset])?,
                 })
             }
             (MemoryProjection::Chunks { width, count }, bytes @ Value::Bytes { .. }) => {
@@ -238,11 +251,17 @@ impl<'tcx> Engine<'tcx> {
                         bytes.clone(),
                         &MemoryProjection::Slice {
                             offset: Box::new(symbolic::integer(
+                                &self.terms,
                                 (index * width) as u128,
                                 bits,
                                 false,
                             )),
-                            length: Box::new(symbolic::integer(*width as u128, bits, false)),
+                            length: Box::new(symbolic::integer(
+                                &self.terms,
+                                *width as u128,
+                                bits,
+                                false,
+                            )),
                         },
                         conditions,
                     )?);
@@ -257,13 +276,14 @@ impl<'tcx> Engine<'tcx> {
         &self,
         index: &Value,
         length: &Value,
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<(), String> {
         let (_, width, signed) = index.integer()?;
         if signed || width != u32::from(self.tcx.sess.target.pointer_width) {
             return Err("memory index type mismatch".to_owned());
         }
-        let inside = symbolic::binary("lt", index.clone(), length.clone())?.boolean()?;
+        let inside =
+            symbolic::binary(&self.terms, "lt", index.clone(), length.clone())?.boolean()?;
         if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&inside)]].concat())? {
             return Err("memory index lacks a proven bounds check".to_owned());
         }
@@ -325,16 +345,16 @@ impl<'tcx> Engine<'tcx> {
                     offset, from_end, ..
                 } => {
                     let width = u32::from(self.tcx.sess.target.pointer_width);
-                    let offset = symbolic::integer(u128::from(offset), width, false);
+                    let offset = symbolic::integer(&self.terms, u128::from(offset), width, false);
                     let index = if from_end {
                         let length = match &value {
                             Value::Bytes { length, .. } => (**length).clone(),
                             Value::Elements(elements) => {
-                                symbolic::integer(elements.len() as u128, width, false)
+                                symbolic::integer(&self.terms, elements.len() as u128, width, false)
                             }
                             _ => return Err("constant memory index needs array storage".to_owned()),
                         };
-                        symbolic::binary("sub", length, offset)?
+                        symbolic::binary(&self.terms, "sub", length, offset)?
                     } else {
                         offset
                     };
@@ -424,7 +444,7 @@ impl<'tcx> Engine<'tcx> {
         storage: &mut Value,
         path: &[MemoryProjection],
         value: Value,
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<(), String> {
         let Some((projection, rest)) = path.split_first() else {
             *storage = value;
@@ -440,19 +460,32 @@ impl<'tcx> Engine<'tcx> {
             )) = rest.split_first()
             {
                 self.memory_projection(storage.clone(), projection, conditions)?;
-                let valid_offset =
-                    symbolic::binary("le", (**inner_offset).clone(), (**length).clone())?
-                        .boolean()?;
-                let available =
-                    symbolic::binary("sub", (**length).clone(), (**inner_offset).clone())?;
+                let valid_offset = symbolic::binary(
+                    &self.terms,
+                    "le",
+                    (**inner_offset).clone(),
+                    (**length).clone(),
+                )?
+                .boolean()?;
+                let available = symbolic::binary(
+                    &self.terms,
+                    "sub",
+                    (**length).clone(),
+                    (**inner_offset).clone(),
+                )?;
                 let valid_length =
-                    symbolic::binary("le", (**inner_length).clone(), available)?.boolean()?;
-                let safe = format!("(and {valid_offset} {valid_length})");
+                    symbolic::binary(&self.terms, "le", (**inner_length).clone(), available)?
+                        .boolean()?;
+                let safe = self.terms.apply(Op::And, &[valid_offset, valid_length])?;
                 if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&safe)]].concat())? {
                     return Err("nested byte view lacks proven region bounds".to_owned());
                 }
-                let absolute =
-                    symbolic::binary("add", (**offset).clone(), (**inner_offset).clone())?;
+                let absolute = symbolic::binary(
+                    &self.terms,
+                    "add",
+                    (**offset).clone(),
+                    (**inner_offset).clone(),
+                )?;
                 let mut translated = vec![MemoryProjection::Slice {
                     offset: Box::new(absolute),
                     length: inner_length.clone(),
@@ -464,7 +497,8 @@ impl<'tcx> Engine<'tcx> {
                 // Prove the parent region before translating its element address.
                 self.memory_projection(storage.clone(), projection, conditions)?;
                 self.memory_bounds(index, length, conditions)?;
-                let absolute = symbolic::binary("add", (**offset).clone(), (**index).clone())?;
+                let absolute =
+                    symbolic::binary(&self.terms, "add", (**offset).clone(), (**index).clone())?;
                 let mut translated = vec![MemoryProjection::Index(Box::new(absolute))];
                 translated.extend_from_slice(tail);
                 return self.write_projection(storage, &translated, value, conditions);
@@ -480,17 +514,18 @@ impl<'tcx> Engine<'tcx> {
             let bits = u32::from(self.tcx.sess.target.pointer_width);
             self.memory_bounds(
                 index,
-                &symbolic::integer(*count as u128, bits, false),
+                &symbolic::integer(&self.terms, *count as u128, bits, false),
                 conditions,
             )?;
             let offset = symbolic::binary(
+                &self.terms,
                 "mul",
                 (**index).clone(),
-                symbolic::integer(*width as u128, bits, false),
+                symbolic::integer(&self.terms, *width as u128, bits, false),
             )?;
             let mut translated = vec![MemoryProjection::Slice {
                 offset: Box::new(offset),
-                length: Box::new(symbolic::integer(*width as u128, bits, false)),
+                length: Box::new(symbolic::integer(&self.terms, *width as u128, bits, false)),
             }];
             translated.extend_from_slice(rest);
             return self.write_projection(storage, &translated, value, conditions);
@@ -513,9 +548,11 @@ impl<'tcx> Engine<'tcx> {
             (MemoryProjection::Index(index), Value::Elements(elements)) => {
                 for (position, element) in elements.iter_mut().enumerate() {
                     let equal = symbolic::binary(
+                        &self.terms,
                         "eq",
                         (**index).clone(),
                         symbolic::integer(
+                            &self.terms,
                             position as u128,
                             u32::from(self.tcx.sess.target.pointer_width),
                             false,
@@ -535,10 +572,10 @@ impl<'tcx> Engine<'tcx> {
                 if width != 8 || signed {
                     return Err("byte write has non-byte value".to_owned());
                 }
-                *data = format!("(store {data} {} {expression})", index.integer()?.0);
-                if data.len() > MAX_QUERY_BYTES {
-                    return Err("byte storage expression exceeds the query-size budget".to_owned());
-                }
+                *data = self.terms.apply(
+                    Op::Store,
+                    &[data.clone(), index.integer()?.0, expression.clone()],
+                )?;
                 Ok(())
             }
             _ => Err("unsupported projected memory write".to_owned()),
@@ -551,7 +588,7 @@ impl<'tcx> Engine<'tcx> {
         offset: &Value,
         length: &Value,
         view: Value,
-        conditions: &[String],
+        conditions: &[Term],
     ) -> Result<(), String> {
         let Value::Bytes {
             length: capacity,
@@ -567,12 +604,13 @@ impl<'tcx> Engine<'tcx> {
         else {
             return Err("byte view assignment requires a byte array".to_owned());
         };
-        let equal = symbolic::binary("eq", (*source_length).clone(), length.clone())?.boolean()?;
+        let equal = symbolic::binary(&self.terms, "eq", (*source_length).clone(), length.clone())?
+            .boolean()?;
         if self.feasible(&[conditions.to_vec(), vec![symbolic::not(&equal)]].concat())? {
             return Err("byte view assignment changed its length".to_owned());
         }
-        let Some(crate::solver::ground::Constant::BitVec { value: count, .. }) =
-            crate::solver::ground::constant(&capacity.integer()?.0)
+        let Some(symbolic::Constant::BitVec { value: count, .. }) =
+            symbolic::constant(&capacity.integer()?.0)
         else {
             return Err("byte view updates need a fixed allocation capacity".to_owned());
         };
@@ -584,33 +622,35 @@ impl<'tcx> Engine<'tcx> {
         if signed || length_signed || bits != length_bits {
             return Err("byte view index type mismatch".to_owned());
         }
-        let fixed_length = match crate::solver::ground::constant(&length) {
-            Some(crate::solver::ground::Constant::BitVec { value, .. }) if value <= count => {
-                Some(value)
-            }
+        let fixed_length = match symbolic::constant(&length) {
+            Some(symbolic::Constant::BitVec { value, .. }) if value <= count => Some(value),
             _ => None,
         };
-        // SMT let bindings evaluate their values outside the binding scope. Nested copies
-        // therefore cannot capture these names in an earlier array expression.
-        let mut copied = "byte_copy_destination".to_owned();
+        let original = data.clone();
+        let mut copied = original.clone();
         for index in 0..fixed_length.unwrap_or(count) {
-            let cell = format!("(_ bv{index} {bits})");
-            let target = format!("(bvadd byte_copy_offset {cell})");
+            let cell = self.terms.bit_vector(index, bits)?;
+            let target = self
+                .terms
+                .apply(Op::BvAdd, &[offset.clone(), cell.clone()])?;
+            let source_byte = self
+                .terms
+                .apply(Op::Select, &[source.clone(), cell.clone()])?;
             let byte = if fixed_length.is_some() {
-                format!("(select byte_copy_source {cell})")
+                source_byte
             } else {
-                format!(
-                    "(ite (bvult {cell} byte_copy_length) (select byte_copy_source {cell}) (select byte_copy_destination {target}))"
-                )
+                let inside = self
+                    .terms
+                    .apply(Op::BvUnsignedLt, &[cell, length.clone()])?;
+                let previous = self
+                    .terms
+                    .apply(Op::Select, &[original.clone(), target.clone()])?;
+                self.terms
+                    .apply(Op::Ite, &[inside, source_byte, previous])?
             };
-            copied = format!("(store {copied} {target} {byte})");
+            copied = self.terms.apply(Op::Store, &[copied, target, byte])?;
         }
-        *data = format!(
-            "(let ((byte_copy_source {source}) (byte_copy_destination {data}) (byte_copy_offset {offset}) (byte_copy_length {length})) {copied})"
-        );
-        if data.len() > MAX_QUERY_BYTES {
-            return Err("byte view expression exceeds the query-size budget".to_owned());
-        }
+        *data = copied;
         Ok(())
     }
 
@@ -829,7 +869,10 @@ mod tests {
     #[test]
     fn a_frame_borrow_hidden_inside_caller_storage_cannot_escape() {
         let caller = Value::Tuple(vec![reference(1, true)]);
-        let state = state(vec![Some(caller), Some(symbolic::integer(7, 16, false))]);
+        let state = state(vec![
+            Some(caller),
+            Some(symbolic::integer(&Context::default(), 7, 16, false)),
+        ]);
         let error = Engine::validate_reference_graph(
             &reference(0, false),
             &state,
@@ -853,7 +896,7 @@ mod tests {
     fn nested_incoming_references_keep_their_storage_identity() {
         let borrowed = Value::Tuple(vec![reference(0, true), reference(1, false)]);
         let state = state(vec![
-            Some(symbolic::integer(7, 16, false)),
+            Some(symbolic::integer(&Context::default(), 7, 16, false)),
             Some(Value::Tuple(vec![reference(0, false)])),
         ]);
         Engine::validate_reference_graph(&borrowed, &state, Some(2), &mut Vec::new()).unwrap();

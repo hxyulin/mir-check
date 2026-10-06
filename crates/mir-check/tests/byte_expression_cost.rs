@@ -122,16 +122,8 @@ fn repeated_numeric_chunk_copies_keep_complete_queries_bounded_on_host_and_arm()
                     "largest query: {}",
                     queries.iter().map(|q| q.len()).max().unwrap()
                 );
-                assert!(
-                    queries
-                        .iter()
-                        .any(|query| query.contains("byte_copy_source"))
-                );
-                assert!(
-                    queries
-                        .iter()
-                        .any(|query| query.contains("encoded_integer"))
-                );
+                assert!(queries.iter().any(|query| query.contains("(let ((t")));
+                assert!(queries.iter().any(|query| query.contains("((_ extract")));
             }
         }
     }

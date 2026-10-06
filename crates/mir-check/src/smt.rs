@@ -4,8 +4,9 @@ mod fold;
 mod printer;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::{Rc, Weak};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -89,10 +90,12 @@ pub enum Op {
     Concat,
     Select,
     Store,
+    ArrayOffset,
     ConstArray { index_bits: u32 },
     FpNeg,
     FpAbs,
     FpIsNaN,
+    FpIsInfinite,
     FpEqual,
     FpLt,
     FpLe,
@@ -179,13 +182,54 @@ impl PartialEq for Term {
 
 impl Eq for Term {}
 
+impl Hash for Term {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.context.0).hash(state);
+        self.node.id.hash(state);
+    }
+}
+
 impl Term {
+    pub fn id(&self) -> usize {
+        self.node.id
+    }
+
     pub fn sort(&self) -> &Sort {
         &self.node.sort
     }
 
     pub fn context(&self) -> &Context {
         &self.context
+    }
+
+    pub fn symbol_index(&self) -> Option<u32> {
+        match self.node.kind {
+            Kind::Symbol(index) => Some(index),
+            Kind::Constant(_) | Kind::Apply(_, _) => None,
+        }
+    }
+
+    pub fn symbols(&self) -> BTreeSet<u32> {
+        let mut visited = HashSet::new();
+        let mut symbols = BTreeSet::new();
+        let mut pending = vec![self];
+        while let Some(term) = pending.pop() {
+            if !visited.insert(term.node.id) {
+                continue;
+            }
+            match &term.node.kind {
+                Kind::Symbol(index) => {
+                    symbols.insert(*index);
+                }
+                Kind::Apply(_, children) => pending.extend(children),
+                Kind::Constant(_) => {}
+            }
+        }
+        symbols
+    }
+
+    pub fn belongs_to(&self, context: &Context) -> bool {
+        Rc::ptr_eq(&self.context.0, &context.0)
     }
 
     pub fn constant(&self) -> Option<Constant> {
@@ -202,6 +246,16 @@ impl Term {
 }
 
 impl Context {
+    pub fn declarations(&self) -> Vec<String> {
+        let pool = self.0.borrow();
+        let mut symbols: Vec<_> = pool.symbols.iter().collect();
+        symbols.sort_by_key(|(index, _)| **index);
+        symbols
+            .into_iter()
+            .map(|(index, sort)| printer::declaration(*index, sort))
+            .collect()
+    }
+
     fn intern(&self, sort: Sort, kind: Kind) -> Term {
         let key = Key {
             sort: sort.clone(),
@@ -364,6 +418,14 @@ fn result_sort(op: Op, args: &[Term]) -> Result<Sort, String> {
             }
             _ => None,
         },
+        Op::ArrayOffset => match sorts.as_slice() {
+            [array @ Sort::Array(index, _), actual]
+                if matches!(index.as_ref(), Sort::BitVec(_)) && index.as_ref() == *actual =>
+            {
+                Some((*array).clone())
+            }
+            _ => None,
+        },
         Op::ConstArray { index_bits } => match sorts.as_slice() {
             [element] => Some(Sort::Array(
                 Box::new(Sort::BitVec(index_bits)),
@@ -375,7 +437,7 @@ fn result_sort(op: Op, args: &[Term]) -> Result<Sort, String> {
             [sort @ Sort::Float { .. }] => Some((*sort).clone()),
             _ => None,
         },
-        Op::FpIsNaN => match sorts.as_slice() {
+        Op::FpIsNaN | Op::FpIsInfinite => match sorts.as_slice() {
             [Sort::Float { .. }] => Some(Sort::Bool),
             _ => None,
         },
