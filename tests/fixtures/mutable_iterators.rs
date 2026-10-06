@@ -32,13 +32,13 @@ pub fn disjoint() {
 }
 
 pub fn diagonal() -> [[f32; 6]; 6] {
-    let mut matrix = [[0.1; 6]; 6];
+    let mut matrix = [[0.25; 6]; 6];
     for (i, row) in matrix.iter_mut().enumerate() {
-        row[i] = if i < 4 { 100_000.0 } else { 100.0 };
+        row[i] = if i < 3 { 10.0 } else { 3.0 };
     }
-    assert!(matrix[0][0] == 100_000.0 && matrix[3][3] == 100_000.0);
-    assert!(matrix[4][4] == 100.0 && matrix[5][5] == 100.0);
-    assert!(matrix[0][1] == 0.1 && matrix[5][4] == 0.1);
+    assert!(matrix[0][0] == 10.0 && matrix[2][2] == 10.0);
+    assert!(matrix[3][3] == 3.0 && matrix[5][5] == 3.0);
+    assert!(matrix[0][1] == 0.25 && matrix[5][4] == 0.25);
     matrix
 }
 
@@ -134,11 +134,11 @@ mod tests {
         for (row, values) in matrix.iter().enumerate() {
             for (column, value) in values.iter().enumerate() {
                 let expected = if row != column {
-                    0.1
-                } else if row < 4 {
-                    100_000.0
+                    0.25
+                } else if row < 3 {
+                    10.0
                 } else {
-                    100.0
+                    3.0
                 };
                 assert_eq!(*value, expected);
             }
