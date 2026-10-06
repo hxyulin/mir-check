@@ -136,12 +136,25 @@ impl<'tcx> Engine<'tcx> {
             return Err("atomic receiver type mismatch".to_owned());
         }
         let order = values.last().ok_or("missing atomic ordering")?;
+        let signature = self
+            .tcx
+            .try_normalize_erasing_regions(
+                ty::TypingEnv::fully_monomorphized(),
+                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
+            )
+            .map_err(|error| format!("atomic signature normalization failed: {error:?}"))?
+            .skip_binder();
+        let ordering_ty = signature
+            .inputs()
+            .last()
+            .copied()
+            .ok_or("atomic ordering argument type is unavailable")?;
         let allowed = match name.as_str() {
             "load" => &["Relaxed", "Acquire", "SeqCst"][..],
             "store" => &["Relaxed", "Release", "SeqCst"][..],
             _ => &["Relaxed", "Acquire", "Release", "AcqRel", "SeqCst"][..],
         };
-        let safe = self.atomic_order(order, allowed)?;
+        let safe = self.atomic_order(order, ordering_ty, allowed)?;
         self.require(
             site.0,
             site.1,
@@ -168,16 +181,30 @@ impl<'tcx> Engine<'tcx> {
         Ok(Some(value))
     }
 
-    fn atomic_order(&self, order: &Value, allowed: &[&str]) -> Result<String, String> {
+    fn atomic_order(
+        &self,
+        order: &Value,
+        ordering_ty: Ty<'tcx>,
+        allowed: &[&str],
+    ) -> Result<String, String> {
         let ordering = self
             .tcx
             .get_diagnostic_item(Symbol::intern("Ordering"))
             .ok_or("atomic Ordering identity unavailable")?;
-        let def = self.tcx.adt_def(ordering);
+        let ty::Adt(def, _) = ordering_ty.kind() else {
+            return Err("atomic ordering argument is not an enum".to_owned());
+        };
+        if def.did() != ordering || !def.is_enum() {
+            return Err("atomic ordering argument type mismatch".to_owned());
+        }
+        let allowed = allowed
+            .iter()
+            .map(|name| Symbol::intern(name))
+            .collect::<Vec<_>>();
         let allowed_tags = def
             .variants()
             .iter_enumerated()
-            .filter(|(_, variant)| allowed.contains(&variant.name.as_str()))
+            .filter(|(_, variant)| allowed.contains(&variant.name))
             .map(|(index, _)| {
                 (
                     index.as_usize(),
@@ -186,10 +213,51 @@ impl<'tcx> Engine<'tcx> {
             })
             .collect::<Vec<_>>();
         match order {
-            Value::Adt { name, variant, .. } if *name == self.tcx.def_path_str(ordering) => Ok(allowed_tags.iter().any(|(index, _)| index == variant).to_string()),
-            Value::Enum { discriminant, variants, .. } if variants.iter().all(|variant| matches!(variant, Value::Adt { name, .. } if *name == self.tcx.def_path_str(ordering))) => {
+            Value::Adt {
+                variant,
+                discriminant,
+                fields,
+                ..
+            } if def.variants().iter_enumerated().any(|(index, definition)| {
+                index.as_usize() == *variant
+                    && definition.fields.is_empty()
+                    && fields.is_empty()
+                    && def.discriminant_for_variant(self.tcx, index).val == *discriminant
+            }) =>
+            {
+                Ok(allowed_tags
+                    .iter()
+                    .any(|(index, _)| index == variant)
+                    .to_string())
+            }
+            Value::Enum {
+                discriminant,
+                variants,
+                ..
+            } if variants.len() == def.variants().len()
+                && def.variants().iter_enumerated().all(|(index, definition)| {
+                    definition.fields.is_empty()
+                        && matches!(&variants[index.as_usize()],
+                                Value::Adt { variant, discriminant, fields, .. }
+                                    if *variant == index.as_usize()
+                                        && fields.is_empty()
+                                        && *discriminant == def.discriminant_for_variant(
+                                            self.tcx, index,
+                                        ).val)
+                }) =>
+            {
                 let (_, bits, signed) = discriminant.integer()?;
-                let expressions = allowed_tags.iter().map(|(_, tag)| symbolic::binary("eq", (**discriminant).clone(), symbolic::integer(*tag, bits, signed))?.boolean()).collect::<Result<Vec<_>, String>>()?;
+                let expressions = allowed_tags
+                    .iter()
+                    .map(|(_, tag)| {
+                        symbolic::binary(
+                            "eq",
+                            (**discriminant).clone(),
+                            symbolic::integer(*tag, bits, signed),
+                        )?
+                        .boolean()
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
                 Ok(format!("(or {})", expressions.join(" ")))
             }
             _ => Err("atomic ordering is not modeled".to_owned()),

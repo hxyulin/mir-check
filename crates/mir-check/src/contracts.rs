@@ -4,6 +4,48 @@ use syn::{BinOp, Expr, Lit, UnOp};
 
 type IntegerType = (u32, bool);
 
+pub fn uses_post_state(text: &str) -> Result<bool, String> {
+    let expression = syn::parse_str::<Expr>(text).map_err(|error| error.to_string())?;
+    post_state_reference(&expression, &[])
+}
+
+fn post_state_reference(expression: &Expr, bound: &[String]) -> Result<bool, String> {
+    match expression {
+        Expr::Paren(expr) => post_state_reference(&expr.expr, bound),
+        Expr::Group(expr) => post_state_reference(&expr.expr, bound),
+        Expr::Path(expr) => Ok(expr.qself.is_none()
+            && expr.path.get_ident().is_some_and(|name| {
+                let name = name.to_string();
+                name.starts_with("final_") && !bound.contains(&name)
+            })),
+        Expr::Field(expr) => post_state_reference(&expr.base, bound),
+        Expr::Index(expr) => Ok(
+            post_state_reference(&expr.expr, bound)? | post_state_reference(&expr.index, bound)?
+        ),
+        Expr::Cast(expr) => post_state_reference(&expr.expr, bound),
+        Expr::Unary(expr) => post_state_reference(&expr.expr, bound),
+        Expr::Binary(expr) => Ok(
+            post_state_reference(&expr.left, bound)? | post_state_reference(&expr.right, bound)?
+        ),
+        Expr::Lit(_) => Ok(false),
+        Expr::MethodCall(expr) => expr.args.iter().try_fold(
+            post_state_reference(&expr.receiver, bound)?,
+            |found, argument| Ok(found | post_state_reference(argument, bound)?),
+        ),
+        Expr::Match(expr) => {
+            expr.arms
+                .iter()
+                .try_fold(post_state_reference(&expr.expr, bound)?, |found, arm| {
+                    let (_, binding) = option_pattern(arm)?;
+                    let mut inner = bound.to_vec();
+                    inner.extend(binding);
+                    Ok(found | post_state_reference(&arm.body, &inner)?)
+                })
+        }
+        _ => Err("unsupported contract expression".to_owned()),
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ScalarType {
     Integer(u32, bool),
@@ -404,4 +446,33 @@ fn literal(
         magnitude
     };
     Ok(symbolic::integer(value, bits, signed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uses_post_state;
+
+    #[test]
+    fn post_state_uses_expression_paths_without_confusing_fields_comments_or_bound_names() {
+        for predicate in [
+            "total_final_count == result",
+            "state.final_count == result",
+            "result == 1 /* final_state */",
+            "match result { Some(final_value) => final_value >= 1, None => true }",
+            "match result { Some(value) => value.total_final_count >= 1, None => true }",
+        ] {
+            assert!(!uses_post_state(predicate).unwrap(), "{predicate}");
+        }
+        for predicate in [
+            "final_state.count == result",
+            "final_state.len() == 3",
+            "(final_count as u32) == result",
+            "match result { Some(final_value) => final_other >= final_value, None => true }",
+            "match final_result { Some(value) => value >= 1, None => true }",
+        ] {
+            assert!(uses_post_state(predicate).unwrap(), "{predicate}");
+        }
+        assert!(uses_post_state("final_state ==").is_err());
+        assert!(uses_post_state("unsupported(final_state)").is_err());
+    }
 }

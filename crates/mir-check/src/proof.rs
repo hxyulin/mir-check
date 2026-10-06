@@ -633,13 +633,14 @@ impl<'tcx> Engine<'tcx> {
                         return Err("mutable local borrows cannot escape their frame".to_owned());
                     }
                     let mut post_bindings = bindings.clone();
-                    if contracts.iter().any(|contract| {
-                        matches!(contract.kind, ContractKind::Ensures)
-                            && contract
-                                .predicate
-                                .as_ref()
-                                .is_some_and(|predicate| predicate.contains("final_"))
-                    }) {
+                    let uses_post_state = contracts
+                        .iter()
+                        .filter(|contract| matches!(contract.kind, ContractKind::Ensures))
+                        .filter_map(|contract| contract.predicate.as_deref())
+                        .try_fold(false, |found, predicate| {
+                            Ok::<_, String>(found | contracts::uses_post_state(predicate)?)
+                        })?;
+                    if uses_post_state {
                         let final_arguments = body
                             .args_iter()
                             .map(|local| self.local(&state, local.as_usize()))
@@ -700,15 +701,7 @@ impl<'tcx> Engine<'tcx> {
                     else {
                         return Err("unresolved indirect call".to_owned());
                     };
-                    if self
-                        .tcx
-                        .lang_items()
-                        .from_def_id(callee)
-                        .is_some_and(|item| {
-                            item.name().as_str().starts_with("panic")
-                                || matches!(item, LangItem::BeginPanic | LangItem::ConstPanicFmt)
-                        })
-                    {
+                    if super::identity::is_panic_call(self.tcx, callee) {
                         self.require(
                             id,
                             terminator.source_info.span,

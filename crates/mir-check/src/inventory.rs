@@ -1,5 +1,4 @@
 use mir_check::{LocalCall, Site, SiteKind, SiteStatus};
-use rustc_attr_ir::LangItem;
 use rustc_hir::def::DefKind;
 use rustc_middle::mir::{AssertKind, Body, Operand, START_BLOCK, TerminatorKind};
 use rustc_middle::ty::{self, TyCtxt};
@@ -116,10 +115,7 @@ fn local_call<'tcx>(
     let name = tcx.def_path_str(id);
     site.callee = Some(name.clone());
     site.detail = name;
-    if tcx.lang_items().from_def_id(id).is_some_and(|item| {
-        item.name().as_str().starts_with("panic")
-            || matches!(item, LangItem::BeginPanic | LangItem::ConstPanicFmt)
-    }) {
+    if super::identity::is_panic_call(tcx, id) {
         site.kind = SiteKind::PanicCall;
     } else if tcx.def_kind(tcx.parent(id)) == DefKind::Trait {
         site.kind = SiteKind::TraitCall;

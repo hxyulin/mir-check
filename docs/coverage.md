@@ -6,6 +6,12 @@ completed a soundness audit. Every result is tied to its compiler, target, flags
 
 ## Inputs and values
 
+The interpreter consumes rustc's typed MIR enums and compiler types/definitions directly.
+Debug MIR strings are report details, not proof input. Language items identify compiler hooks;
+broad Rust support also requires MIR operations, memory/ownership semantics, call resolution
+and intrinsics. Complete language support still cannot guarantee a complete proof for every
+program: resource limits and undecided queries remain separate sources of UNKNOWN.
+
 | Feature | Current support | Boundary |
 | --- | --- | --- |
 | Integers and bool | Symbolic target-width values, signed comparisons, exact bit-vector operations and population counts | Char and raw pointers are unsupported inputs |

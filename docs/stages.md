@@ -537,3 +537,19 @@ old-to-final times were 0.323 to 0.047 seconds for units, 0.699 to 0.087 seconds
 0.976 to 0.114 seconds for floats. All remained PROVED. Floating-point queries use Z3; their gain
 comes from session reuse and decision caching. These are small synthetic roots, not a promise
 about branch-heavy or solver-heavy code.
+
+## Stage 29: compiler identities and parsed contract references
+
+The MIR interpreter already operates on typed rustc enums rather than parsing debug output.
+This stage removes remaining semantic substring shortcuts: panic language items have an explicit
+typed match, atomic Ordering arguments and variants are checked against the normalized compiler
+enum, and array from_fn resolves a module child DefId anchored by ArrayIntoIter. Post-state
+contract references are detected in parsed expressions, with Option-arm bindings scoped locally;
+fields, comments and unrelated names containing final_ do not activate post-state snapshots.
+Internal checked arithmetic selection uses an explicit closed operation set.
+
+Host/ARM identity regressions check seven roots: four prove, two refute and one remains unknown.
+Application types and functions with library-like names execute their actual bodies. Existing
+Cell/atomic regressions preserve their outcomes. AST tests distinguish free post-state paths,
+fields, comments and shadowing Option bindings. Ordinary source selectors and report strings
+remain text interfaces; they do not determine MIR instruction semantics.

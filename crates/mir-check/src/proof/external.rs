@@ -253,11 +253,9 @@ impl<'tcx> Engine<'tcx> {
         }
         let result = self.argument(instance.def_id(), output, &mut conditions)?;
         bindings.insert("result".to_owned(), result.clone());
-        if spec
-            .ensures
-            .iter()
-            .any(|predicate| predicate.contains("final_"))
-        {
+        if spec.ensures.iter().try_fold(false, |found, predicate| {
+            Ok::<_, String>(found | contracts::uses_post_state(predicate)?)
+        })? {
             let finals = self.snapshots(values, &memory, &conditions)?;
             for (name, value) in names.iter().zip(finals) {
                 bindings.insert(format!("final_{name}"), value);

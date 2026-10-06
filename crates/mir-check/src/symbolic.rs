@@ -261,7 +261,7 @@ pub fn binary(operation: &str, left: Value, right: Value) -> Result<Value, Strin
         bits,
         signed,
     };
-    if operation.starts_with("checked_") {
+    if matches!(operation, "checked_add" | "checked_sub" | "checked_mul") {
         let extra = if operation == "checked_mul" { bits } else { 1 };
         let extend = if signed { "sign_extend" } else { "zero_extend" };
         let wide =

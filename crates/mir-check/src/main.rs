@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod contracts;
+mod identity;
 mod inventory;
 mod proof;
 mod solver;

@@ -5,6 +5,19 @@ analysis or a general verifier for arbitrary Rust. The compiler adapter reads ty
 from the pinned rustc with mir-opt-level=0. MIR supplies explicit types, branches, assertions and
 calls; rustc does not supply the proof itself.
 
+The interpreter matches typed Body, Rvalue, StatementKind, TerminatorKind, Operand and Place
+values. It does not parse printed MIR or inventory details for proof decisions. Library models
+use compiler definition identities, diagnostic/language items, normalized signatures and exact
+Symbols within identified compiler types or traits. Panic calls use an explicit LangItem match;
+atomic Ordering uses its actual compiler enum. Contract expressions use syn syntax trees,
+including scoped post-state references. Strings remain appropriate for source selectors,
+diagnostics and the separately generated SMT protocol.
+
+Language items identify compiler hooks rather than all language operations. Broad support also
+requires complete MIR operations, memory/ownership rules, calls and intrinsics. Even complete
+semantic support can leave a proof unfinished because loops, recursion, path growth or solver
+queries exceed the analysis limits.
+
 ## Inputs and paths
 
 Each selected root gets symbolic inputs. Integers are bit-vectors with the target's exact widths

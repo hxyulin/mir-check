@@ -97,7 +97,7 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("call signature normalization failed: {error:?}"))?
             .skip_binder();
-        if self.tcx.def_path_str(callee) == "core::array::from_fn" {
+        if self.core_array_from_fn() == Some(callee) {
             return self.array_from_fn(instance, signature, values, state, stack, site);
         }
         let parent = self.tcx.parent(callee);
@@ -283,6 +283,23 @@ impl<'tcx> Engine<'tcx> {
             return Ok(Some(results));
         }
         Ok(None)
+    }
+
+    fn core_array_from_fn(&self) -> Option<DefId> {
+        let iterator = self
+            .tcx
+            .get_diagnostic_item(Symbol::intern("ArrayIntoIter"))?;
+        let module = self.tcx.parent(self.tcx.parent(iterator));
+        if self.tcx.def_kind(module) != DefKind::Mod {
+            return None;
+        }
+        self.tcx.module_children(module).iter().find_map(|child| {
+            let id = child.res.opt_def_id()?;
+            (child.ident.name == Symbol::intern("from_fn")
+                && id.krate == iterator.krate
+                && self.tcx.def_kind(id) == DefKind::Fn)
+                .then_some(id)
+        })
     }
 
     fn array_from_fn(

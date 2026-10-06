@@ -215,3 +215,12 @@ Synthetic array-generation and iterator regressions exercise the relevant Rust f
 independent ticket, parcel, score and tally examples. Host/ARM proofs, rejected mutations and
 bounded native execution check callback order, skips, exhaustion, zero-sized elements and aliases;
 these cases do not constitute a completed soundness audit.
+
+Proof execution reads typed rustc Body, StatementKind, Rvalue, TerminatorKind, Operand and Place
+values directly. Printed MIR appears only in diagnostics and inventories; it is not parsed for
+proofs. Panic calls use an explicit LangItem match, atomic Ordering uses normalized compiler type
+and variant identities, and array from_fn resolves the actual compiler module child DefId.
+Post-state contract detection parses syn expressions and distinguishes free final_ identifiers
+from field names, comments and local Option bindings. Compiler-provided Symbols still identify
+methods or variants when diagnostic items are unavailable; these are exact names within an
+already identified compiler type/trait, not substring matches over MIR.
