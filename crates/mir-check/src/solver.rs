@@ -31,6 +31,7 @@ pub struct Query {
     assertions: Vec<String>,
     ground: Option<bool>,
     non_float: Option<Box<Query>>,
+    symbols: std::collections::BTreeSet<u32>,
 }
 
 impl Query {
@@ -62,6 +63,7 @@ impl Query {
             assertions,
             ground: None,
             non_float: None,
+            symbols: std::collections::BTreeSet::new(),
         };
         for declaration in &query.declarations {
             query.text.push_str(declaration);
@@ -72,6 +74,10 @@ impl Query {
         }
         query.text.push_str("(check-sat)\n");
         query
+    }
+
+    pub fn symbols(&self) -> &std::collections::BTreeSet<u32> {
+        &self.symbols
     }
 
     pub fn text(&self) -> &str {
@@ -208,6 +214,7 @@ impl Query {
             assertions.iter().map(String::as_str),
         );
         query.ground = ground;
+        query.symbols = symbols;
         Ok(query)
     }
 }
@@ -1279,6 +1286,7 @@ mod encoding_tests {
         ]);
         let query = Query::from_terms(&context, &[], &x, &bindings).unwrap();
         assert_eq!(bindings[&1], bindings[&2]);
+        assert_eq!(query.symbols(), &std::collections::BTreeSet::from([1, 2]));
         assert_eq!(query.assertions.len(), 2);
         assert_eq!(query.declarations.len(), 2);
         assert!(matches!(

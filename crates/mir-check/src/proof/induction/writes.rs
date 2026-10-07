@@ -53,6 +53,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::Enum { .. }
                 | Value::Cell { .. }
                 | Value::Atomic { .. }
+                | Value::LocalAtomic { .. }
                 | Value::Reference { .. }
                 | Value::SliceIterator { .. }
                 | Value::Elements(_)
@@ -83,6 +84,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::Bytes { .. }
                 | Value::Cell { .. }
                 | Value::Atomic { .. }
+                | Value::LocalAtomic { .. }
                 | Value::Reference { .. }
                 | Value::SliceIterator { .. }
                 | Value::Tuple(_)
@@ -167,6 +169,7 @@ fn scalar_update(
             | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::Reference { .. }
             | Value::SliceIterator { .. }
             | Value::Tuple(_)

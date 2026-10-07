@@ -32,17 +32,7 @@ impl<'tcx> Engine<'tcx> {
                 instance.def
             ));
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx
-                    .fn_sig(*id)
-                    .instantiate(self.tcx, args.skip_binder()),
-            )
-            .map_err(|error| {
-                format!("function-pointer signature normalization failed: {error:?}")
-            })?;
+        let signature = self.call_poly_signature(ty::Instance::new_raw(*id, args.skip_binder()))?;
         let expected = self
             .tcx
             .erase_and_anonymize_regions(Ty::new_fn_ptr(self.tcx, signature));

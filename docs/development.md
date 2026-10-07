@@ -30,6 +30,9 @@ See the [repository conventions](https://github.com/hxyulin/mir-check/blob/main/
 
 ## Analyzer design priorities
 
+The [analyzer redesign](analyzer-redesign.md) records implemented foundations, remaining migrations
+and completion criteria for storage, calls, query construction and counterexample validation.
+
 The typed MIR adapter, interned SMT terms and persistent Z3 text interface already provide the
 intended foundations. Keep unsupported behavior explicit while replacing narrowly scoped models
 with common semantics where the current representations lose necessary facts.

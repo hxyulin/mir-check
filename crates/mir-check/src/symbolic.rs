@@ -72,6 +72,11 @@ pub enum Value {
         bits: u32,
         signed: bool,
     },
+    LocalAtomic {
+        allocation: usize,
+        bits: u32,
+        signed: bool,
+    },
     Reference {
         allocation: usize,
         projection: Vec<MemoryProjection>,
@@ -134,6 +139,7 @@ impl Value {
                 }),
             Self::Cell { .. }
             | Self::Atomic { .. }
+            | Self::LocalAtomic { .. }
             | Self::Reference { .. }
             | Self::SliceIterator { .. }
             | Self::MetadataPointer(_)
@@ -182,6 +188,7 @@ impl Value {
             | Self::Unit => self.owned_repeat_size(),
             Self::Cell { .. }
             | Self::Atomic { .. }
+            | Self::LocalAtomic { .. }
             | Self::SliceIterator { .. }
             | Self::MetadataPointer(_)
             | Self::StaticText
@@ -202,9 +209,10 @@ impl Value {
             Self::SliceIterator {
                 mutable, source, ..
             } => *mutable || source.contains_mutable(),
-            Self::Reference { mutable: false, .. } | Self::Cell { .. } | Self::Atomic { .. } => {
-                false
-            }
+            Self::Reference { mutable: false, .. }
+            | Self::Cell { .. }
+            | Self::Atomic { .. }
+            | Self::LocalAtomic { .. } => false,
             Self::Adt { fields, .. } => fields.iter().any(|(_, value)| value.contains_mutable()),
             Self::Enum { variants, .. } => variants.iter().any(Self::contains_mutable),
             Self::Tuple(fields) | Self::Elements(fields) => {
@@ -225,6 +233,38 @@ impl Value {
             | Self::Function
             | Self::Unit => false,
             Self::DebugReference { source, .. } => source.contains_mutable(),
+        }
+    }
+
+    pub fn contains_local_atomic(&self) -> bool {
+        match self {
+            Self::LocalAtomic { .. } => true,
+            Self::Adt { fields, .. } => fields
+                .iter()
+                .any(|(_, value)| value.contains_local_atomic()),
+            Self::Enum { variants, .. } | Self::Tuple(variants) | Self::Elements(variants) => {
+                variants.iter().any(Self::contains_local_atomic)
+            }
+            Self::SliceIterator { source, .. }
+            | Self::MetadataPointer(source)
+            | Self::DebugReference { source, .. } => source.contains_local_atomic(),
+            Self::Input(_)
+            | Self::Bool(_)
+            | Self::Int { .. }
+            | Self::Float { .. }
+            | Self::Bytes { .. }
+            | Self::Cell { .. }
+            | Self::Atomic { .. }
+            | Self::Reference { .. }
+            | Self::StaticSlice { .. }
+            | Self::StaticView { .. }
+            | Self::RawPointer { .. }
+            | Self::StaticText
+            | Self::FormatArguments
+            | Self::Uninitialized
+            | Self::FunctionPointer { .. }
+            | Self::Function
+            | Self::Unit => false,
         }
     }
 

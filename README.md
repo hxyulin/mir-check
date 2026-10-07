@@ -105,6 +105,13 @@ Strict verification succeeds only when every selected root is PROVED. A solver a
 automatically a confirmed Rust failure; mutation and replay tests provide independent evidence
 for fixtures.
 
+Add `--replay` to `--verify` to compile and execute supported native counterexample inputs. The
+default scan executes no analyzed functions. Replay preserves the analyzed panic strategy and
+overflow configuration, records concrete inputs and observed panic locations, and distinguishes
+confirmed panics, executions that did not panic, unsupported inputs and incomplete runs. A replay
+that returns normally does not prove the root safe. Cross-target execution and arbitrary inputs
+remain unsupported; see [native replay](docs/usage.md#execute-a-counterexample).
+
 ## Use it in a project
 
 Install the analyzer, Cargo command and compiler wrapper from this checkout:
@@ -264,8 +271,9 @@ target/release/mir-check --verify --induction --entry sampled_registers -- \
 
 See [the coverage matrix](docs/coverage.md) for evidence and limits, and
 [proof execution](docs/proofs.md) for how obligations are generated and what the result trusts.
-JSON schema version 8 includes per-root proofs and a per-crate coverage summary. Inventory sites
-keep their separate unverified status even when a selected root proves their paths safe.
+JSON schema version 9 includes per-root proofs, recorded failure call chains, optional native replay
+evidence and a per-crate coverage summary. Saved schema 7 and 8 reports remain readable. Inventory
+sites keep their separate unverified status even when a selected root proves their paths safe.
 
 Use `--contracts contracts.json` to attach checked preconditions and postconditions without adding
 a crate dependency or editing the analyzed code. The sidecar can also declare explicit trusted

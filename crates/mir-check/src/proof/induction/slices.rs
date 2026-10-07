@@ -68,14 +68,7 @@ impl<'tcx> Engine<'tcx> {
         } else {
             None
         };
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("slice signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         let Some(first) = signature.inputs().first() else {
             return Ok(None);
         };
@@ -148,12 +141,7 @@ impl<'tcx> Engine<'tcx> {
             return Ok(None);
         };
         let receiver = values.first().ok_or("slice receiver missing")?;
-        let output = self
-            .tcx
-            .fn_sig(instance.def_id())
-            .instantiate(self.tcx, instance.args)
-            .skip_binder()
-            .output();
+        let output = self.call_signature(instance)?.output();
         let value = match operation {
             SliceOperation::New { mutable } => {
                 let source = self.loop_template_snapshot(receiver, state)?;
@@ -261,6 +249,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::Reference { .. }
             | Value::SliceIterator { .. }
             | Value::Tuple(_)
@@ -327,12 +316,7 @@ impl<'tcx> Engine<'tcx> {
         exclude_failure(system, premise, &state.conditions, &safe);
         state.conditions.push(safe);
         let remaining = symbolic::binary(&self.terms, "sub", (**back).clone(), (**front).clone())?;
-        let output = self
-            .tcx
-            .fn_sig(instance.def_id())
-            .instantiate(self.tcx, instance.args)
-            .skip_binder()
-            .output();
+        let output = self.call_signature(instance)?.output();
         self.record_model(
             instance.def_id(),
             "typed slice cursor: front <= back <= length; indexed items",

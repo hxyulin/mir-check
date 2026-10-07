@@ -4,7 +4,7 @@ mod fold;
 pub mod horn;
 mod printer;
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -20,6 +20,16 @@ pub enum Sort {
 }
 
 impl Sort {
+    fn uses_floating_point(&self) -> bool {
+        match self {
+            Self::Float { .. } | Self::RoundingMode => true,
+            Self::Array(index, element) => {
+                index.uses_floating_point() || element.uses_floating_point()
+            }
+            Self::Bool | Self::BitVec(_) => false,
+        }
+    }
+
     fn validate(&self) -> Result<(), String> {
         match self {
             Self::Bool | Self::RoundingMode => Ok(()),
@@ -151,6 +161,8 @@ struct Node {
     id: usize,
     sort: Sort,
     kind: Kind,
+    symbols: OnceCell<Option<BTreeSet<u32>>>,
+    uses_floating_point: bool,
 }
 
 #[derive(Default)]
@@ -217,11 +229,18 @@ impl Term {
     }
 
     pub fn symbols(&self) -> BTreeSet<u32> {
+        if let Some(Some(symbols)) = self.node.symbols.get() {
+            return symbols.clone();
+        }
         let mut visited = HashSet::new();
         let mut symbols = BTreeSet::new();
         let mut pending = vec![self];
         while let Some(term) = pending.pop() {
             if !visited.insert(term.node.id) {
+                continue;
+            }
+            if let Some(Some(cached)) = term.node.symbols.get() {
+                symbols.extend(cached);
                 continue;
             }
             match &term.node.kind {
@@ -231,6 +250,11 @@ impl Term {
                 Kind::Apply(_, children) => pending.extend(children),
                 Kind::Constant(_) => {}
             }
+        }
+        // Bound retained metadata even when a root's expressions contain many inputs.
+        if self.node.symbols.get().is_none() {
+            let cached = (symbols.len() <= 64).then(|| symbols.clone());
+            let _ = self.node.symbols.set(cached);
         }
         symbols
     }
@@ -259,28 +283,7 @@ impl Term {
     }
 
     pub fn uses_floating_point(&self) -> bool {
-        fn floating(sort: &Sort) -> bool {
-            match sort {
-                Sort::Float { .. } | Sort::RoundingMode => true,
-                Sort::Array(index, element) => floating(index) || floating(element),
-                Sort::Bool | Sort::BitVec(_) => false,
-            }
-        }
-        let mut visited = HashSet::new();
-        let mut pending = vec![self];
-        while let Some(term) = pending.pop() {
-            if !visited.insert(term.node.id) {
-                continue;
-            }
-            if floating(term.sort()) {
-                return true;
-            }
-            match &term.node.kind {
-                Kind::Apply(_, children) => pending.extend(children),
-                Kind::Constant(_) | Kind::Symbol(_) => {}
-            }
-        }
-        false
+        self.node.uses_floating_point
     }
 
     pub fn constant(&self) -> Option<Constant> {
@@ -339,10 +342,17 @@ impl Context {
                 context: self.clone(),
             };
         }
+        let uses_floating_point = sort.uses_floating_point()
+            || match &kind {
+                Kind::Apply(_, children) => children.iter().any(Term::uses_floating_point),
+                Kind::Constant(_) | Kind::Symbol(_) => false,
+            };
         let node = Rc::new(Node {
             id: pool.next_id,
             sort,
             kind,
+            symbols: OnceCell::new(),
+            uses_floating_point,
         });
         pool.next_id += 1;
         pool.nodes.insert(key, Rc::downgrade(&node));

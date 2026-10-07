@@ -46,6 +46,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticSlice { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::SliceIterator { .. }
             | Value::MetadataPointer(_)
             | Value::StaticText

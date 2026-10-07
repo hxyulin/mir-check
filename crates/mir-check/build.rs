@@ -8,6 +8,11 @@ fn main() {
     println!("cargo:rerun-if-env-changed=RUSTC");
     let rustc = std::env::var("RUSTC").expect("Cargo supplies RUSTC");
     let version = output(&rustc, &["-vV"]);
+    let host = version
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .expect("compiler supplies the host target");
+    println!("cargo:rustc-env=MIR_CHECK_HOST={host}");
     assert!(
         version.contains(COMPILER_COMMIT),
         "mir-check requires nightly-2026-09-22; compiler APIs and ABI must match"

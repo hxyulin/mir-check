@@ -98,12 +98,15 @@ fn known_function_pointers_execute_targets_and_unknown_targets_stay_unknown() {
         ("selected_target", ProofStatus::Proved),
         ("stored_target", ProofStatus::Proved),
         ("generic_target", ProofStatus::Proved),
+        ("mixed_generic_targets", ProofStatus::Proved),
+        ("different_const_generic_shapes", ProofStatus::Proved),
         ("rust_call_adapters", ProofStatus::Proved),
         ("pointer_call_preserves_effects", ProofStatus::Proved),
         ("empty_argument_tuple", ProofStatus::Proved),
         ("pointer_call_checks_panics", ProofStatus::Refuted),
         ("wrong_return_claim", ProofStatus::Refuted),
         ("different_selected_target", ProofStatus::Refuted),
+        ("empty_const_generic_target", ProofStatus::Refuted),
         ("arbitrary_pointer_is_unknown", ProofStatus::Unknown),
         ("closure_pointer_is_unknown", ProofStatus::Unknown),
         ("caller_adapter_is_unknown", ProofStatus::Unknown),
@@ -173,6 +176,46 @@ fn calls_through_pointers_check_contracts_against_actual_arguments_and_returns()
             Some(specification.clone()),
         );
     }
+}
+
+#[test]
+fn cached_generic_signatures_do_not_skip_call_contracts() {
+    let specification = serde_json::json!({"schema_version": 1, "functions": [{
+        "function": "function_pointers::select", "arguments": ["value"],
+        "requires": ["value < 4"], "ensures": ["result == value"]
+    }]});
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        verify(
+            &fixture(),
+            &[
+                ("bounded_generic_argument", ProofStatus::Proved),
+                ("generic_target", ProofStatus::Refuted),
+            ],
+            target,
+            false,
+            Some(specification.clone()),
+        );
+    }
+}
+
+#[test]
+fn mutating_a_cached_const_generic_body_breaks_both_dependent_proofs() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let mutation = source.replace("    values[0]\n", "    values[1]\n");
+    assert_ne!(source, mutation);
+    let directory = Directory::new();
+    let path = directory.0.join("mutant.rs");
+    std::fs::write(&path, mutation).unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        verify(
+            &path,
+            &[("different_const_generic_shapes", ProofStatus::Refuted)],
+            target,
+            false,
+            None,
+        );
+    }
+    assert!(!native_tests(&path, &directory));
 }
 
 #[test]

@@ -201,6 +201,60 @@ impl<'tcx> Engine<'tcx> {
         Ok(bindings)
     }
 
+    fn invalidate_local_atomics(value: &Value, memory: &mut [Option<Value>]) -> Result<(), String> {
+        match value {
+            Value::LocalAtomic {
+                allocation,
+                bits,
+                signed,
+            } => {
+                let storage = memory
+                    .get_mut(*allocation)
+                    .ok_or("local atomic effect points outside storage")?;
+                // Dead allocations remain dead: interference cannot resurrect their lifetime.
+                if storage.is_some() {
+                    *storage = Some(Value::Atomic {
+                        bits: *bits,
+                        signed: *signed,
+                    });
+                }
+            }
+            Value::Adt { fields, .. } => {
+                for (_, field) in fields {
+                    Self::invalidate_local_atomics(field, memory)?;
+                }
+            }
+            Value::Enum { variants, .. } | Value::Tuple(variants) | Value::Elements(variants) => {
+                for variant in variants {
+                    Self::invalidate_local_atomics(variant, memory)?;
+                }
+            }
+            Value::SliceIterator { source, .. }
+            | Value::MetadataPointer(source)
+            | Value::DebugReference { source, .. } => {
+                Self::invalidate_local_atomics(source, memory)?
+            }
+            Value::Input(_)
+            | Value::Bool(_)
+            | Value::Int { .. }
+            | Value::Float { .. }
+            | Value::Bytes { .. }
+            | Value::Cell { .. }
+            | Value::Atomic { .. }
+            | Value::Reference { .. }
+            | Value::RawPointer { .. }
+            | Value::StaticSlice { .. }
+            | Value::StaticView { .. }
+            | Value::StaticText
+            | Value::FormatArguments
+            | Value::Uninitialized
+            | Value::FunctionPointer { .. }
+            | Value::Function
+            | Value::Unit => {}
+        }
+        Ok(())
+    }
+
     pub(super) fn trusted_call(
         &mut self,
         instance: ty::Instance<'tcx>,
@@ -231,16 +285,7 @@ impl<'tcx> Engine<'tcx> {
         {
             return Err("trusted generic summaries require an exact instance selector".to_owned());
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx
-                    .fn_sig(instance.def_id())
-                    .instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("summary signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         if signature.inputs().len() != values.len() {
             return Err("summary call arity mismatch".to_owned());
         }
@@ -333,6 +378,20 @@ impl<'tcx> Engine<'tcx> {
                             .ok_or("summary effect points to unavailable storage")?;
                         self.write_projection(storage, projection, replacement, &conditions)?;
                     }
+                    Value::LocalAtomic {
+                        allocation,
+                        bits,
+                        signed,
+                    } if self.atomic_shape(*element).is_some() => {
+                        let storage = memory
+                            .get_mut(*allocation)
+                            .and_then(Option::as_mut)
+                            .ok_or("summary atomic effect points to unavailable storage")?;
+                        *storage = Value::Atomic {
+                            bits: *bits,
+                            signed: *signed,
+                        };
+                    }
                     Value::Cell { allocation } if self.cell_element(*element).is_some() => {
                         let inner = self
                             .cell_element(*element)
@@ -351,6 +410,11 @@ impl<'tcx> Engine<'tcx> {
             if let Some(allocation) = self.static_roots {
                 memory[allocation] = roots;
             }
+        }
+        // A trusted call may publish an atomic without changing its value during the call.
+        // Even an empty modifies list cannot certify absence of subsequent interference.
+        for value in state.locals.iter().chain(state.memory.iter()).flatten() {
+            Self::invalidate_local_atomics(value, &mut memory)?;
         }
         let output = signature.output();
         let (result, result_binding) = if let Some(name) = &spec.returns_alias {

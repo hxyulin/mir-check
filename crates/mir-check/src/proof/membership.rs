@@ -66,14 +66,7 @@ impl<'tcx> Engine<'tcx> {
         if !slice_first && !element_first {
             return Ok(None);
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("membership signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         if !signature.output().is_bool() {
             return Ok(None);
         }
@@ -188,6 +181,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::Reference { .. }
             | Value::SliceIterator { .. }
             | Value::Tuple(_)

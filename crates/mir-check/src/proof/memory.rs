@@ -75,6 +75,24 @@ impl<'tcx> Engine<'tcx> {
                     Err("static storage view invalidated by unknown memory effects".into())
                 }
             }
+            Value::LocalAtomic {
+                allocation,
+                bits,
+                signed,
+            } => match memory.get(*allocation).and_then(Option::as_ref) {
+                Some(
+                    Value::Int {
+                        bits: width,
+                        signed: sign,
+                        ..
+                    }
+                    | Value::Atomic {
+                        bits: width,
+                        signed: sign,
+                    },
+                ) if (*width, *sign) == (*bits, *signed) => Ok(value.clone()),
+                _ => Err("local atomic snapshot points to unavailable backing".into()),
+            },
             Value::DebugReference { source, .. } => {
                 self.snapshot(source, memory, conditions, depth + 1)?;
                 Ok(value.clone())
@@ -784,7 +802,9 @@ impl<'tcx> Engine<'tcx> {
         visited: &mut Vec<usize>,
     ) -> Result<(), String> {
         match value {
-            Value::Reference { allocation, .. } | Value::Cell { allocation } => {
+            Value::Reference { allocation, .. }
+            | Value::Cell { allocation }
+            | Value::LocalAtomic { allocation, .. } => {
                 if matches!(value, Value::Reference { .. })
                     && incoming.is_some_and(|limit| *allocation >= limit)
                 {
@@ -897,9 +917,14 @@ impl<'tcx> Engine<'tcx> {
                     return Err("mutable local borrows cannot escape their frame".to_owned());
                 }
                 let referent = self.reference_value(&value, &state.memory, &state.conditions)?;
+                if referent.contains_local_atomic() {
+                    return Err(
+                        "borrowed frame-owned atomics cannot escape as owned snapshots".into(),
+                    );
+                }
                 self.return_value(referent, state, incoming)
             }
-            value @ (Value::Reference { .. } | Value::Cell { .. }) => {
+            value @ (Value::Reference { .. } | Value::Cell { .. } | Value::LocalAtomic { .. }) => {
                 Self::validate_reference_graph(&value, state, Some(incoming), &mut Vec::new())?;
                 Ok(value)
             }
@@ -995,6 +1020,19 @@ mod tests {
         let state = state(vec![None]);
         let error =
             Engine::validate_reference_graph(&borrowed, &state, None, &mut Vec::new()).unwrap_err();
+        assert!(error.contains("dead or uninitialized"));
+    }
+
+    #[test]
+    fn dead_owned_atomic_backing_is_rejected_inside_aggregates() {
+        let atomic = Value::Tuple(vec![Value::LocalAtomic {
+            allocation: 0,
+            bits: 8,
+            signed: false,
+        }]);
+        let state = state(vec![None]);
+        let error =
+            Engine::validate_reference_graph(&atomic, &state, None, &mut Vec::new()).unwrap_err();
         assert!(error.contains("dead or uninitialized"));
     }
 

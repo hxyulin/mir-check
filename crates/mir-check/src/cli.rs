@@ -1,4 +1,4 @@
-use crate::{ProofStatus, Report};
+use crate::{Function, Obligation, ObligationKind, ProofStatus, Report};
 use std::fmt::Write as _;
 use std::io::{BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -84,6 +84,169 @@ fn status_color(status: ProofStatus) -> &'static str {
     }
 }
 
+fn next_step(detail: &str) -> &'static str {
+    if detail.contains("call-depth limit") {
+        "Try --max-call-depth; recursive calls may need an invariant."
+    } else if detail.contains("execution step limit") {
+        "Try --induction for supported loops, or increase --max-steps."
+    } else if detail.contains("query size limit") {
+        "Try --max-query-bytes; this changes a resource budget, not supported operations."
+    } else if detail.contains("execution budget") {
+        "Try --root-timeout-secs to give this root more analysis time."
+    } else if detail.ends_with(": timeout")
+        || detail == "timeout"
+        || detail.contains("Z3 returned timeout")
+        || detail.contains("solver timed out")
+    {
+        "Try --solver-timeout-ms to give each solver query more time."
+    } else if detail.contains("foreign declarations have no Rust MIR") {
+        "Provide an explicit --contracts boundary if you can justify its assumptions."
+    } else if detail.contains("prebuilt core library omitted") {
+        "Try Cargo -Zbuild-std=core to retain core MIR for this target."
+    } else if detail.contains("MIR body unavailable") {
+        "Rebuild with dependency MIR retention; inspect the named callee and build artifacts."
+    } else if detail.contains("root input") || detail.contains("root parameter") {
+        "Select a concrete caller that constructs the input, or add support for its shape."
+    } else {
+        "Inspect the named construct with --verbose; larger budgets cannot model unsupported code."
+    }
+}
+
+fn render_call_chain(output: &mut String, function: &Function, obligation: &Obligation) {
+    if !obligation.call_chain.is_empty() {
+        let chain = obligation.call_chain.join(" -> ");
+        if chain.chars().count() < 85 {
+            let _ = writeln!(output, "    call chain: {chain}");
+        } else {
+            output.push_str("    call chain:\n");
+            for (index, function) in obligation.call_chain.iter().enumerate() {
+                let _ = writeln!(
+                    output,
+                    "      {}{function}",
+                    if index == 0 { "" } else { "-> " }
+                );
+            }
+        }
+    } else if obligation.function != function.name {
+        let _ = writeln!(
+            output,
+            "    root: {}; failing function: {} (call chain not recorded)",
+            function.name, obligation.function
+        );
+    }
+}
+
+fn render_inputs(output: &mut String, function: &Function, obligation: &Obligation) {
+    let (label, inputs) = if let Some(replay) = &obligation.replay
+        && !replay.inputs.is_empty()
+    {
+        ("replay inputs", replay.inputs.clone())
+    } else if let Some(recipe) = function
+        .proof
+        .as_ref()
+        .and_then(|proof| proof.replay_inputs.as_ref())
+        && let Some(model) = &obligation.model
+        && let Ok(inputs) = crate::replay::counterexample_inputs(recipe, model)
+    {
+        ("counterexample inputs", inputs)
+    } else {
+        return;
+    };
+    if !inputs.is_empty() {
+        let inputs = inputs
+            .iter()
+            .map(|(name, value)| format!("{name} = {value}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(output, "    {label}: {inputs}");
+    }
+}
+
+fn render_replay(output: &mut String, function: &Function, obligation: &Obligation, colored: bool) {
+    use crate::replay::ReplayStatus;
+
+    render_inputs(output, function, obligation);
+    let Some(replay) = &obligation.replay else {
+        let outcome = if obligation.kind == ObligationKind::PanicSafety {
+            "panic"
+        } else {
+            "failure"
+        };
+        let _ = writeln!(
+            output,
+            "    evidence: symbolic counterexample; runtime {outcome} unconfirmed"
+        );
+        return;
+    };
+    let (label, color) = match replay.status {
+        ReplayStatus::ConfirmedPanic => ("native replay panicked", "31"),
+        ReplayStatus::NotReproduced => ("native replay did not panic", "33"),
+        ReplayStatus::Unsupported => ("native replay unsupported", "33"),
+        ReplayStatus::ToolFailure => ("native replay could not complete", "33"),
+    };
+    let _ = writeln!(output, "    evidence: {}", paint(label, color, colored));
+    if replay.status == ReplayStatus::ConfirmedPanic {
+        if let Some(message) = &replay.panic_message {
+            let _ = writeln!(output, "    native panic message: {message}");
+        }
+        if let Some(source) = &replay.panic_source {
+            let _ = writeln!(
+                output,
+                "    native panic at {}:{}:{}",
+                source.file, source.line, source.column
+            );
+        }
+        if replay.matches_obligation {
+            output.push_str("    panic site matches the obligation\n");
+        } else {
+            output.push_str("    panic site differs or could not be matched to this obligation\n");
+        }
+    }
+    if !replay.detail.is_empty() {
+        let _ = writeln!(output, "    replay: {}", short_detail(&replay.detail));
+    }
+    let _ = writeln!(
+        output,
+        "    replay panic strategy: {}",
+        replay.panic_strategy
+    );
+}
+
+fn render_failure(
+    output: &mut String,
+    function: &Function,
+    obligation: &Obligation,
+    colored: bool,
+) {
+    let label = match obligation.kind {
+        ObligationKind::PanicSafety => "panic condition",
+        ObligationKind::Validity => "validity condition",
+        ObligationKind::CallPrecondition => "callee precondition",
+        ObligationKind::Postcondition => "postcondition",
+        ObligationKind::Unsupported => "blocked by",
+    };
+    let _ = writeln!(output, "    {label}: {}", short_detail(&obligation.detail));
+    let _ = writeln!(
+        output,
+        "    at {}:{}:{} in {}",
+        obligation.source.file,
+        obligation.source.line,
+        obligation.source.column,
+        obligation.function
+    );
+    render_call_chain(output, function, obligation);
+    for reason in &obligation.abstraction_reasons {
+        let _ = writeln!(output, "    abstraction in query: {reason}");
+    }
+    match obligation.status {
+        ProofStatus::Refuted => render_replay(output, function, obligation, colored),
+        ProofStatus::Unknown => {
+            let _ = writeln!(output, "    next: {}", next_step(&obligation.detail));
+        }
+        ProofStatus::Proved | ProofStatus::ProvedWithAssumptions => {}
+    }
+}
+
 // Line-based heartbeats do not redraw or hide compiler diagnostics, including in captured logs.
 pub struct Progress {
     sender: Option<mpsc::Sender<Option<String>>>,
@@ -152,7 +315,22 @@ impl Drop for Progress {
 
 pub fn render_report(report: &Report, verbose: bool, colored: bool) -> String {
     if verbose {
-        return crate::render(report)
+        let mut output = crate::render(report);
+        for function in &report.functions {
+            let Some(proof) = &function.proof else {
+                continue;
+            };
+            for obligation in &proof.obligations {
+                if matches!(
+                    obligation.status,
+                    ProofStatus::Refuted | ProofStatus::Unknown
+                ) {
+                    let _ = writeln!(output, "  failure explanation for {}:", function.name);
+                    render_failure(&mut output, function, obligation, false);
+                }
+            }
+        }
+        return output
             .split_inclusive(char::is_whitespace)
             .map(|word| {
                 let label = word.trim_end();
@@ -243,14 +421,16 @@ pub fn render_report(report: &Report, verbose: bool, colored: bool) -> String {
                 .iter()
                 .find(|obligation| obligation.status == proof.status)
             {
-                let _ = writeln!(output, "    {}", short_detail(&obligation.detail));
-                if obligation.function != function.name {
-                    let _ = writeln!(
-                        output,
-                        "    in {} at {}:{}",
-                        obligation.function, obligation.source.file, obligation.source.line
-                    );
-                }
+                render_failure(&mut output, function, obligation, colored);
+            }
+            if proof.status == ProofStatus::Refuted
+                && let Some(blocker) = proof
+                    .obligations
+                    .iter()
+                    .find(|obligation| obligation.status == ProofStatus::Unknown)
+            {
+                output.push_str("    analysis also incomplete:\n");
+                render_failure(&mut output, function, blocker, colored);
             }
             if proof.stopped_after_counterexample {
                 let _ = writeln!(output, "    stopped after first counterexample");
@@ -365,7 +545,39 @@ pub fn render_totals(reports: &[Report], success: bool, colored: bool, elapsed_s
         output.push_str("  UNKNOWN means analysis could not finish a proof.\n");
     }
     if refuted > 0 {
-        output.push_str("  REFUTED is a failing translated obligation; check its root domain.\n");
+        output.push_str(
+            "  REFUTED is a failing translated obligation; runtime confirmation is separate.\n",
+        );
+    }
+    let mut replay_counts = [0_usize; 5];
+    for replay in reports
+        .iter()
+        .flat_map(|report| &report.functions)
+        .filter_map(|function| function.proof.as_ref())
+        .flat_map(|proof| &proof.obligations)
+        .filter_map(|obligation| obligation.replay.as_ref())
+    {
+        use crate::replay::ReplayStatus;
+
+        let index = match replay.status {
+            ReplayStatus::ConfirmedPanic => 0,
+            ReplayStatus::NotReproduced => 1,
+            ReplayStatus::Unsupported => 2,
+            ReplayStatus::ToolFailure => 3,
+        };
+        replay_counts[index] += 1;
+        if replay.status == ReplayStatus::ConfirmedPanic && replay.matches_obligation {
+            replay_counts[4] += 1;
+        }
+    }
+    if replay_counts.iter().any(|count| *count > 0) {
+        let [panics, returned, unsupported, incomplete, matched] = replay_counts;
+        let _ = writeln!(
+            output,
+            "  Native replay: {panics} panicked ({matched} at matching sites), \
+             {returned} did not panic, {unsupported} unsupported, {incomplete} incomplete."
+        );
+        output.push_str("  Replay evidence does not change proof status or verification exit.\n");
     }
     let stopped = reports
         .iter()
@@ -376,8 +588,9 @@ pub fn render_totals(reports: &[Report], success: bool, colored: bool, elapsed_s
     if stopped > 0 {
         let _ = writeln!(
             output,
-            "  {stopped} roots stopped after their first counterexample. \
-             Re-run verification with --all-failures to continue them."
+            "  {stopped} root{} stopped after its first counterexample. \
+             Re-run verification with --all-failures to continue analysis.",
+            if stopped == 1 { "" } else { "s" }
         );
     }
     if assumed > 0 {
@@ -498,7 +711,7 @@ pub fn report_command(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         return Err("no crate reports found".into());
     }
     for report in &mut reports {
-        if !(7..=8).contains(&report.schema_version) {
+        if !(7..=9).contains(&report.schema_version) {
             return Err(format!("unsupported report schema {}", report.schema_version).into());
         }
         report.coverage = crate::coverage(report);

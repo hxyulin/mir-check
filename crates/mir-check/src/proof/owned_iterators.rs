@@ -64,14 +64,7 @@ impl<'tcx> Engine<'tcx> {
         if callee.krate != iterator.krate {
             return Ok(None);
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("owned iterator signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         let parent = self.tcx.parent(callee);
         let name = self.tcx.item_name(callee);
         let trait_id = if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: true }) {
@@ -323,16 +316,7 @@ impl<'tcx> Engine<'tcx> {
         stack: &[DefId],
         site: (DefId, Span),
     ) -> Result<Vec<Return>, String> {
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx
-                    .fn_sig(instance.def_id())
-                    .instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("iterator fold signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         if values.len() != 3 || signature.inputs().len() != 3 {
             return Err("iterator fold callback arity mismatch".to_owned());
         }

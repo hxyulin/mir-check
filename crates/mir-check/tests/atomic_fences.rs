@@ -187,30 +187,24 @@ fn cas_preserves_result_relations_ordering_checks_and_spurious_failures() {
         ("bad_cas_success_claim", ProofStatus::Refuted),
         ("unchecked_cas_ordering", ProofStatus::Refuted),
         ("cas_history_remains_arbitrary", ProofStatus::Refuted),
-        ("fresh_counter_claim", ProofStatus::Refuted),
+        ("fresh_counter_claim", ProofStatus::Proved),
         ("occupied_counter_claim", ProofStatus::Refuted),
         ("pointer_cas_is_unknown", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         for optimized in [false, true] {
             let report = verify(&fixture(), &entries, target, optimized);
-            let failures = ["fresh_counter_claim", "occupied_counter_claim"].map(|name| {
-                report
-                    .functions
-                    .iter()
-                    .find(|function| function.name == name)
-                    .unwrap()
-                    .proof
-                    .as_ref()
-                    .unwrap()
-                    .obligations
-                    .iter()
-                    .find(|obligation| obligation.status == ProofStatus::Refuted)
-                    .unwrap()
-            });
-            assert_eq!(failures[0].query, failures[1].query);
-            assert!(failures.iter().all(|failure| {
-                failure.kind == mir_check::ObligationKind::PanicSafety
+            let occupied = report
+                .functions
+                .iter()
+                .find(|function| function.name == "occupied_counter_claim")
+                .unwrap()
+                .proof
+                .as_ref()
+                .unwrap();
+            assert!(occupied.obligations.iter().any(|failure| {
+                failure.status == ProofStatus::Refuted
+                    && failure.kind == mir_check::ObligationKind::PanicSafety
                     && failure.detail == "panic entry point is reachable"
             }));
         }

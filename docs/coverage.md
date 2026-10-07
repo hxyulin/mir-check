@@ -25,7 +25,7 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | Disjoint mutable root references, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
 | Typed static stores | Certified UnsafeCell payload places accept supported typed moves, known callbacks and fresh constructed futures; stored references retain escape evidence | Shared reads remain opaque; no last-write, initialization-protocol or exclusivity facts; arbitrary writes, general unions, resumed futures and static future polling remain UNKNOWN |
-| Interior mutation | Scalar Cell aliases/calls, integer atomic load/store/add/sub/swap and fences with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer atomics and other operations remain gaps |
+| Interior mutation | Scalar Cell aliases/calls; distinct owned integer atomic allocations retain new/load/store/add/sub/swap/CAS history; fences check orderings | Root/static atomics and local atomics after trusted publication remain arbitrary per access; pointer escapes, thread execution, RefCell and pointer atomics remain gaps |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Snapshot writes and general aliases remain unsupported; certified static stores have a separate model |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
@@ -530,4 +530,5 @@ when only a reference is constructed. General formatting stays UNKNOWN. Same-nam
 helpers cannot acquire core models; reference erasure retains dead/frame escape checks. Tests cover
 host/ARM debug and optimized builds, constructor-guard mutations, native replay and induction
 rejection. A panic-helper counterexample remains a translated obligation rather than an automatic
-replay-confirmed failure; arbitrary atomic states can make otherwise unobserved error paths feasible.
+replay-confirmed failure; arbitrary atomic states can make otherwise unobserved error paths
+feasible.

@@ -112,14 +112,7 @@ impl<'tcx> Engine<'tcx> {
         {
             return Ok(Some(results));
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("call signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         if self.core_array_from_fn() == Some(callee) {
             return self.array_from_fn(instance, signature, raw_values, state, stack, site);
         }
@@ -132,8 +125,11 @@ impl<'tcx> Engine<'tcx> {
             let [input] = signature.inputs() else {
                 return Ok(None);
             };
-            if !matches!(input.kind(), ty::Ref(_, slice, mutability)
-                if mutability.is_mut() && matches!(slice.kind(), ty::Slice(element) if *element == self.tcx.types.u8))
+            let ty::Ref(_, slice, mutability) = input.kind() else {
+                return Ok(None);
+            };
+            if !mutability.is_mut()
+                || !matches!(slice.kind(), ty::Slice(element) if *element == self.tcx.types.u8)
             {
                 return Ok(None);
             }
@@ -152,10 +148,13 @@ impl<'tcx> Engine<'tcx> {
             let ty::Array(element, width) = chunk_array.kind() else {
                 return Ok(None);
             };
+            let ty::Ref(_, remainder, remainder_mutability) = outputs[1].kind() else {
+                return Ok(None);
+            };
             if !mutability.is_mut()
                 || *element != self.tcx.types.u8
-                || !matches!(outputs[1].kind(), ty::Ref(_, slice, mutability)
-                    if mutability.is_mut() && matches!(slice.kind(), ty::Slice(element) if *element == self.tcx.types.u8))
+                || !remainder_mutability.is_mut()
+                || !matches!(remainder.kind(), ty::Slice(element) if *element == self.tcx.types.u8)
             {
                 return Ok(None);
             }

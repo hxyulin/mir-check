@@ -2019,7 +2019,7 @@ fn coverage_counts_root_results_separately_from_unselected_and_interpreted_bodie
     );
     assert!(!output.status.success());
     let analysis: Report = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(analysis.schema_version, 8);
+    assert_eq!(analysis.schema_version, 9);
     let coverage = &analysis.coverage;
     assert_eq!(coverage.selected_roots, 3);
     assert_eq!(
@@ -2900,7 +2900,9 @@ pub enum Message { Missing, Sample(Packet) }
     )
     .unwrap();
     let source = directory.0.join("consumer.rs");
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 #![no_std]
 pub fn read(packet: &dependency::Packet) -> u8 {
     match packet.index {
@@ -2916,9 +2918,14 @@ pub fn bad(packet: &dependency::Packet) -> u8 {
     }
 }
 pub fn message(value: &dependency::Message) -> u8 {
-    match value { dependency::Message::Missing => 0, dependency::Message::Sample(packet) => read(packet) }
+    match value {
+        dependency::Message::Missing => 0,
+        dependency::Message::Sample(packet) => read(packet),
+    }
 }
-"#).unwrap();
+"#,
+    )
+    .unwrap();
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let library = directory.0.join(if target.is_some() {
             "libarm.rlib"
@@ -3346,8 +3353,7 @@ fn the_vendored_pid_updates_and_resets_preserve_writes_and_require_valid_limits_
 }
 
 #[test]
-fn cells_preserve_alias_writes_and_atomics_check_orderings_without_assuming_history_on_host_and_arm()
- {
+fn cells_preserve_aliases_and_atomics_check_orderings_without_assuming_shared_history() {
     let entries = [
         ("cell_aliases", ProofStatus::Proved),
         ("cell_callback", ProofStatus::Proved),

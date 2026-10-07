@@ -135,6 +135,7 @@ fn normalize(
             | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::Reference { .. }
             | Value::SliceIterator { .. }
             | Value::Tuple(_)

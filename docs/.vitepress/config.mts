@@ -42,6 +42,8 @@ export default defineConfig({
         text: 'Develop the project',
         items: [
           { text: 'Development and docs', link: '/development' },
+          { text: 'Analyzer redesign', link: '/analyzer-redesign' },
+          { text: 'Typed storage model', link: '/storage-model' },
           { text: 'Implementation stages', link: '/stages' },
         ],
       },

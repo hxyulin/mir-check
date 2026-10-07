@@ -3,6 +3,7 @@
 pub mod cli;
 mod config;
 pub mod limits;
+pub mod replay;
 pub mod smt;
 pub use config::{ContractConfig, FunctionContract};
 pub use limits::AnalysisLimits;
@@ -164,6 +165,8 @@ pub struct Proof {
     pub trusted_calls: Vec<TrustedCall>,
     #[serde(default)]
     pub matched_contracts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_inputs: Option<replay::ReplayArguments>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -204,6 +207,12 @@ pub struct Obligation {
     pub status: ProofStatus,
     pub query: Option<String>,
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub call_chain: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abstraction_reasons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<replay::ReplayResult>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

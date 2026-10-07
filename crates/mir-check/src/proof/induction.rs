@@ -388,6 +388,9 @@ impl<'tcx> Engine<'tcx> {
             status,
             query: Some(query),
             model: None,
+            call_chain: vec![self.tcx.def_path_str(instance.def_id())],
+            abstraction_reasons: Vec::new(),
+            replay: None,
         });
         Ok(())
     }
@@ -1058,6 +1061,7 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
         other @ (Value::Float { .. }
         | Value::Cell { .. }
         | Value::Atomic { .. }
+        | Value::LocalAtomic { .. }
         | Value::StaticText
         | Value::FormatArguments
         | Value::RawPointer { .. }

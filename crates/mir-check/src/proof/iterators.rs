@@ -44,14 +44,7 @@ impl<'tcx> Engine<'tcx> {
         if callee.krate != shared.krate {
             return Ok(None);
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("iterator signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         let name = self.tcx.item_name(callee);
         let parent = self.tcx.parent(callee);
         let inherent = matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false });
@@ -642,11 +635,7 @@ impl<'tcx> Engine<'tcx> {
         stack: &[DefId],
         site: (DefId, Span),
     ) -> Result<Vec<Return>, String> {
-        let signature = self
-            .tcx
-            .fn_sig(instance.def_id())
-            .instantiate(self.tcx, instance.args)
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         let (callable, environment) = match signature.inputs()[1].kind() {
             ty::Closure(id, args) => (ty::Instance::new_raw(*id, args), true),
             ty::FnDef(id, args) => (self.resolve_function_item(*id, args.skip_binder())?, false),

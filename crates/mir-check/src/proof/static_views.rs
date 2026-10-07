@@ -176,7 +176,7 @@ impl<'tcx> Engine<'tcx> {
             && matches!(block.terminator().kind, TerminatorKind::Return)
     }
 
-    fn static_layout(
+    pub(super) fn static_layout(
         &self,
         ty: Ty<'tcx>,
     ) -> Result<rustc_middle::ty::layout::TyAndLayout<'tcx>, String> {
@@ -202,14 +202,8 @@ impl<'tcx> Engine<'tcx> {
     fn intern_static_view(&self, view: StaticView<'tcx>) -> Result<Value, String> {
         let declared = self.static_declared_type(view.static_id)?;
         let allocation = self.static_layout(declared)?;
-        let target = self.static_layout(view.ty)?;
-        if view
-            .offset
-            .checked_add(target.size.bytes())
-            .is_none_or(|end| end > allocation.size.bytes())
-            || allocation.align.abi < target.align.abi
-            || !view.offset.is_multiple_of(target.align.abi.bytes())
-        {
+        let footprint = self.typed_storage_footprint(view.ty, view.offset)?;
+        if !footprint.fits(allocation.size.bytes(), allocation.align.abi.bytes()) {
             return Err("static view exceeds its allocation or required alignment".into());
         }
         let mut views = self.static_views.borrow_mut();
@@ -421,6 +415,13 @@ impl<'tcx> Engine<'tcx> {
         Ok(())
     }
 
+    fn certified_static_type(&self, view: StaticView<'tcx>) -> Result<bool, String> {
+        if view.ty == view.certified || (view.offset == 0 && view.ty == view.original) {
+            return Ok(true);
+        }
+        self.initialized_storage_prefix(view.certified, view.ty)
+    }
+
     fn atomic_storage_prefix(
         &self,
         ty: Ty<'tcx>,
@@ -592,8 +593,7 @@ impl<'tcx> Engine<'tcx> {
         match projection {
             ProjectionElem::Deref if view.kind != ViewKind::Place => {
                 if !self.uninit_static_address(view)? {
-                    if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original)
-                    {
+                    if !self.certified_static_type(view)? {
                         self.certify_atomic_overlay(view.certified, view.ty)?;
                     }
                     view.certified = view.ty;
@@ -681,7 +681,7 @@ impl<'tcx> Engine<'tcx> {
             if let Some(atomic) = self.atomic_shape(view.ty) {
                 return Ok(atomic);
             }
-            if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original) {
+            if !self.certified_static_type(view)? {
                 return Err(
                     "static reinterpretation does not restore a certified storage type".into(),
                 );

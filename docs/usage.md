@@ -131,19 +131,30 @@ feasibility. `--entry` works in inventory mode too, to request those paths.
 
 The default compact report prints counts and up to 20 roots per crate, prioritizing refutations,
 unknowns and trusted assumptions before ordinary proofs. It includes source locations and the
-first matching failed obligation, plus the five largest UNKNOWN gap groups. `--summary` remains
+first matching failed obligation, plus the five largest UNKNOWN gap groups. Failure explanations
+name the condition, precise source location and symbolic call chain. They also identify supported
+abstraction choices present in the query, rather than listing every model used by the root.
+They distinguish an
+unconfirmed symbolic counterexample from a native replay that panicked, did not panic, could not
+run, or failed to complete. A native panic at another location is reported separately from a
+matching obligation. Older reports without call chains identify only the root and failing function.
+UNKNOWN explanations point to the relevant resource option or unsupported construct. A refuted
+root with a later UNKNOWN also displays its first analysis blocker. `--summary` remains
 an alias for this view. A refuted root can also have unknown obligations, so gap groups may include
 it. Distinct interpreted
 instances are deduplicated within one crate report; they can include callees and dependency
 bodies. The counts are not statement/branch coverage percentages or whole-crate safety claims.
 
 Use `--verbose` to inspect every root, sites, assumptions, input bindings, interpreted instances,
-trusted models and individual obligations. Schema version 8 JSON includes:
+trusted models and individual obligations. Schema version 9 JSON includes:
 
 - `coverage`: inventoried/selected/unselected counts, root outcomes, interpreted instance count
   and gap groups.
 - `functions[].proof`: root status, assumptions, input bindings, interpreted bodies, explicit
-  library models, used user-trusted summaries and obligations with SMT queries and optional models.
+  library models, used user-trusted summaries and obligations with SMT queries, optional models,
+  symbolic call chains, query abstraction reasons and optional replay evidence. Readers accept
+  schema versions 7 through 9;
+  absent replay evidence means the runtime outcome is unconfirmed.
 - `contract_config`, `matched_contracts`: the optional external configuration and matched selectors.
 - `functions[].sites`: the independent unverified MIR inventory.
 - `rustc_arguments`, `compiler`, `target`, `panic_strategy`, `overflow_checks`: analysis build data.
@@ -154,8 +165,8 @@ for other completed crates; they cannot produce a successful run. Missing reques
 fail while retaining the collected reports. Build directories can be removed after use.
 
 Direct mode accepts `--json`, `--jsonl FILE|-`, `--verbose`, `--summary`, `--verify`, repeated
-`--entry`, `--contracts FILE`, `--allow-assumptions`, `--color` and `--quiet` before rustc
-arguments:
+`--entry`, `--replay`, `--contracts FILE`, `--allow-assumptions`, `--color` and `--quiet`
+before rustc arguments:
 
 ```sh
 target/debug/mir-check --json --verify --entry next_byte -- \
@@ -329,3 +340,42 @@ cargo mir-check --verify --all-failures --entry bounded_increment --lib
 Normal execution and solver budgets still apply, so this does not promise every possible failure.
 Reports retain full queries and models and mark roots that stopped early. Reading saved reports
 does not resume verification; re-run the original command with this option to continue exploration.
+
+## Execute a counterexample
+
+Add `--replay` to verification to compile and execute the first panic counterexample for each
+refuted root. Execution is opt-in: an ordinary scan only performs static analysis. Supported
+concrete counterexample inputs can also appear in ordinary reports without executing the function.
+
+```sh
+target/debug/mir-check --verify --replay --entry checked_index -- \
+  --crate-type=lib --edition=2024 tests/fixtures/counterexample_replay.rs \
+  -Coverflow-checks=yes -Cpanic=abort
+
+cargo mir-check --verify --replay --entry decode --lib
+```
+
+The first example reports a failing bounds check, native input values, the observed panic message
+and source location. It still exits unsuccessfully because the root is REFUTED. The CLI separately
+counts native panics, matching panic sites, inputs that returned without panic, unsupported replay
+and replay tool failures. A panic at a different site confirms a root execution failure; it does
+not confirm that particular obligation. A successful execution tests one input and does not prove
+the function safe or change REFUTED to PROVED.
+
+Replay currently supports accessible nongeneric free functions on the analyzed native host target,
+with Boolean, integer and unit inputs and supported fixed scalar arrays of at most 128 elements.
+References, symbolic byte-array encodings, floating-point inputs and trusted call boundaries are
+unsupported. Inputs must have concrete retained model assignments; missing values are never filled
+with defaults. An ARM report remains statically analyzable, but this option cannot execute it on
+the host.
+
+Replay recompiles the original source using the retained compiler configuration and dependencies.
+The primary Rust source must still match the recorded scan; dependency artifacts must remain
+available. Included data and dependency sources are not independently fingerprinted.
+It preserves the analyzed abort or unwind panic strategy. A native hook records panic entry;
+for abort it exits after recording the panic, while unwind uses catch_unwind. This observes a
+panic without establishing anything about subsequent cleanup. Compilation and execution have
+time and output budgets. Failure to compile, a timeout or incomplete execution is a replay tool
+failure. Returned values are retained without invoking caller-side destructors, so a destructor
+outside the checked function cannot be mistaken for that function's panic. Generated harnesses
+and compiler logs are temporary; JSON and JSONL retain structured replay evidence.

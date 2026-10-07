@@ -126,6 +126,7 @@ impl<'tcx> Engine<'tcx> {
             other @ (Value::Float { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
@@ -365,6 +366,7 @@ impl<'tcx> Engine<'tcx> {
                         | Value::Enum { .. }
                         | Value::Cell { .. }
                         | Value::Atomic { .. }
+                        | Value::LocalAtomic { .. }
                         | Value::Reference { .. }
                         | Value::SliceIterator { .. }
                         | Value::Elements(_)
@@ -569,6 +571,7 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::Reference { .. }
             | Value::SliceIterator { .. }
             | Value::Tuple(_)
@@ -625,6 +628,7 @@ pub(super) fn static_projection(value: Value, part: &MemoryProjection) -> Result
             | Value::Enum { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::Reference { .. }
             | Value::SliceIterator { .. }
             | Value::Tuple(_)

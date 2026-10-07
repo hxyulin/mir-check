@@ -37,7 +37,10 @@ impl<'tcx> Engine<'tcx> {
         else {
             return value;
         };
-        let raw_bits = self.fresh(Sort::BitVec(bits));
+        let raw_bits = self.fresh_abstraction(
+            Sort::BitVec(bits),
+            "arithmetic NaNs allow every payload and sign; other float encodings are exact",
+        );
         let Value::Float {
             expression: decoded,
             ..
@@ -117,14 +120,7 @@ impl<'tcx> Engine<'tcx> {
                 _ => Err("slice len receiver is not modeled".to_owned()),
             };
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, args),
-            )
-            .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         self.check_fence_ordering(instance, signature, values, state, (caller, span))?;
         if let Some(value) = self.atomic_fence_intrinsic(instance, signature, values, span)? {
             return Ok(Some(value));

@@ -28,14 +28,7 @@ impl<'tcx> Engine<'tcx> {
             .instantiate(self.tcx, instance.args)
             .skip_norm_wip()
             .def_id;
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx.fn_sig(callee).instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("range signature normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         let Some(input) = signature.inputs().first() else {
             return Ok(None);
         };

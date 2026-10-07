@@ -19,6 +19,7 @@ const MAX_INPUT_VALUES: usize = 512;
 mod aggregates;
 mod array_equality;
 mod builtins;
+mod call_metadata;
 mod constants;
 mod coroutines;
 mod error_formatting;
@@ -35,9 +36,11 @@ mod membership;
 mod memory;
 mod owned_iterators;
 mod pointer_handles;
+mod replay_inputs;
 mod slice_equality;
 mod static_views;
 mod static_writes;
+mod storage_layout;
 
 #[derive(Clone)]
 struct State {
@@ -58,12 +61,15 @@ struct Engine<'tcx> {
     terms: Context,
     next_symbol: u32,
     float_encodings: BTreeMap<u32, Term>,
+    abstraction_symbols: BTreeMap<u32, &'static str>,
     static_views: std::cell::RefCell<Vec<static_views::StaticView<'tcx>>>,
     static_epoch: Option<usize>,
     static_roots: Option<usize>,
     function_pointers: Vec<(ty::Instance<'tcx>, Ty<'tcx>)>,
     static_addresses: std::collections::HashMap<DefId, Term>,
     steps: usize,
+    call_chain: Vec<DefId>,
+    failed_call_chain: Option<Vec<DefId>>,
     input_depth: usize,
     input_values: usize,
     input_shapes: std::collections::HashMap<Ty<'tcx>, std::rc::Rc<symbolic::input::InputShape>>,
@@ -79,6 +85,8 @@ struct Engine<'tcx> {
     solver: std::cell::RefCell<Solver>,
     bodies:
         std::cell::RefCell<std::collections::HashMap<ty::Instance<'tcx>, std::rc::Rc<Body<'tcx>>>>,
+    call_signatures:
+        std::cell::RefCell<std::collections::HashMap<ty::Instance<'tcx>, ty::PolyFnSig<'tcx>>>,
 }
 
 pub fn verify(
@@ -94,12 +102,15 @@ pub fn verify(
         terms: Context::default(),
         next_symbol: 0,
         float_encodings: BTreeMap::new(),
+        abstraction_symbols: BTreeMap::new(),
         static_views: std::cell::RefCell::new(Vec::new()),
         static_epoch: None,
         static_roots: None,
         function_pointers: Vec::new(),
         static_addresses: std::collections::HashMap::new(),
         steps: 0,
+        call_chain: Vec::new(),
+        failed_call_chain: None,
         input_depth: 0,
         input_values: 0,
         input_shapes: std::collections::HashMap::new(),
@@ -113,6 +124,7 @@ pub fn verify(
         resolved_contracts: BTreeMap::new(),
         solver: std::cell::RefCell::new(Solver::with_limits(limits)),
         bodies: std::cell::RefCell::new(std::collections::HashMap::new()),
+        call_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
@@ -124,6 +136,7 @@ pub fn verify(
             trusted_calls: Vec::new(),
             matched_contracts: Vec::new(),
             stopped_after_counterexample: false,
+            replay_inputs: None,
         },
     };
     let result = engine.root(id);
@@ -228,6 +241,7 @@ impl<'tcx> Engine<'tcx> {
                 arguments.push(self.argument(id, ty, &mut conditions)?);
             }
         }
+        self.proof.replay_inputs = Some(self.replay_arguments(id, &arguments));
         let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
         let instance = ty::Instance::new_raw(id, ty::GenericArgs::identity_for_item(self.tcx, id));
         let bindings = self.configured_bindings(body, &snapshots, instance)?;
@@ -296,6 +310,13 @@ impl<'tcx> Engine<'tcx> {
             Value::Cell { allocation } => format!("Cell allocation {allocation}; mutable contents"),
             Value::Atomic { bits, signed } => {
                 format!("shared atomic {bits}-bit signed={signed}; arbitrary per access")
+            }
+            Value::LocalAtomic {
+                allocation,
+                bits,
+                signed,
+            } => {
+                format!("local atomic allocation {allocation}; {bits}-bit signed={signed}")
             }
             Value::Unit => "()".to_owned(),
             Value::Elements(elements) => {
@@ -380,6 +401,13 @@ impl<'tcx> Engine<'tcx> {
             .expect("modeled MIR sort");
         self.next_symbol += 1;
         symbol
+    }
+
+    fn fresh_abstraction(&mut self, sort: Sort, reason: &'static str) -> Term {
+        let term = self.fresh(sort);
+        self.abstraction_symbols
+            .insert(term.symbol_index().expect("fresh symbol"), reason);
+        term
     }
 
     fn argument(
@@ -622,6 +650,28 @@ impl<'tcx> Engine<'tcx> {
             status,
             query: Some(query.text().to_owned()),
             model,
+            call_chain: if status == ProofStatus::Proved {
+                Vec::new()
+            } else {
+                self.call_chain
+                    .iter()
+                    .map(|id| self.tcx.def_path_str(*id))
+                    .collect()
+            },
+            abstraction_reasons: if status == ProofStatus::Proved {
+                Vec::new()
+            } else {
+                query
+                    .symbols()
+                    .iter()
+                    .filter_map(|symbol| self.abstraction_symbols.get(symbol))
+                    .copied()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect()
+            },
+            replay: None,
         });
         if status == ProofStatus::Unknown {
             return Err("solver could not discharge an obligation".to_owned());
@@ -642,6 +692,15 @@ impl<'tcx> Engine<'tcx> {
             status: ProofStatus::Unknown,
             query: self.solver.borrow_mut().take_failed_feasibility_query(),
             model: None,
+            call_chain: self
+                .failed_call_chain
+                .take()
+                .unwrap_or_else(|| vec![id])
+                .into_iter()
+                .map(|id| self.tcx.def_path_str(id))
+                .collect(),
+            abstraction_reasons: Vec::new(),
+            replay: None,
         });
     }
 
@@ -681,6 +740,24 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn execute(
+        &mut self,
+        instance: ty::Instance<'tcx>,
+        arguments: Vec<Value>,
+        conditions: Vec<Term>,
+        memory: Vec<Option<Value>>,
+        stack: &[DefId],
+    ) -> Result<Vec<Return>, String> {
+        let chain = stack.iter().copied().chain([instance.def_id()]).collect();
+        let previous = std::mem::replace(&mut self.call_chain, chain);
+        let result = self.execute_body(instance, arguments, conditions, memory, stack);
+        if result.is_err() && self.failed_call_chain.is_none() {
+            self.failed_call_chain = Some(self.call_chain.clone());
+        }
+        self.call_chain = previous;
+        result
+    }
+
+    fn execute_body(
         &mut self,
         instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
@@ -1271,6 +1348,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::StaticText
                 | Value::Cell { .. }
                 | Value::Atomic { .. }
+                | Value::LocalAtomic { .. }
                 | Value::SliceIterator { .. }),
             ) => value,
             (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields

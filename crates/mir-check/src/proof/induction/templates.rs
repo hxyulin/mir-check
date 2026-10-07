@@ -25,6 +25,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::Enum { .. }
                 | Value::Cell { .. }
                 | Value::Atomic { .. }
+                | Value::LocalAtomic { .. }
                 | Value::Reference { .. }
                 | Value::SliceIterator { .. }
                 | Value::Tuple(_)
@@ -180,6 +181,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::Bytes { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
+            | Value::LocalAtomic { .. }
             | Value::SliceIterator { .. }
             | Value::MetadataPointer(_)
             | Value::StaticText
@@ -220,16 +222,7 @@ impl<'tcx> Engine<'tcx> {
         if let Some(value) = self.loop_slice_template(instance, values, state)? {
             return Ok(Some(value));
         }
-        let signature = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx
-                    .fn_sig(instance.def_id())
-                    .instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("template call normalization failed: {error:?}"))?
-            .skip_binder();
+        let signature = self.call_signature(instance)?;
         if let ty::Ref(_, pointee, mutability) = signature.output().kind() {
             for (input, value) in signature.inputs().iter().zip(values) {
                 if matches!(input.kind(), ty::Ref(_, input, writable)

@@ -66,6 +66,40 @@ pub fn generic_target(value: u8) {
     assert!(callback(value) == value);
 }
 
+pub fn mixed_generic_targets(value: u8, wide: u16, flag: bool) {
+    let byte_callback: fn(u8) -> u8 = select::<u8>;
+    let wide_callback: fn(u16) -> u16 = select::<u16>;
+    let flag_callback: fn(bool) -> bool = select::<bool>;
+    assert!(byte_callback(value) == value);
+    assert!(wide_callback(wide) == wide);
+    assert!(flag_callback(flag) == flag);
+    assert!(byte_callback(value) == value);
+}
+
+fn first<const N: usize>(values: [u8; N]) -> u8 {
+    values[0]
+}
+
+pub fn different_const_generic_shapes(first_value: u8, second_value: u8) {
+    let short: fn([u8; 2]) -> u8 = first::<2>;
+    let long: fn([u8; 4]) -> u8 = first::<4>;
+    assert!(short([first_value, second_value]) == first_value);
+    assert!(long([second_value, first_value, 0, 0]) == second_value);
+    assert!(short([second_value, first_value]) == second_value);
+}
+
+pub fn empty_const_generic_target() {
+    let empty: fn([u8; 0]) -> u8 = first::<0>;
+    let _ = empty([]);
+}
+
+pub fn bounded_generic_argument(value: u8) {
+    if value < 4 {
+        let callback: fn(u8) -> u8 = select::<u8>;
+        assert!(callback(value) == value);
+    }
+}
+
 pub fn rust_call_adapters(value: u8) {
     let callback: fn(u8) -> u8 = low_bits;
     assert!(through_adapter(callback, value) < 4);
@@ -149,6 +183,8 @@ mod tests {
             super::selected_target(value, true);
             super::stored_target(value);
             super::generic_target(value);
+            super::mixed_generic_targets(value, u16::from(value) * 257, value % 2 == 0);
+            super::different_const_generic_shapes(value, value.wrapping_add(1));
             super::rust_call_adapters(value);
             super::pointer_call_preserves_effects(value);
         }

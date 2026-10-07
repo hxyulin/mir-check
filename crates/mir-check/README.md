@@ -3,6 +3,17 @@
 Host compiler adapter and report model. mir-check drives rustc directly; cargo-mir-check
 uses it as a Cargo workspace wrapper and collects per-crate reports in an isolated build directory.
 
+Human failure reports name the violated condition, source location and symbolic call chain.
+UNKNOWN includes a next step for the actual limit or unsupported construct. REFUTED remains a
+translated failure; native replay evidence is displayed separately, including a panic at a
+different site or a replay that did not panic. A passed replay never converts REFUTED to PROVED.
+`--replay` explicitly requests native execution of supported counterexample inputs; the default
+scan executes no analyzed functions. Supported concrete assignments can be displayed without
+running them. Native evidence includes the observed panic message and location, and records the
+native replay's panic strategy, preserving the analyzed build's abort or unwind configuration.
+Saved reports without the new evidence fields remain readable and show their runtime outcome as
+unconfirmed. JSON and JSONL retain the complete evidence independently of compact display.
+
 Cargo sets mir-check-rustc as the outer compiler wrapper and mir-check as the workspace wrapper. The
 outer wrapper appends -Zalways-encode-mir=yes and -Zmir-opt-level=0 without rewriting flags. It
 forwards to the workspace analyzer or the pinned compiler, so direct and transitive Cargo library
@@ -181,22 +192,29 @@ invalid caller limits and a rejected reset-write mutation on host/ARM. Arbitrary
 paths can still exceed the budget.
 
 Compiler-identified scalar Cell new/get/set/replace models share allocation-backed writes through
-supported aliases and calls. Integer atomic new/load/store/fetch_add/fetch_sub/swap models allow
-arbitrary current values and interference at each access. RMW operations return the old value and
-wrap on overflow. Load/store ordering restrictions are checked, including symbolic Ordering
-arguments. Atomic-only static wrappers are represented without freezing mutable initializers.
-Compiler-identified fence/compiler_fence wrappers check non-Relaxed orderings, including symbolic
-arguments, then execute their available MIR. Valid atomic_fence/atomic_singlethreadfence intrinsic
-calls return unit without adding synchronization facts or changing tracked local storage. Invalid
-intrinsic orderings remain UNKNOWN. This abstraction does not prove memory ordering, publication,
-data-race freedom or whole-function atomicity.
-Reports record these models; atomic history assertions can refute under the conservative
-abstraction. RefCell guards, general UnsafeCell operations and raw pointers remain unsupported.
+supported aliases and calls. Integer atomic constructors executed in analyzed MIR create distinct
+owned allocations. Local load/store/fetch_add/fetch_sub/swap and strong/weak CAS retain exact
+history through aliases, analyzed calls and owned returns. RMW updates wrap without overflow panics.
+Weak CAS additionally permits spurious failure. Load/store and CAS ordering restrictions are
+checked, including symbolic Ordering arguments.
 
-Even a fresh local atomic loses its constructor value in the arbitrary-access model. A first
-strong CAS from zero can therefore refute despite passing native replay. The atomic-fence fixture
-checks that limitation alongside a genuinely occupied counter and an initializer mutation that
-panics. A solver assignment alone is not evidence that the analyzed program reaches the failure.
+Root/shared static atomics still permit arbitrary per-access state; their initializers do not prove
+startup state. Every trusted boundary discards precise local atomic history, even with modifies=[]:
+publishing an alias can allow subsequent interference without modifying the value during the call.
+Stores cannot restore precision after that boundary. Dead backing, unsupported pointer publication,
+thread execution and borrowed frame escapes remain UNKNOWN. Reports identify the history policy.
+
+Compiler-identified fence/compiler_fence wrappers check non-Relaxed orderings, including symbolic
+arguments, then execute available MIR. Valid atomic_fence/atomic_singlethreadfence intrinsics return
+unit without adding synchronization facts or changing tracked local storage. Invalid intrinsic
+orderings remain UNKNOWN. The models do not prove memory ordering, publication, data-race freedom or
+whole-function atomicity. RefCell guards, general UnsafeCell operations and raw pointers remain
+gaps.
+
+The fresh-counter fixture proves its first claim, while an occupied counter refutes. Native replay
+agrees, and changing the fresh initializer from zero to one fails both proof and replay. A solver
+assignment alone is not evidence that the analyzed program reaches a failure, especially when its
+outcome depends on conservative shared atomic interference.
 
 --contracts FILE attaches checked clauses to unchanged code through a schema-1 JSON sidecar.
 Exact crate-qualified selectors and positional aliases are validated; stale configuration fails.
@@ -566,13 +584,14 @@ Reads use the existing arbitrary-per-access model without byte-order or initiali
 Shared atomic reborrows preserve their marker across temporary lifetimes. This does not prove
 synchronization protocols or the validity of overlapping accesses and arbitrary overlay writes.
 
-Integer compare_exchange and compare_exchange_weak support typed success/failure results. Strong
-CAS succeeds exactly when its arbitrary old value equals the expected value. Weak CAS may fail
-spuriously even on a match. Success orderings accept all five Ordering variants; failure accepts
-Relaxed, Acquire or SeqCst, including when stronger than success on the pinned core. Invalid
-orderings refute. Replacement values are type-checked, and later accesses stay arbitrary. Pointer
-CAS remains UNKNOWN. Host/ARM debug and optimized fixtures test signed values, result relations,
-ordering guards, spurious failure, mutations and native replay.
+Integer compare_exchange and compare_exchange_weak support typed success/failure results. Strong CAS
+succeeds exactly when its old value equals the expected value. Weak CAS may fail spuriously even on
+a match. Success orderings accept all five Ordering variants; failure accepts Relaxed, Acquire or
+SeqCst, including when stronger than success on the pinned core. Invalid orderings refute.
+Replacement values are type-checked. Owned local storage retains the conditional update, while
+conservative root/static accesses stay arbitrary. Pointer CAS remains UNKNOWN. Host/ARM debug and
+optimized fixtures test signed values, result relations, ordering guards, spurious failure,
+mutations and native replay.
 
 MaybeUninit::as_ptr exposes the address of a certified shared static container without certifying
 payload initialization. Payload reads remain UNKNOWN; supported typed stores are described below.
@@ -627,3 +646,7 @@ assumed panic-free. Guarded success/error returns preserve their actual payloads
 failure-helper calls generate panic obligations. Same-named user traits/helpers do not match.
 Independent host/ARM debug and optimized fixtures test positive, refuted and UNKNOWN cases,
 formatter counters, reference escape, induction rejection, guard mutations and native replay.
+
+Failure reports identify supported abstraction symbols that occur in the obligation query, including
+conservative atomic reads, weak compare-exchange choices and arithmetic NaN encodings. These labels
+explain modeling choices; they do not establish which choice caused a real panic.

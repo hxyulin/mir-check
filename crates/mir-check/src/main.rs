@@ -52,6 +52,8 @@ struct Checker {
     all_failures: bool,
     induction: bool,
     limits: AnalysisLimits,
+    replay: bool,
+    pending_report: Option<Report>,
 }
 
 impl Callbacks for Checker {
@@ -66,6 +68,7 @@ impl Callbacks for Checker {
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
+        let crate_name = report.crate_name.clone();
         report.analysis_limits = Some(self.limits);
         tcx.dcx().abort_if_errors();
         self.analysis_ran = true;
@@ -232,7 +235,9 @@ impl Callbacks for Checker {
                         ));
                     }
                 }
-                if let Err(error) = self.emit(&report) {
+                if self.replay && self.report_dir.is_none() {
+                    self.pending_report = Some(report);
+                } else if let Err(error) = self.emit(&report) {
                     self.error = Some(error.to_string());
                 }
             }
@@ -241,10 +246,7 @@ impl Callbacks for Checker {
         let elapsed_s = progress.elapsed();
         drop(progress);
         if !self.quiet {
-            eprintln!(
-                "mir-check: Analyzed {} in {elapsed_s:.1}s",
-                report.crate_name
-            );
+            eprintln!("mir-check: Analyzed {} in {elapsed_s:.1}s", crate_name);
         }
         if self.report_dir.is_some() {
             Compilation::Continue
@@ -307,7 +309,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
     }
     functions.sort_by(|left, right| left.name.cmp(&right.name));
     Report {
-        schema_version: 8,
+        schema_version: 9,
         compiler: env!("MIR_CHECK_COMPILER").to_owned(),
         crate_name: tcx.crate_name(rustc_hir::def_id::LOCAL_CRATE).to_string(),
         target: tcx.sess.opts.target_triple.to_string(),
@@ -420,6 +422,8 @@ fn main() -> ExitCode {
         all_failures: std::env::var_os("MIR_CHECK_ALL_FAILURES").is_some(),
         induction: std::env::var_os("MIR_CHECK_INDUCTION").is_some(),
         limits,
+        replay: false,
+        pending_report: None,
     };
     let mut from_report = None;
     if checker.report_dir.is_some() {
@@ -434,7 +438,7 @@ fn main() -> ExitCode {
         {
             println!(
                 "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] \
-                [--contracts FILE] [--allow-assumptions] [--all-failures] [--induction] \
+                [--contracts FILE] [--allow-assumptions] [--all-failures] [--induction] [--replay] \
                 [--verbose] [--quiet] \
                 [--color auto|always|never] [--jsonl FILE|-] -- \
                 <rustc arguments>\n\
@@ -444,6 +448,7 @@ fn main() -> ExitCode {
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
                 --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
                 Refuted roots stop at their first counterexample; --all-failures continues them.\n\
+                --replay compiles and executes supported native counterexample inputs.\n\
                 mir-check report <file or directory> reads saved JSON/JSONL reports.\n\n{}",
                 mir_check::limits::HELP
             );
@@ -480,6 +485,10 @@ fn main() -> ExitCode {
                 }
                 Some("--induction") => {
                     checker.induction = true;
+                    args.remove(1);
+                }
+                Some("--replay") => {
+                    checker.replay = true;
                     args.remove(1);
                 }
                 Some("--all-failures") => {
@@ -584,7 +593,7 @@ fn main() -> ExitCode {
         }
         let loaded = (|| -> Result<Report, Box<dyn std::error::Error>> {
             let report: Report = serde_json::from_slice(&std::fs::read(&path)?)?;
-            if !(7..=8).contains(&report.schema_version) {
+            if !(7..=9).contains(&report.schema_version) {
                 return Err(format!("unsupported report schema {}", report.schema_version).into());
             }
             if report.compiler != env!("MIR_CHECK_COMPILER") {
@@ -647,6 +656,10 @@ fn main() -> ExitCode {
             }
         }
     }
+    if checker.replay && !checker.verify {
+        eprintln!("mir-check: --replay requires --verify");
+        return ExitCode::FAILURE;
+    }
     if !args
         .iter()
         .any(|arg| arg == "--sysroot" || arg.starts_with("--sysroot="))
@@ -656,6 +669,18 @@ fn main() -> ExitCode {
     checker.rustc_arguments = args[1..].to_vec();
     let status =
         rustc_driver::catch_with_exit_code(|| rustc_driver::run_compiler(&args, &mut checker));
+    if let Some(mut report) = checker.pending_report.take() {
+        let progress = Progress::new(
+            !checker.quiet,
+            checker.color,
+            "Compiling and executing native counterexample replays".to_owned(),
+        );
+        mir_check::replay::replay_report(&mut report);
+        drop(progress);
+        if let Err(error) = checker.emit(&report) {
+            checker.error = Some(error.to_string());
+        }
+    }
     if checker.verify
         && checker.report_dir.is_none()
         && !checker.analysis_ran

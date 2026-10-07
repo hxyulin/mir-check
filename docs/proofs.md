@@ -486,47 +486,60 @@ contents. Supported aliases and calls share updates. One shared scalar Cell root
 multiple root locations with unresolved aliases remain unknown. RefCell guards/destructors and
 general UnsafeCell/raw-pointer operations remain gaps.
 
-Compiler-identified integer atomics support new/load/store/fetch_add/fetch_sub/swap. Their state is
-conservatively arbitrary at each access, including statics whose initializer is zero. RMW calls
-return an arbitrary old value; updates wrap and carry no arithmetic overflow panic. No subsequent
-access is correlated with the operation, allowing interference without modeling a full concurrent
-execution. Assertions about such relationships may refute in this abstraction; those assignments
-are not automatically reachable executions. Load/store ordering restrictions are panic obligations,
-including symbolic Ordering arguments. Unsupported operations and targets retain normal unknown
-boundaries. The models and their interference policy appear in reports.
+Compiler-identified integer atomics support new/load/store/fetch_add/fetch_sub/swap and strong/weak
+compare_exchange. A constructor executed in analyzed MIR creates a distinct owned allocation with
+its actual integer value. Supported aliases, ordinary analyzed calls and owned return moves retain
+that identity. Loads read its path-local state; stores, swaps and modular RMW update it. Strong CAS
+updates only on equality, and weak CAS additionally permits spurious failure. No arithmetic overflow
+panic is introduced by modular RMW. Dead backing storage and unsupported pointer escapes are
+UNKNOWN.
 
-The same abstraction applies to a freshly constructed local atomic, even when its reference never
-escapes. It can therefore refute a first strong compare_exchange from zero that always succeeds in
-native execution. The independent fresh-counter fixture demonstrates this false positive alongside
-an occupied counter whose unwrap genuinely panics. Both produce the same failing query because the
-current model discards constructor values. Native replay passes the fresh case and rejects a
-mutation of its initializer from zero to one. This is a precision limitation, not a confirmed Rust
-failure; preserving initialization requires storage identity and a justified interference policy.
+Exact history requires absence of unmodeled publication. Every trusted call discards precise local
+atomic history, even with an empty modifies clause: the boundary may publish an alias without
+changing the value during the call. A live backing allocation becomes permanently conservative;
+stores after the boundary cannot restore exclusivity. General unknown effects may also invalidate
+the backing allocation, yielding UNKNOWN. Borrowed frame-owned atomics cannot escape as owned
+snapshots. Pointer atomics, thread publication and induction over owned atomic identities remain
+gaps.
+
+Root/shared static atomics still have conservatively arbitrary values at every access, including
+statics with a zero initializer. Their RMW calls return an arbitrary old value, and later accesses
+remain uncorrelated. Such counterexamples need not be reachable executions. Fresh startup facts
+require an explicit verified environment model; local constructor precision supplies no static
+startup guarantee. Load/store ordering restrictions are panic obligations, including symbolic
+Ordering arguments. Reports name whether a model retains owned history or allows interference.
+
+The independent fresh-counter fixture now proves its first strong claim, while the occupied counter
+is REFUTED. Native execution agrees; mutating the fresh constructor from zero to one fails both the
+proof and native test. Other fixtures check aliased updates, owned returns, modular wrapping, strong
+and weak CAS transitions, invalid orderings, unsupported escapes and trusted-effect invalidation.
 
 Compiler-identified fence/compiler_fence wrappers establish a panic obligation excluding Relaxed,
-including when the Ordering is symbolic. The wrapper's available MIR still executes on valid
-paths. This catches invalid orderings without requiring a model for the wrapper's panic formatting.
-The atomic_fence and atomic_singlethreadfence intrinsic boundaries validate their signatures and
+including when the Ordering is symbolic. The wrapper's available MIR still executes on valid paths.
+This catches invalid orderings without requiring a model for the wrapper's panic formatting. The
+atomic_fence and atomic_singlethreadfence intrinsic boundaries validate their signatures and
 compiler-evaluated constant ordering enums. Acquire, Release, AcqRel and SeqCst return unit without
 changing tracked local storage. Invalid or unsupported intrinsic orderings are UNKNOWN, not panic
 counterexamples; the safe wrappers are responsible for their defined Relaxed panic behavior.
 
-Fences add no happens-before or atomic-history constraints. Atomic accesses remain arbitrary and
-uncorrelated across a fence. The interpreter follows sequential MIR control flow but does not treat
-an entire function as indivisible, enumerate concurrent executions, or simulate CPU reordering and
-caches. The fence model is a conservative abstraction for supported atomic-value panic checks; it
-does not establish publication safety, data-race freedom or full weak-memory correctness. See the
-Rust documentation for [fence](https://doc.rust-lang.org/core/sync/atomic/fn.fence.html) and
+Fences add no happens-before or atomic-history constraints. Conservative shared atomic accesses
+remain arbitrary across a fence; exact owned histories keep their existing storage facts. The
+interpreter follows sequential MIR control flow but does not treat an entire function as
+indivisible, enumerate concurrent executions, or simulate CPU reordering and caches. The fence model
+is a conservative abstraction for supported atomic-value panic checks; it does not establish
+publication safety, data-race freedom or full weak-memory correctness. See the Rust documentation
+for [fence](https://doc.rust-lang.org/core/sync/atomic/fn.fence.html) and
 [compiler_fence](https://doc.rust-lang.org/core/sync/atomic/fn.compiler_fence.html).
 
-Integer compare_exchange uses an arbitrary old value for each operation. Its Result discriminant
-is tied to equality with the expected value: strong CAS returns Ok(old) exactly on equality, and
-Err(old) otherwise. Weak CAS also has a fresh spurious-failure choice; a matching old value may
-therefore occur in Err. Success and failure payloads retain this operation's old value. Both input
-values and the result type are checked against the compiler signature. All five success orderings
-and Relaxed/Acquire/SeqCst failure orderings are accepted, as in the pinned core; failure need not
-be weaker than success. Release/AcqRel failure orderings are panic obligations. No subsequent
-access is correlated with the update. Pointer CAS and low-level CAS intrinsics remain UNKNOWN.
+For conservative shared storage, integer compare_exchange uses an arbitrary old value per operation.
+Its Result discriminant is tied to equality with the expected value: strong CAS returns Ok(old)
+exactly on equality, and Err(old) otherwise. Weak CAS also has a fresh spurious-failure choice; a
+matching old value may therefore occur in Err. Success and failure payloads retain this operation's
+old value. Both input values and the result type are checked against the compiler signature. All
+five success orderings and Relaxed/Acquire/SeqCst failure orderings are accepted, as in the pinned
+core; failure need not be weaker than success. Release/AcqRel failure orderings are panic
+obligations. Conservative shared accesses remain uncorrelated with the update; owned local accesses
+retain its conditional state transition. Pointer CAS and low-level CAS intrinsics remain UNKNOWN.
 
 An atomic-only wrapper such as validate::Site can be represented without reading its mutable
 initializer as immutable data. Other interior-mutable constant references remain unsupported.

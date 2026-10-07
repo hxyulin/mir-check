@@ -31,7 +31,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
             [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] \
-            [--all-failures] [--induction] \
+            [--all-failures] [--induction] [--replay] \
             [--verbose] [--color auto|always|never] [--quiet] [--jsonl FILE|-] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
@@ -40,6 +40,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Without --entry, --verify requires all local bodies to pass.\n\
             --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
             Refuted roots stop at their first counterexample; --all-failures continues them.\n\
+            --replay compiles and executes supported native inputs after the build.\n\
             Default output is compact; --verbose shows the full inventory and obligations.\n\
             cargo mir-check report <file or directory> reads saved JSON/JSONL reports.\n\n{}",
             mir_check::limits::HELP
@@ -57,6 +58,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut allow_assumptions = false;
     let mut all_failures = false;
     let mut induction = false;
+    let mut replay = false;
     let mut limits = AnalysisLimits::default();
     let mut cargo_args = Vec::new();
     let mut args = args.into_iter();
@@ -99,6 +101,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Some("--allow-assumptions") => allow_assumptions = true,
             Some("--all-failures") => all_failures = true,
             Some("--induction") => induction = true,
+            Some("--replay") => replay = true,
             Some("--contracts") => {
                 let path = args.next().ok_or("--contracts requires a JSON file")?;
                 contracts_path = Some(std::fs::canonicalize(PathBuf::from(path))?);
@@ -122,6 +125,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .any(|arg| arg == "--target-dir" || arg.to_string_lossy().starts_with("--target-dir="))
     {
         return Err("--target-dir is managed by mir-check to prevent stale inventories".into());
+    }
+    if replay && !verify {
+        return Err("--replay requires --verify".into());
     }
     let config = contracts_path
         .as_ref()
@@ -221,7 +227,12 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             paths.len(),
             path.display()
         ));
-        let report: Report = serde_json::from_slice(&std::fs::read(path)?)?;
+        let mut report: Report = serde_json::from_slice(&std::fs::read(path)?)?;
+        if replay {
+            report_progress.update(format!("Compiling and replaying {}", report.crate_name));
+            mir_check::replay::replay_report(&mut report);
+            std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+        }
         collected.push(report);
     }
     let elapsed_s = build_elapsed_s + report_progress.elapsed();

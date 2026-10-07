@@ -9,6 +9,10 @@ Read the [published documentation](https://hxyulin.github.io/mir-check/) or the 
 - [Fleet survey](fleet-survey.md): measured outcomes for unchanged embedded workspaces.
 - [Proof execution](proofs.md): symbolic states, obligations, contracts and trusted components.
 - [Development](development.md): local checks, documentation previews and Pages publishing.
+- [Analyzer redesign](analyzer-redesign.md): storage, calls, performance and counterexample
+  validation.
+- [Typed storage](storage-model.md): allocation identity, footprints, initialization and
+  interference.
 - [Stages](stages.md): implementation history and validation evidence.
 
 Start with the repository README for a runnable parser proof. The compiler crate README describes
