@@ -104,7 +104,10 @@ impl Query {
             .chain([failure])
             .collect();
         let mut query = Self::from_term_assertions(context, &terms)?;
-        if failure.constant().is_none() && !failure.uses_floating_point() {
+        if query.ground != Some(false)
+            && failure.constant().is_none()
+            && !failure.uses_floating_point()
+        {
             let non_float: Vec<_> = terms
                 .iter()
                 .copied()
@@ -133,6 +136,8 @@ impl Query {
             symbols.extend(term.symbols());
         }
         let declarations = context.declarations_for(&symbols)?;
+        let mut positive = std::collections::HashSet::new();
+        let mut negative = std::collections::HashSet::new();
         let mut bytes = prelude().len()
             + "(check-sat)\n".len()
             + declarations
@@ -143,6 +148,17 @@ impl Query {
             return Err("symbolic query size limit reached".to_owned());
         }
         for term in terms {
+            for conjunct in term.conjuncts() {
+                let (same, opposite, id) = if let Some(inner) = conjunct.negated() {
+                    (&mut negative, &mut positive, inner.id())
+                } else {
+                    (&mut positive, &mut negative, conjunct.id())
+                };
+                if opposite.contains(&id) {
+                    ground = Some(false);
+                }
+                same.insert(id);
+            }
             match term.constant() {
                 Some(Constant::Bool(true)) => continue,
                 Some(Constant::Bool(false)) => ground = Some(false),
@@ -243,6 +259,11 @@ impl Solver {
 
     pub fn check_query(&mut self, query: &Query) -> Answer {
         self.failed_feasibility_query = None;
+        if matches!(self.decisions.get(query.text()), Some(Decision::Unsat))
+            || (!self.custom && query.ground == Some(false))
+        {
+            return self.check_inner(query.text(), Some(query));
+        }
         if !self.custom
             && let Some(non_float) = &query.non_float
             && matches!(
@@ -907,6 +928,78 @@ mod encoding_tests {
     use std::collections::BTreeMap;
 
     #[test]
+    fn complementary_integer_guards_need_no_solver_even_under_a_nested_float_condition() {
+        let context = Context::default();
+        let left = context.symbol(0, Sort::BitVec(32)).unwrap();
+        let right = context.symbol(1, Sort::BitVec(32)).unwrap();
+        let ge = context
+            .apply(Op::BvUnsignedGe, &[left.clone(), right.clone()])
+            .unwrap();
+        let lt = context.apply(Op::BvUnsignedLt, &[left, right]).unwrap();
+        let float = context
+            .symbol(
+                2,
+                Sort::Float {
+                    exponent: 8,
+                    significand: 24,
+                },
+            )
+            .unwrap();
+        let nan = context.apply(Op::FpIsNaN, &[float]).unwrap();
+        let group = context.apply(Op::And, &[nan, ge]).unwrap();
+        let query = Query::from_terms(&context, &[group], &lt, &BTreeMap::new()).unwrap();
+        let mut solver = Solver {
+            executable: std::env::temp_dir().join("mir-check-missing-guard-fold-solver"),
+            custom: false,
+            ..Solver::default()
+        };
+        assert_eq!(query.ground, Some(false));
+        assert!(query.non_float.is_none());
+        assert!(!solver.feasible_query(&query).unwrap());
+        assert!(matches!(solver.check_query(&query), Answer::Unsat));
+        assert!(solver.session.is_none());
+        let foreign = Context::default().symbol(0, Sort::Bool).unwrap();
+        assert!(Query::from_terms(&context, &[lt], &foreign, &BTreeMap::new()).is_err());
+    }
+
+    #[test]
+    fn disjunctions_are_not_mistaken_for_conjunctive_path_facts() {
+        let context = Context::default();
+        let p = context.symbol(0, Sort::Bool).unwrap();
+        let q = context.symbol(1, Sort::Bool).unwrap();
+        let either = context.apply(Op::Or, &[p.clone(), q]).unwrap();
+        let not_p = context.apply(Op::Not, &[p]).unwrap();
+        let query = Query::from_terms(&context, &[either], &not_p, &BTreeMap::new()).unwrap();
+        assert_eq!(query.ground, None);
+        assert!(Solver::default().feasible_query(&query).unwrap());
+    }
+
+    #[test]
+    fn a_cached_full_proof_does_not_repeat_an_evicted_non_floating_probe() {
+        let context = Context::default();
+        let failure = context.symbol(0, Sort::Bool).unwrap();
+        let zero = context
+            .apply(
+                Op::PositiveZero {
+                    exponent: 8,
+                    significand: 24,
+                },
+                &[],
+            )
+            .unwrap();
+        let impossible = context.apply(Op::FpLt, &[zero.clone(), zero]).unwrap();
+        let query = Query::from_terms(&context, &[impossible], &failure, &BTreeMap::new()).unwrap();
+        let probe = query.non_float.as_ref().unwrap();
+        let mut solver = Solver::default();
+        assert!(matches!(solver.check_query(&query), Answer::Unsat));
+        let requests = solver.session.as_ref().unwrap().sequence;
+        assert!(solver.decisions.remove(probe.text()).is_some());
+        assert!(matches!(solver.check_query(&query), Answer::Unsat));
+        assert_eq!(solver.session.as_ref().unwrap().sequence, requests);
+        assert!(!solver.decisions.contains_key(probe.text()));
+    }
+
+    #[test]
     fn non_floating_probes_accept_only_unsat_and_keep_full_counterexample_constraints() {
         use mir_check::smt::Rounding;
         let context = Context::default();
@@ -948,19 +1041,10 @@ mod encoding_tests {
             &BTreeMap::new(),
         )
         .unwrap();
-        let probe = query.non_float.as_ref().unwrap();
-        assert!(!probe.text().contains("to_fp") && query.text().contains("to_fp"));
+        assert!(query.non_float.is_none() && query.text().contains("to_fp"));
         let mut solver = Solver::default();
         assert!(matches!(solver.check_query(&query), Answer::Unsat));
-        assert!(
-            !solver
-                .context
-                .as_ref()
-                .unwrap()
-                .assertions
-                .iter()
-                .any(|s| s.contains("to_fp"))
-        );
+        assert!(solver.session.is_none());
 
         let only_float =
             Query::from_terms(&context, &[fp_zero], &failure, &BTreeMap::new()).unwrap();
@@ -1125,7 +1209,9 @@ mod encoding_tests {
             (2, context.apply(Op::Equal, &[y, x.clone()]).unwrap()),
         ]);
         let query = Query::from_terms(&context, &[], &x, &bindings).unwrap();
-        assert_eq!(query.assertions.len(), 3);
+        assert_eq!(bindings[&1], bindings[&2]);
+        assert_eq!(query.assertions.len(), 2);
+        assert_eq!(query.declarations.len(), 2);
         assert!(matches!(
             Solver::default().check_query(&query),
             Answer::Sat(_)

@@ -91,6 +91,14 @@ fn integer_probes_preserve_float_domains_and_real_failures_on_host_and_arm() {
             "unsupported_float_operations_stay_unknown",
             ProofStatus::Unknown,
         ),
+        (
+            "a_signed_index_keeps_both_range_guards",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_widened_byte_stays_below_its_first_unrepresentable_bound",
+            ProofStatus::Proved,
+        ),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         verify(&fixture(), &entries, target);
@@ -118,6 +126,43 @@ fn relaxing_the_integer_guard_refutes_the_same_float_branch_on_host_and_arm() {
             )],
             target,
         );
+    }
+}
+
+#[test]
+fn signed_guard_and_widened_bound_mutations_refute_on_host_and_arm() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let directory = Directory::new();
+    for (original, mutation, name) in [
+        (
+            "index >= 0 && index < 6",
+            "index < 6",
+            "a_signed_index_keeps_both_range_guards",
+        ),
+        (
+            "u32::from(index) < 256",
+            "u32::from(index) < 255",
+            "a_widened_byte_stays_below_its_first_unrepresentable_bound",
+        ),
+    ] {
+        assert!(source.contains(original));
+        let path = directory.0.join("mutant.rs");
+        std::fs::write(&path, source.replace(original, mutation)).unwrap();
+        for target in [None, Some("thumbv7em-none-eabihf")] {
+            verify(&path, &[(name, ProofStatus::Refuted)], target);
+        }
+        let executable = directory.0.join("native");
+        let compiler = Path::new(env!("MIR_CHECK_SYSROOT")).join("bin/rustc");
+        let output = Command::new(compiler)
+            .args(["--test", "--edition=2024"])
+            .arg(path)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let output = Command::new(executable).output().unwrap();
+        assert!(!output.status.success(), "the mutation must panic natively");
     }
 }
 

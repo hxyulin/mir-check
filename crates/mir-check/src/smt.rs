@@ -239,6 +239,25 @@ impl Term {
         Rc::ptr_eq(&self.context.0, &context.0)
     }
 
+    pub fn negated(&self) -> Option<&Term> {
+        match &self.node.kind {
+            Kind::Apply(Op::Not, arguments) => arguments.first(),
+            Kind::Constant(_) | Kind::Symbol(_) | Kind::Apply(_, _) => None,
+        }
+    }
+
+    pub fn conjuncts(&self) -> Vec<&Term> {
+        let mut pending = vec![self];
+        let mut terms = Vec::new();
+        while let Some(term) = pending.pop() {
+            match &term.node.kind {
+                Kind::Apply(Op::And, arguments) => pending.extend(arguments.iter().rev()),
+                Kind::Constant(_) | Kind::Symbol(_) | Kind::Apply(_, _) => terms.push(term),
+            }
+        }
+        terms
+    }
+
     pub fn uses_floating_point(&self) -> bool {
         fn floating(sort: &Sort) -> bool {
             match sort {

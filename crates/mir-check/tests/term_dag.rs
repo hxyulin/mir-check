@@ -24,11 +24,13 @@ fn solve(queries: &[String]) -> Vec<String> {
     writer.join().unwrap().unwrap();
     assert!(output.status.success(), "{output:?}");
     assert!(output.stderr.is_empty(), "{output:?}");
-    String::from_utf8(output.stdout)
+    let answers: Vec<_> = String::from_utf8(output.stdout)
         .unwrap()
         .lines()
         .map(str::to_owned)
-        .collect()
+        .collect();
+    assert_eq!(answers.len(), queries.len());
+    answers
 }
 
 fn equivalent(term: &Term, expected: &str) -> String {
@@ -117,6 +119,189 @@ fn structural_boolean_folding_preserves_symbolic_obligations() {
         "(declare-const v0 Bool)\n(assert v0)\n(assert (not v0))".to_owned(),
     ];
     assert_eq!(solve(&queries), ["sat", "unsat"]);
+}
+
+#[test]
+fn integer_guard_normalization_matches_z3_for_every_supported_symbolic_width() {
+    let mut queries = Vec::new();
+    for bits in [1, 8, 16, 32, 64, 128, 256] {
+        let context = Context::default();
+        let left = context.symbol(0, Sort::BitVec(bits)).unwrap();
+        let right = context.symbol(1, Sort::BitVec(bits)).unwrap();
+        for (op, name) in [
+            (Op::BvUnsignedLt, "bvult"),
+            (Op::BvUnsignedLe, "bvule"),
+            (Op::BvUnsignedGt, "bvugt"),
+            (Op::BvUnsignedGe, "bvuge"),
+            (Op::BvSignedLt, "bvslt"),
+            (Op::BvSignedLe, "bvsle"),
+            (Op::BvSignedGt, "bvsgt"),
+            (Op::BvSignedGe, "bvsge"),
+        ] {
+            let term = context.apply(op, &[left.clone(), right.clone()]).unwrap();
+            queries.push(format!(
+                "(declare-const v0 (_ BitVec {bits}))\n\
+                 (declare-const v1 (_ BitVec {bits}))\n{}",
+                equivalent(&term, &format!("({name} v0 v1)")),
+            ));
+        }
+        for (less, greater_equal) in [
+            (Op::BvUnsignedLt, Op::BvUnsignedGe),
+            (Op::BvSignedLt, Op::BvSignedGe),
+        ] {
+            let less = context.apply(less, &[left.clone(), right.clone()]).unwrap();
+            let greater_equal = context
+                .apply(greater_equal, &[left.clone(), right.clone()])
+                .unwrap();
+            assert_eq!(greater_equal.negated(), Some(&less));
+            assert_eq!(
+                context
+                    .apply(Op::And, &[less, greater_equal])
+                    .unwrap()
+                    .constant(),
+                Some(Constant::Bool(false))
+            );
+        }
+    }
+    assert!(solve(&queries).iter().all(|answer| answer == "unsat"));
+}
+
+#[test]
+fn boolean_groups_flatten_deduplicate_and_fold_only_exact_complements() {
+    let context = Context::default();
+    let p = context.symbol(0, Sort::Bool).unwrap();
+    let q = context.symbol(1, Sort::Bool).unwrap();
+    let not_p = context.apply(Op::Not, std::slice::from_ref(&p)).unwrap();
+    for (op, opposite_result) in [(Op::And, false), (Op::Or, true)] {
+        let group = context.apply(op, &[p.clone(), q.clone()]).unwrap();
+        assert_eq!(
+            context.apply(op, &[group.clone(), p.clone()]).unwrap(),
+            group
+        );
+        assert_eq!(
+            context
+                .apply(op, &[group, not_p.clone()])
+                .unwrap()
+                .constant(),
+            Some(Constant::Bool(opposite_result))
+        );
+        assert!(
+            context
+                .apply(op, &[p.clone(), q.clone()])
+                .unwrap()
+                .constant()
+                .is_none()
+        );
+        let foreign = Context::default().symbol(0, Sort::Bool).unwrap();
+        assert!(
+            context
+                .apply(op, &[p.clone(), not_p.clone(), foreign])
+                .is_err()
+        );
+    }
+    let decode = Op::FloatFromBits {
+        exponent: 8,
+        significand: 24,
+    };
+    let nan = context
+        .apply(decode, &[context.bit_vector(0x7fc0_0001, 32).unwrap()])
+        .unwrap();
+    let zero = context
+        .apply(decode, &[context.bit_vector(0, 32).unwrap()])
+        .unwrap();
+    let less = context
+        .apply(Op::FpLt, &[nan.clone(), zero.clone()])
+        .unwrap();
+    let greater_equal = context.apply(Op::FpGe, &[nan, zero]).unwrap();
+    assert!(greater_equal.negated().is_none());
+    let both = context.apply(Op::Or, &[less, greater_equal]).unwrap();
+    assert_eq!(solve(&[equivalent(&both, "false")]), ["unsat"]);
+}
+
+#[test]
+fn widened_unsigned_index_guards_match_z3_without_casting_away_out_of_range_bounds() {
+    let mut queries = Vec::new();
+    for (bits, widened) in [
+        (1, 32),
+        (8, 32),
+        (8, 64),
+        (16, 64),
+        (32, 64),
+        (64, 128),
+        (128, 256),
+    ] {
+        let context = Context::default();
+        let value = context.symbol(0, Sort::BitVec(bits)).unwrap();
+        let extended = context
+            .apply(Op::ZeroExtend(widened - bits), std::slice::from_ref(&value))
+            .unwrap();
+        let mut bounds = vec![0, 1, u128::MAX];
+        if bits < 128 {
+            bounds.extend([(1_u128 << bits) - 1, 1_u128 << bits]);
+        }
+        for bound in bounds {
+            let constant = context.bit_vector(bound, widened).unwrap();
+            let Constant::BitVec(actual) = constant.constant().unwrap() else {
+                unreachable!()
+            };
+            for (operands, expected) in [
+                (
+                    [extended.clone(), constant.clone()],
+                    format!(
+                        "(bvult ((_ zero_extend {}) v0) (_ bv{actual} {widened}))",
+                        widened - bits
+                    ),
+                ),
+                (
+                    [constant, extended.clone()],
+                    format!(
+                        "(bvult (_ bv{actual} {widened}) ((_ zero_extend {}) v0))",
+                        widened - bits
+                    ),
+                ),
+            ] {
+                let term = context.apply(Op::BvUnsignedLt, &operands).unwrap();
+                queries.push(format!(
+                    "(declare-const v0 (_ BitVec {bits}))\n{}",
+                    equivalent(&term, &expected)
+                ));
+            }
+        }
+        let bound = context.bit_vector(1, widened).unwrap();
+        let wide_guard = context.apply(Op::BvUnsignedLt, &[extended, bound]).unwrap();
+        let narrow_guard = context
+            .apply(
+                Op::BvUnsignedLt,
+                &[value, context.bit_vector(1, bits).unwrap()],
+            )
+            .unwrap();
+        assert_eq!(wide_guard, narrow_guard);
+    }
+    assert!(solve(&queries).iter().all(|answer| answer == "unsat"));
+}
+
+#[test]
+fn boolean_switch_equalities_keep_their_exact_guard_identity() {
+    let context = Context::default();
+    let p = context.symbol(0, Sort::Bool).unwrap();
+    let q = context.symbol(1, Sort::Bool).unwrap();
+    let not_p = context.apply(Op::Not, std::slice::from_ref(&p)).unwrap();
+    assert_eq!(
+        context
+            .apply(Op::Equal, &[p.clone(), context.boolean(true)])
+            .unwrap(),
+        p
+    );
+    assert_eq!(
+        context
+            .apply(Op::Equal, &[context.boolean(false), p.clone()])
+            .unwrap(),
+        not_p
+    );
+    assert_eq!(
+        context.apply(Op::Equal, &[p.clone(), q.clone()]).unwrap(),
+        context.apply(Op::Equal, &[q, p]).unwrap()
+    );
 }
 
 #[test]

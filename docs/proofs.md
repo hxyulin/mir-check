@@ -315,8 +315,17 @@ arity validation. Integer operations wrap at their declared width; signed compar
 sign/zero extensions preserve that width's semantics. Closed arithmetic wider than 128 bits and
 floating-point operations retain solver terms. Query construction validates every relevant
 Boolean assertion and its context before recognizing an all-true domain or a false conjunct.
-Failing obligations still request a Z3 counterexample model. Symbolic questions go to Z3, with
-the existing decision cache and persistent subprocess. No symbolic search runs inside mir-check.
+Integer comparisons normalize to less-than and its Boolean negation. Unsigned comparisons of a
+zero-extended value against a constant use the original width only when the bound fits; an
+out-of-range bound folds to the exact result. Boolean equality with true/false retains the original
+guard or its negation. Boolean groups flatten and remove duplicate terms. Query construction
+recognizes exact complementary conjuncts across assertions without splitting disjunctions.
+Floating-point ordering is not normalized this way: NaN makes its comparisons non-complementary.
+These identities can discharge an infeasible symbolic path without a solver request; full query
+validation and size limits still apply before that decision.
+Failing obligations still request a Z3 counterexample model. Remaining symbolic questions go to Z3
+with the existing decision cache and persistent subprocess. No symbolic search runs inside
+mir-check.
 The folder is part of the trusted implementation and has differential tests against Z3. The old
 string evaluator remains test-only for protocol regressions; production proofs do not use it.
 

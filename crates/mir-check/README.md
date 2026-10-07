@@ -326,6 +326,12 @@ root-local cache stores up to 128 normalized instantiated bodies, keyed by the f
 Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes or
 cross-invocation compiler objects.
 
+Structural guard simplification also normalizes integer comparisons, narrows zero-extended index
+comparisons against representable bounds, and removes duplicate Boolean terms. A condition and its
+exact negation make a conjunction infeasible without starting Z3, including when the path contains
+unrelated floating-point conditions. Floating-point comparisons retain their NaN semantics. These
+are exact identities, not inferred invariants; full query validation and size limits still apply.
+
 Integer/Boolean safety obligations in mixed floating-point paths can first use a stronger query
 that omits floating-point assertions. Only UNSAT discharges the obligation; SAT or UNKNOWN falls
 back to the full path, and counterexamples always come from the full query. This uses typed term

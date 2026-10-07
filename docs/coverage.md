@@ -86,8 +86,9 @@ queued branches. Call depth is 16 active frames; recursion can finish within the
 Queries have at most 200,000 bytes, a five-second solver timeout and a six-second host deadline per
 default solver request. Exceeding a limit returns UNKNOWN. The root budget remains 30 seconds.
 Root-local solver sessions retain common assertions with push/pop and reset incompatible declaration
-namespaces. Exact-query caching, closed Boolean/bit-vector folding and a full-Instance MIR cache
-reduce repeated work. None reuses function proofs or unchecked summaries; full standalone queries
+namespaces. Exact-query caching, Boolean/bit-vector folding, exact complementary integer guards
+and a full-Instance MIR cache reduce repeated work. Floating-point ordering keeps its NaN behavior.
+None reuses function proofs or unchecked summaries; full standalone queries
 remain in reports.
 
 Mixed floating-point paths can discharge an integer/Boolean safety check with a stronger

@@ -1,4 +1,5 @@
 use super::{Constant, Context, Kind, Op, Sort, Term};
+use std::collections::HashSet;
 
 pub(super) fn simplify(context: &Context, op: Op, args: &[Term], sort: &Sort) -> Option<Term> {
     match (op, args) {
@@ -10,6 +11,76 @@ pub(super) fn simplify(context: &Context, op: Op, args: &[Term], sort: &Sort) ->
             | Kind::Apply(_, _) => None,
         },
         (Op::Equal, [left, right]) if left == right => Some(context.boolean(true)),
+        (Op::Equal, [left, right]) if left.sort() == &Sort::Bool => {
+            for (constant, value) in [(left, right), (right, left)] {
+                if let Some(Constant::Bool(flag)) = constant.constant() {
+                    return if flag {
+                        Some(value.clone())
+                    } else {
+                        context.apply(Op::Not, std::slice::from_ref(value)).ok()
+                    };
+                }
+            }
+            if left.id() > right.id() {
+                context
+                    .apply(Op::Equal, &[right.clone(), left.clone()])
+                    .ok()
+            } else {
+                None
+            }
+        }
+        (Op::Equal, [left, right])
+            if matches!(left.sort(), Sort::BitVec(_)) && left.id() > right.id() =>
+        {
+            context
+                .apply(Op::Equal, &[right.clone(), left.clone()])
+                .ok()
+        }
+        (Op::BvUnsignedLt | Op::BvSignedLt, [left, right]) if left == right => {
+            Some(context.boolean(false))
+        }
+        (Op::BvUnsignedLt, [_, right]) if matches!(right.constant(), Some(Constant::BitVec(0))) => {
+            Some(context.boolean(false))
+        }
+        (Op::BvUnsignedLt, [left, right])
+            if matches!(left.node.kind, Kind::Apply(Op::ZeroExtend(_), _))
+                || matches!(right.node.kind, Kind::Apply(Op::ZeroExtend(_), _)) =>
+        {
+            unsigned_extended_comparison(context, left, right)
+                .or_else(|| bit_vector(context, op, args, sort))
+        }
+        (Op::BvUnsignedGe | Op::BvSignedGe, [left, right]) => {
+            let comparison = if op == Op::BvUnsignedGe {
+                Op::BvUnsignedLt
+            } else {
+                Op::BvSignedLt
+            };
+            let less = context
+                .apply(comparison, &[left.clone(), right.clone()])
+                .ok()?;
+            context.apply(Op::Not, &[less]).ok()
+        }
+        (Op::BvUnsignedGt | Op::BvSignedGt, [left, right]) => {
+            let comparison = if op == Op::BvUnsignedGt {
+                Op::BvUnsignedLt
+            } else {
+                Op::BvSignedLt
+            };
+            context
+                .apply(comparison, &[right.clone(), left.clone()])
+                .ok()
+        }
+        (Op::BvUnsignedLe | Op::BvSignedLe, [left, right]) => {
+            let comparison = if op == Op::BvUnsignedLe {
+                Op::BvUnsignedLt
+            } else {
+                Op::BvSignedLt
+            };
+            let less = context
+                .apply(comparison, &[right.clone(), left.clone()])
+                .ok()?;
+            context.apply(Op::Not, &[less]).ok()
+        }
         (Op::Ite, [condition, left, right]) => match condition.constant() {
             Some(Constant::Bool(value)) => Some(if value { left } else { right }.clone()),
             _ if left == right => Some(left.clone()),
@@ -17,21 +88,46 @@ pub(super) fn simplify(context: &Context, op: Op, args: &[Term], sort: &Sort) ->
         },
         (Op::And | Op::Or, values) => {
             let identity = op == Op::And;
-            if values
-                .iter()
-                .any(|value| value.constant() == Some(Constant::Bool(!identity)))
-            {
-                return Some(context.boolean(!identity));
+            let mut pending: Vec<_> = values.iter().rev().collect();
+            let mut positive = HashSet::new();
+            let mut negative = HashSet::new();
+            let mut retained = Vec::new();
+            while let Some(value) = pending.pop() {
+                if let Kind::Apply(inner, arguments) = &value.node.kind
+                    && *inner == op
+                {
+                    pending.extend(arguments.iter().rev());
+                    continue;
+                }
+                if value.constant() == Some(Constant::Bool(!identity)) {
+                    return Some(context.boolean(!identity));
+                }
+                if value.constant() == Some(Constant::Bool(identity)) {
+                    continue;
+                }
+                let (same, opposite, id) = if let Some(inner) = value.negated() {
+                    (&mut negative, &mut positive, inner.id())
+                } else {
+                    (&mut positive, &mut negative, value.id())
+                };
+                if opposite.contains(&id) {
+                    return Some(context.boolean(!identity));
+                }
+                if same.insert(id) {
+                    retained.push(value.clone());
+                }
             }
-            let retained: Vec<_> = values
-                .iter()
-                .filter(|value| value.constant() != Some(Constant::Bool(identity)))
-                .cloned()
-                .collect();
             match retained.as_slice() {
                 [] => Some(context.boolean(identity)),
                 [only] => Some(only.clone()),
-                _ if retained.len() != values.len() => context.apply(op, &retained).ok(),
+                _ if retained.len() != values.len()
+                    || retained
+                        .iter()
+                        .zip(values)
+                        .any(|(left, right)| left != right) =>
+                {
+                    context.apply(op, &retained).ok()
+                }
                 _ => None,
             }
         }
@@ -53,6 +149,32 @@ pub(super) fn simplify(context: &Context, op: Op, args: &[Term], sort: &Sort) ->
         },
         _ => bit_vector(context, op, args, sort),
     }
+}
+
+fn unsigned_extended_comparison(context: &Context, left: &Term, right: &Term) -> Option<Term> {
+    for (extended, constant, reverse) in [(left, right, false), (right, left, true)] {
+        let Kind::Apply(Op::ZeroExtend(_), arguments) = &extended.node.kind else {
+            continue;
+        };
+        let Some(Constant::BitVec(value)) = constant.constant() else {
+            continue;
+        };
+        let original = &arguments[0];
+        let Sort::BitVec(bits) = original.sort() else {
+            return None;
+        };
+        if *bits < 128 && value >= 1_u128 << bits {
+            return Some(context.boolean(!reverse));
+        }
+        let narrowed = context.bit_vector(value, *bits).ok()?;
+        let operands = if reverse {
+            [narrowed, original.clone()]
+        } else {
+            [original.clone(), narrowed]
+        };
+        return context.apply(Op::BvUnsignedLt, &operands).ok();
+    }
+    None
 }
 
 fn mask(bits: u32) -> Option<u128> {
