@@ -45,7 +45,7 @@ impl<'tcx> Engine<'tcx> {
             variant: 0,
             is_option: false,
             discriminant: 0,
-            fields,
+            fields: fields.into(),
         })
     }
 
@@ -201,7 +201,7 @@ impl<'tcx> Engine<'tcx> {
                 variant: 0,
                 is_option: false,
                 discriminant: 0,
-                fields: Vec::new(),
+                fields: Vec::new().into(),
             }));
         }
         if self.is_task_context(owner)
@@ -228,7 +228,7 @@ impl<'tcx> Engine<'tcx> {
                 variant: 0,
                 is_option: false,
                 discriminant: 0,
-                fields: Vec::new(),
+                fields: Vec::new().into(),
             }));
         }
         Ok(None)

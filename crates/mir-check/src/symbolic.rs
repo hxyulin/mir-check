@@ -1,7 +1,9 @@
+mod adt_fields;
 mod floating;
 pub mod input;
 #[cfg(test)]
 mod tests;
+pub use adt_fields::AdtFields;
 pub use floating::{float, float_cast, float_from_bits, float_negate};
 pub use mir_check::smt::{Context, Op, Sort, Term};
 
@@ -63,7 +65,7 @@ pub enum Value {
         variant: usize,
         is_option: bool,
         discriminant: u128,
-        fields: Vec<(String, Value)>,
+        fields: AdtFields,
     },
     Enum {
         discriminant: Box<Value>,

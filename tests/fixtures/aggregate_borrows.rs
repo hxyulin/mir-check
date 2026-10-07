@@ -1,7 +1,63 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::requires;
+use mir_contracts::{ensures, requires};
+
+#[derive(Clone, Copy)]
+pub struct Stamp {
+    count: u16,
+}
+
+#[derive(Clone, Copy)]
+pub struct Page {
+    left: Stamp,
+    right: Stamp,
+}
+
+fn page() -> Page {
+    Page {
+        left: Stamp { count: 7 },
+        right: Stamp { count: 11 },
+    }
+}
+
+pub fn branched_owned_fields(choose_left: bool) {
+    let original = page();
+    let mut changed = original;
+    if choose_left {
+        changed.left.count = 19;
+        assert!(changed.left.count == 19 && changed.right.count == 11);
+    } else {
+        changed.right.count = 23;
+        assert!(changed.left.count == 7 && changed.right.count == 23);
+    }
+    assert!(original.left.count == 7 && original.right.count == 11);
+}
+
+pub fn repeated_owned_fields() {
+    let original = page();
+    let mut repeated = [original; 3];
+    repeated[1].left.count = 19;
+    assert!(repeated[0].left.count == 7 && repeated[2].left.count == 7);
+    assert!(repeated[1].left.count == 19 && repeated[1].right.count == 11);
+    assert!(original.left.count == 7);
+}
+
+pub fn wrong_branched_owned_fields(choose_left: bool) {
+    let mut changed = page();
+    if choose_left {
+        changed.left.count = 19;
+    }
+    assert!(changed.left.count == 7);
+}
+
+#[ensures(result == value.left.count)]
+#[ensures(final_value.left.count == 19)]
+pub fn snapshot_before_nested_write(value: &mut Page) -> u16 {
+    let before = value.left.count;
+    value.left.count = 19;
+    before
+}
 
 struct Pair<'a> {
     left: &'a mut u16,
@@ -202,6 +258,13 @@ mod tests {
 
     #[test]
     fn writes_through_aggregate_and_adapter_borrows_reach_original_storage() {
+        branched_owned_fields(false);
+        branched_owned_fields(true);
+        repeated_owned_fields();
+        let mut original = page();
+        assert!(snapshot_before_nested_write(&mut original) == 7);
+        assert!(original.left.count == 19 && original.right.count == 11);
+        assert!(std::panic::catch_unwind(|| wrong_branched_owned_fields(true)).is_err());
         for seed in 0..100 {
             parcel_pair(seed);
             tuple_reborrow(seed);

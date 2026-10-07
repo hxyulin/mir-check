@@ -695,3 +695,9 @@ uncertified type changes, pointer loads and volatile atomic operations remain UN
 including compiler alignment wrappers. The wrapper must preserve its payload layout, and each
 subobject follows compiler fields and alignment checks. Equal sizes, padding, unions and
 uninitialized members do not establish a certificate or write capability.
+
+ADT field vectors share immutable host storage across branch clones. Writes copy the affected
+vectors, preserving Rust allocation identities, independent owned values and contract entry
+snapshots. Reference validity and escape checks still inspect the complete value graph.
+Call and destructor continuations also take returned memory and conditions directly, avoiding a
+clone of the caller state that would immediately be discarded.

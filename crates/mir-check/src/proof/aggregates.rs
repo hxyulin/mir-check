@@ -106,7 +106,7 @@ impl<'tcx> Engine<'tcx> {
             variant: 0,
             is_option: false,
             discriminant: 0,
-            fields,
+            fields: fields.into(),
         })
     }
 

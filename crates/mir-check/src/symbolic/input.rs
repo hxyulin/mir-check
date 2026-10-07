@@ -118,13 +118,13 @@ impl InputValue {
                             .ok_or("lazy input symbol range overflow")?;
                         Ok((name.clone(), value))
                     })
-                    .collect::<Result<_, String>>()?;
+                    .collect::<Result<Vec<_>, String>>()?;
                 Ok(Value::Adt {
                     name: name.clone(),
                     variant: 0,
                     is_option: false,
                     discriminant: 0,
-                    fields,
+                    fields: fields.into(),
                 })
             }
             InputKind::Array { element, count } => {

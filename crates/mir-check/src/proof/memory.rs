@@ -1016,6 +1016,29 @@ mod tests {
     }
 
     #[test]
+    fn shared_adt_fields_keep_dead_and_frame_owned_reference_checks() {
+        let value = Value::Adt {
+            name: "Borrowed".into(),
+            variant: 0,
+            is_option: false,
+            discriminant: 0,
+            fields: vec![("borrow".into(), reference(0, true))].into(),
+        };
+        let branch = value.clone();
+        let dead = state(vec![None]);
+        let live = state(vec![Some(Value::Unit)]);
+        for value in [&value, &branch] {
+            let error =
+                Engine::validate_reference_graph(value, &dead, None, &mut Vec::new()).unwrap_err();
+            assert!(error.contains("dead or uninitialized"));
+            let error = Engine::validate_reference_graph(value, &live, Some(0), &mut Vec::new())
+                .unwrap_err();
+            assert!(error.contains("frame-owned"));
+            Engine::validate_reference_graph(value, &live, Some(1), &mut Vec::new()).unwrap();
+        }
+    }
+
+    #[test]
     fn dead_owned_atomic_backing_is_rejected_inside_aggregates() {
         let atomic = Value::Tuple(vec![Value::LocalAtomic {
             allocation: 0,

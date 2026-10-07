@@ -83,6 +83,10 @@ fn verify(path: &Path, names: &[&str], target: Option<&str>) -> (Output, Report)
 #[test]
 fn tracked_aggregate_borrows_preserve_writes_on_host_and_arm() {
     let entries = [
+        ("branched_owned_fields", ProofStatus::Proved),
+        ("repeated_owned_fields", ProofStatus::Proved),
+        ("wrong_branched_owned_fields", ProofStatus::Refuted),
+        ("snapshot_before_nested_write", ProofStatus::Proved),
         ("parcel_pair", ProofStatus::Proved),
         ("tuple_reborrow", ProofStatus::Proved),
         ("captured_counter", ProofStatus::Proved),
@@ -128,6 +132,37 @@ fn tracked_aggregate_borrows_preserve_writes_on_host_and_arm() {
             );
         }
     }
+}
+
+#[test]
+fn returning_the_mutated_field_instead_of_the_entry_snapshot_is_refuted() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let original = "value.left.count = 19;\n    before";
+    assert_eq!(source.matches(original).count(), 1);
+    let directory = Directory::new();
+    let path = directory.0.join("aggregate_borrows.rs");
+    std::fs::write(
+        &path,
+        source.replace(original, "value.left.count = 19;\n    value.left.count"),
+    )
+    .unwrap();
+    let (output, report) = verify(&path, &["snapshot_before_nested_write"], None);
+    assert!(!output.status.success());
+    let proof = report
+        .functions
+        .iter()
+        .find(|f| f.name == "snapshot_before_nested_write")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        proof.status,
+        ProofStatus::Refuted,
+        "{:?}",
+        proof.obligations
+    );
+    assert!(proof.obligations.iter().any(|o| o.model.is_some()));
 }
 
 #[test]

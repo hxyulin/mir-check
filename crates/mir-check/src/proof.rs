@@ -57,6 +57,17 @@ struct State {
     memory: Memory,
 }
 
+impl State {
+    fn continuation(&self, conditions: Vec<Term>, memory: Memory) -> Self {
+        Self {
+            locals: self.locals.clone(),
+            addresses: self.addresses.clone(),
+            conditions,
+            memory,
+        }
+    }
+}
+
 struct Return {
     value: Value,
     conditions: Vec<Term>,
@@ -535,7 +546,7 @@ impl<'tcx> Engine<'tcx> {
                 variant: 0,
                 is_option: false,
                 discriminant: 0,
-                fields: Vec::new(),
+                fields: Vec::new().into(),
             });
         }
         match ty.kind() {
@@ -1096,9 +1107,8 @@ impl<'tcx> Engine<'tcx> {
                     )? {
                         let target = target.ok_or("trusted call has no return edge")?;
                         for result in results {
-                            let mut continuation = state.clone();
-                            continuation.conditions = result.conditions;
-                            continuation.memory = result.memory;
+                            let mut continuation =
+                                state.continuation(result.conditions, result.memory);
                             self.write(&mut continuation, *destination, result.value)?;
                             queue.push_back((target, continuation));
                         }
@@ -1116,9 +1126,8 @@ impl<'tcx> Engine<'tcx> {
                     {
                         let target = target.ok_or("owned iterator call has no return edge")?;
                         for result in results {
-                            let mut continuation = state.clone();
-                            continuation.conditions = result.conditions;
-                            continuation.memory = result.memory;
+                            let mut continuation =
+                                state.continuation(result.conditions, result.memory);
                             self.write(&mut continuation, *destination, result.value)?;
                             queue.push_back((target, continuation));
                         }
@@ -1135,9 +1144,8 @@ impl<'tcx> Engine<'tcx> {
                     {
                         let target = target.ok_or("iterator call has no return edge")?;
                         for result in results {
-                            let mut continuation = state.clone();
-                            continuation.conditions = result.conditions;
-                            continuation.memory = result.memory;
+                            let mut continuation =
+                                state.continuation(result.conditions, result.memory);
                             self.write(&mut continuation, *destination, result.value)?;
                             queue.push_back((target, continuation));
                         }
@@ -1170,9 +1178,8 @@ impl<'tcx> Engine<'tcx> {
                     {
                         let target = target.ok_or("modeled call has no return edge")?;
                         for result in results {
-                            let mut continuation = state.clone();
-                            continuation.conditions = result.conditions;
-                            continuation.memory = result.memory;
+                            let mut continuation =
+                                state.continuation(result.conditions, result.memory);
                             self.write(&mut continuation, *destination, result.value)?;
                             queue.push_back((target, continuation));
                         }
@@ -1222,9 +1229,7 @@ impl<'tcx> Engine<'tcx> {
                     )?;
                     let target = target.ok_or("local call has no return edge")?;
                     for result in results {
-                        let mut continuation = state.clone();
-                        continuation.conditions = result.conditions;
-                        continuation.memory = result.memory;
+                        let mut continuation = state.continuation(result.conditions, result.memory);
                         self.write(&mut continuation, *destination, result.value)?;
                         queue.push_back((target, continuation));
                     }
@@ -1245,9 +1250,8 @@ impl<'tcx> Engine<'tcx> {
                             (id, terminator.source_info.span),
                         )?;
                         for result in results {
-                            let mut continuation = state.clone();
-                            continuation.conditions = result.conditions;
-                            continuation.memory = result.memory;
+                            let mut continuation =
+                                state.continuation(result.conditions, result.memory);
                             if place.projection.is_empty() {
                                 if let Some(allocation) =
                                     continuation.addresses[place.local.as_usize()].take()

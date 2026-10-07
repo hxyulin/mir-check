@@ -112,7 +112,7 @@ impl<'tcx> Engine<'tcx> {
                     variant: 0,
                     is_option: false,
                     discriminant: 0,
-                    fields: Vec::new(),
+                    fields: Vec::new().into(),
                 })
             }
             ty::Adt(def, _) if def.is_struct() || def.is_enum() => {

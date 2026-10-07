@@ -17,7 +17,7 @@ The current stages establish reusable parts without claiming the whole redesign 
 | --- | --- | --- |
 | Typed locations | Static footprints, initialized-prefix certificates, checked location access and tracked raw addresses | Common typed projections/footprints, subobject initialization and retained static payloads |
 | Atomic state | Exact local histories and explicit fresh-startup static histories with conservative invalidation | Verified startup environments, precise overlaps and supported shared interference |
-| Aggregate sharing | Interned SMT leaves and compiler-keyed lazy input shapes | Shared owned aggregate values, branch snapshots and compiler-keyed aggregate shapes |
+| Aggregate sharing | Interned SMT leaves, lazy input shapes and shared owned ADT fields | Remaining aggregate kinds, branch snapshots and compiler-keyed aggregate shapes |
 | Call metadata | Root-local normalized signature cache shared by ordinary and induction models | Common compiler-identified operation descriptions and backend-independent transition semantics |
 | Query construction | Dependency reuse for immutable SMT terms | Measured structural query assembly reuse with complete context keys |
 | Counterexamples | Explicit native replay for a supported input subset and structured validation outcomes | Additional owned input shapes, source-faithful dependency validation and controlled Miri replay |
@@ -80,20 +80,31 @@ cannot validate an arbitrary interfering atomic history.
 
 ## Shared aggregates and branch states
 
-Use shared immutable aggregate shapes keyed by compiler type and shared immutable values whose
-writes copy only changed paths. Display names belong at reporting boundaries. This can eliminate
-recursive field-vector and name copies while retaining the existing interned SMT leaves.
+Owned ADT fields now use shared host storage with copy-on-write. Cloning a struct, enum payload,
+closure environment or coroutine value retains its field-vector handle. A field write detaches
+shared vectors along the changed path, keeping unaffected nested ADT vectors shared. Consuming
+shared fields preserves the other owners. Allocation handles and reference validation retain
+their existing semantics; host pointer identity is never a modeled Rust address.
+
+Tuple fields, array elements, enum variant tables and branch allocation vectors still clone their
+containers. ADT display names also remain owned strings. The next stages should share those
+representations and compiler-keyed immutable shapes, with names at reporting boundaries.
 
 Host sharing must not create Rust aliasing. Copying an owned Rust value produces a separate logical
 value; taking an address still identifies its particular allocation. Repeated array elements,
 closure environments and independently owned coroutine captures must retain that distinction.
+Return continuations copy caller locals and address mappings, then take the returned conditions and
+memory directly. They avoid cloning caller memory and startup histories that would be immediately
+discarded.
+
 Branches may share their entry representation but must not share later mutations. Contract entry
 snapshots remain independent of later writes, including nested referenced storage.
 
-First instrument cloned aggregate bytes, branch-state copies and snapshot construction on
-independent public fixtures. Migrate one aggregate kind and compare complete proof results, queries
-and native outcomes. Cover branch divergence, nested mutation, owned repeats, callback environments,
-entry snapshots, moves and frame escape before expanding the representation to all aggregate kinds.
+Snapshot and return-value traversal remain recursive: sharing an ADT is not evidence that its
+references are live or that its entry values match post-state values. Independent fixtures cover
+branch divergence, nested mutation, owned repeats, callback environments, entry snapshots and
+frame escape. Measure container copies and compare complete proof results and queries before
+expanding the representation to all aggregate kinds.
 
 ## Compiler call descriptions and common semantics
 
