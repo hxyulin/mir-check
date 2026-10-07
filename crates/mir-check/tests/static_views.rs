@@ -401,14 +401,14 @@ fn atomic_overlays_require_dense_initialized_storage_and_preserve_arbitrary_valu
 }
 
 #[test]
-fn changing_atomic_storage_layout_or_an_overlay_offset_never_proves() {
+fn atomic_storage_layout_mutations_respect_the_accessed_footprint() {
     let source = std::fs::read_to_string(fixture()).unwrap();
     for (original, mutation, root, status, replay) in [
         (
             "#[repr(C, align(4))]\nstruct Lanes",
             "#[repr(C, align(8))]\nstruct Lanes",
             "atomic_overlay_load",
-            ProofStatus::Unknown,
+            ProofStatus::Proved,
             false,
         ),
         (
@@ -428,6 +428,67 @@ fn changing_atomic_storage_layout_or_an_overlay_offset_never_proves() {
         }
         if replay {
             assert!(!native_tests(&path, &directory));
+        }
+    }
+    let directory = Directory::new();
+    let path = directory.0.join("internal-padding.rs");
+    let mutation = source
+        .replace(
+            "low: core::sync::atomic::AtomicU16,",
+            "low: core::sync::atomic::AtomicU8,",
+        )
+        .replace(
+            "low: core::sync::atomic::AtomicU16::new(9)",
+            "low: core::sync::atomic::AtomicU8::new(9)",
+        );
+    assert_ne!(mutation, source);
+    std::fs::write(&path, mutation).unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        verify(
+            &path,
+            &[("atomic_overlay_load", ProofStatus::Unknown)],
+            target,
+            false,
+            None,
+        );
+    }
+}
+
+#[test]
+fn atomic_prefixes_opaque_addresses_and_reference_slots_keep_their_boundaries() {
+    let entries = [
+        (
+            "opaque_fields_outside_an_atomic_prefix",
+            ProofStatus::Proved,
+        ),
+        ("atomic_prefix_cannot_read_a_union", ProofStatus::Unknown),
+        ("atomic_prefix_cannot_read_a_pointer", ProofStatus::Unknown),
+        ("maybe_uninit_payload_address", ProofStatus::Proved),
+        (
+            "maybe_uninit_address_does_not_prove_initialization",
+            ProofStatus::Unknown,
+        ),
+        (
+            "zero_arg_closure_captures_static_reference",
+            ProofStatus::Proved,
+        ),
+        (
+            "zero_arg_then_captures_static_reference",
+            ProofStatus::Proved,
+        ),
+        ("zero_arg_then_calls_function_item", ProofStatus::Proved),
+        (
+            "a_mutable_reference_slot_preserves_static_views",
+            ProofStatus::Proved,
+        ),
+        (
+            "mutable_static_payload_remains_unknown",
+            ProofStatus::Unknown,
+        ),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized, None);
         }
     }
 }

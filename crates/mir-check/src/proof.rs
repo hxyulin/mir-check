@@ -925,12 +925,20 @@ impl<'tcx> Engine<'tcx> {
                     let instance = if fn_trait
                         && let ty::FnDef(id, args) = generic_args.skip_binder().type_at(0).kind()
                     {
-                        let [Value::Function, Value::Tuple(parameters)] = values.as_slice() else {
+                        let [Value::Function, parameters] = values.as_slice() else {
                             return Err(
                                 "function-item call arguments are not a Rust-call tuple".to_owned()
                             );
                         };
-                        values = parameters.clone();
+                        values = match parameters {
+                            Value::Tuple(parameters) => parameters.clone(),
+                            Value::Unit => Vec::new(),
+                            _ => {
+                                return Err(
+                                    "function-item arguments are not a Rust-call tuple".into()
+                                );
+                            }
+                        };
                         self.resolve_function_item(*id, args.skip_binder())?
                     } else {
                         instance
@@ -1060,13 +1068,19 @@ impl<'tcx> Engine<'tcx> {
                         && self.tcx.def_kind(callee) == DefKind::Closure
                         && self.tcx.coroutine_kind(callee).is_none()
                     {
-                        let [closure, Value::Tuple(parameters)] = values.as_slice() else {
+                        let [closure, parameters] = values.as_slice() else {
                             return Err(
                                 "closure call arguments are not a Rust-call tuple".to_owned()
                             );
                         };
                         let mut flattened = vec![closure.clone()];
-                        flattened.extend(parameters.iter().cloned());
+                        match parameters {
+                            Value::Tuple(parameters) => {
+                                flattened.extend(parameters.iter().cloned())
+                            }
+                            Value::Unit => {}
+                            _ => return Err("closure arguments are not a Rust-call tuple".into()),
+                        }
                         values = flattened;
                     }
                     let results = self.call_instance(

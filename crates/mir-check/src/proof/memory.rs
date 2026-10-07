@@ -413,7 +413,7 @@ impl<'tcx> Engine<'tcx> {
         mutable: bool,
     ) -> Result<Value, String> {
         let value = self.place(state, place)?;
-        if matches!(value, Value::StaticView { .. }) {
+        if matches!(value, Value::StaticView { .. }) && self.static_place_view(&value, state)? {
             return self.borrow_static_view(&value, mutable, state);
         }
         if !mutable

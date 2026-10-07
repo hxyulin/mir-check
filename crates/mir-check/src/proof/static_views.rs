@@ -269,19 +269,20 @@ impl<'tcx> Engine<'tcx> {
         }
         let source_layout = self.static_layout(source)?;
         let target_layout = self.static_layout(target)?;
-        if source_layout.size != target_layout.size
-            || !self.dense_atomic_storage(source, 0, &mut 0)?
+        if source_layout.size < target_layout.size
+            || !self.atomic_storage_prefix(source, target_layout.size.bytes(), 0, &mut 0)?
         {
             return Err(
-                "atomic overlay needs equal-size initialized atomic storage without padding".into(),
+                "atomic overlay needs an initialized atomic footprint without padding".into(),
             );
         }
         Ok(())
     }
 
-    fn dense_atomic_storage(
+    fn atomic_storage_prefix(
         &self,
         ty: Ty<'tcx>,
+        bytes: u64,
         depth: usize,
         values: &mut usize,
     ) -> Result<bool, String> {
@@ -290,11 +291,13 @@ impl<'tcx> Engine<'tcx> {
         }
         *values += 1;
         let layout = self.static_layout(ty)?;
-        if ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
-            return Ok(false);
-        }
-        if layout.size.bytes() == 0 {
+        if bytes == 0 {
             return Ok(true);
+        }
+        if layout.size.bytes() < bytes
+            || ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
+        {
+            return Ok(false);
         }
         match ty.kind() {
             ty::Adt(def, args)
@@ -305,11 +308,16 @@ impl<'tcx> Engine<'tcx> {
             {
                 let element = args.type_at(0);
                 Ok((element.is_bool() || self.integer_type(element).is_some())
-                    && layout.size == self.static_layout(element)?.size)
+                    && layout.size == self.static_layout(element)?.size
+                    && layout.size.bytes() == bytes)
             }
             ty::Adt(def, args) if def.is_struct() => {
                 let mut ranges = Vec::new();
                 for (index, field) in def.non_enum_variant().fields.iter_enumerated() {
+                    let offset = layout.fields.offset(index.as_usize()).bytes();
+                    if offset >= bytes {
+                        continue;
+                    }
                     let field_ty = self
                         .tcx
                         .try_normalize_erasing_regions(
@@ -319,13 +327,18 @@ impl<'tcx> Engine<'tcx> {
                         .map_err(|error| {
                             format!("atomic overlay field normalization failed: {error:?}")
                         })?;
-                    if !self.dense_atomic_storage(field_ty, depth + 1, values)? {
+                    let size = self
+                        .static_layout(field_ty)?
+                        .size
+                        .bytes()
+                        .min(bytes - offset);
+                    if size == 0 {
+                        continue;
+                    }
+                    if !self.atomic_storage_prefix(field_ty, size, depth + 1, values)? {
                         return Ok(false);
                     }
-                    let size = self.static_layout(field_ty)?.size.bytes();
-                    if size != 0 {
-                        ranges.push((layout.fields.offset(index.as_usize()).bytes(), size));
-                    }
+                    ranges.push((offset, size));
                 }
                 ranges.sort_unstable();
                 let mut end = 0;
@@ -337,19 +350,67 @@ impl<'tcx> Engine<'tcx> {
                         .checked_add(size)
                         .ok_or("atomic overlay field offset overflow")?;
                 }
-                Ok(end == layout.size.bytes())
+                Ok(end == bytes)
             }
             ty::Array(element, _) => {
                 let rustc_abi::FieldsShape::Array { stride, count } = layout.fields else {
                     return Ok(false);
                 };
-                Ok(count != 0
-                    && count <= 128
-                    && stride == self.static_layout(*element)?.size
-                    && self.dense_atomic_storage(*element, depth + 1, values)?)
+                let stride = stride.bytes();
+                if stride == 0 || stride != self.static_layout(*element)?.size.bytes() {
+                    return Ok(false);
+                }
+                let needed = bytes.div_ceil(stride);
+                if needed > count || needed > 128 {
+                    return Ok(false);
+                }
+                for index in 0..needed {
+                    let size = (bytes - index * stride).min(stride);
+                    if !self.atomic_storage_prefix(*element, size, depth + 1, values)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
             }
             _ => Ok(false),
         }
+    }
+
+    pub(super) fn static_place_view(&self, value: &Value, state: &State) -> Result<bool, String> {
+        Ok(self.static_view(value, state)?.kind == ViewKind::Place)
+    }
+
+    pub(super) fn static_uninit_pointer(
+        &self,
+        receiver: Ty<'tcx>,
+        name: &str,
+        values: &[Value],
+        state: &State,
+    ) -> Result<Option<Value>, String> {
+        let ty::Adt(def, args) = receiver.kind() else {
+            return Ok(None);
+        };
+        if self.tcx.lang_items().get(LangItem::MaybeUninit) != Some(def.did()) || name != "as_ptr" {
+            return Ok(None);
+        }
+        let [value @ Value::StaticView { .. }] = values else {
+            return Ok(None);
+        };
+        let mut view = self.static_view(value, state)?;
+        if view.kind != ViewKind::Shared || view.ty != receiver || view.certified != receiver {
+            return Err("MaybeUninit address requires a certified shared container view".into());
+        }
+        let payload = args.type_at(0);
+        let wrapper_layout = self.static_layout(receiver)?;
+        let payload_layout = self.static_layout(payload)?;
+        if wrapper_layout.size != payload_layout.size
+            || wrapper_layout.align.abi != payload_layout.align.abi
+        {
+            return Err("MaybeUninit payload address does not preserve size and alignment".into());
+        }
+        view.ty = payload;
+        view.kind = ViewKind::Raw;
+        self.intern_static_view(view).map(Some)
     }
 
     pub(super) fn static_view_projection(

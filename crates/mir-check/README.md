@@ -547,10 +547,12 @@ Slice iterator `find_map` executes concrete callback MIR, retains captured side 
 at the first modeled Some result. Unsupported callback shapes and destructors remain UNKNOWN.
 Empty slice descriptors retain effect invalidation. These views do not load array payloads.
 
-Opaque static views can reinterpret a dense group of Boolean/integer atomic fields as one
-same-size integer atomic. Compiler layouts must cover the region without padding, and the target
-must fit the allocation at an aligned offset. Arrays and nested structs are supported within the
-shape limits; MaybeUninit, unions, pointers, ordinary payload fields and destructors remain UNKNOWN.
+Opaque static views can reinterpret a dense prefix of Boolean/integer atomic fields as one
+integer atomic. Compiler layouts must cover its footprint without padding or partial atomic leaves,
+and the target must fit its certified source region and allocation at an aligned offset. Arrays
+and nested structs are supported within the shape limits. Padding, MaybeUninit, unions, pointers
+and ordinary fields outside the accessed prefix can be ignored; reading them remains UNKNOWN.
+Destructors remain unsupported.
 Reads use the existing arbitrary-per-access model without byte-order or initializer assumptions.
 Shared atomic reborrows preserve their marker across temporary lifetimes. This does not prove
 synchronization protocols or the validity of overlapping accesses and arbitrary overlay writes.
@@ -562,3 +564,10 @@ Relaxed, Acquire or SeqCst, including when stronger than success on the pinned c
 orderings refute. Replacement values are type-checked, and later accesses stay arbitrary. Pointer
 CAS remains UNKNOWN. Host/ARM debug and optimized fixtures test signed values, result relations,
 ordering guards, spurious failure, mutations and native replay.
+
+MaybeUninit::as_ptr exposes the address of a certified shared static container without certifying
+payload initialization. Payload reads and initialization/writes remain UNKNOWN. Static reference
+values can be captured and replaced in tracked local slots while mutable static payload borrows
+remain rejected. Concrete zero-argument closures and function items support Rust-call's empty-tuple
+unit representation and execute their actual MIR. Host/ARM fixtures test these boundaries and
+retain rejected reads, native scoped replay and layout mutations.

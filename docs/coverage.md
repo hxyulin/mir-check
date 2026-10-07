@@ -489,10 +489,12 @@ orderings, symbolic guarded and invalid orderings, native panic replay, mutation
 payloads. Invalid direct intrinsic orderings remain UNKNOWN. This does not establish whole-function
 atomicity, publication safety or full weak-memory correctness.
 
-Dense Boolean/integer atomic fields in certified static storage can form a same-size integer
-atomic view. Compiler offsets and strides must cover every byte, and the allocation must satisfy
-the wider atomic's alignment at the projected offset. Padding, uninitialized storage, pointers,
-ordinary payload fields and destructors remain UNKNOWN. Shared atomic reborrows retain their opaque
+Dense Boolean/integer atomic prefixes in certified static storage can form an integer atomic
+view. Compiler offsets and strides must cover every accessed byte without padding or cutting a
+leaf, and the allocation must satisfy alignment at the projected offset. Opaque fields and padding
+outside that footprint can be ignored. Reading padding, uninitialized storage, pointers or
+ordinary payload fields, and destructors, remain UNKNOWN. Shared atomic reborrows retain their
+opaque
 marker. Host/ARM debug and optimized tests cover nonzero offsets, Boolean arrays, arbitrary values,
 rejected regions, native scoped replay and layout/offset mutations. This adds no synchronization or
 atomic-history facts and does not verify overlapping concurrent accesses.
@@ -502,3 +504,10 @@ with symbolic ordering checks. Weak CAS allows spurious failure. All 15 valid su
 ordering pairs in the pinned core are accepted; Release and AcqRel failure orderings refute. The
 model adds no atomic history or synchronization facts. Pointer CAS remains UNKNOWN. Host/ARM tests
 include positive, refuted and unknown cases, mutations and native replay.
+
+Certified shared static MaybeUninit containers support as_ptr with size/alignment checks. The raw
+payload address keeps the container's initialization barrier; it does not authorize reading T.
+General union reads and MaybeUninit initialization/writes remain unsupported. Tracked local static
+reference slots support shared captures and mutable slot replacement. Actual mutable static
+payload borrows remain UNKNOWN. Concrete zero-argument closure/function-item calls now accept the
+empty Rust-call tuple's unit representation, with actual callback MIR execution.

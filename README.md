@@ -342,8 +342,9 @@ The ordinary interpreter can also recover a compiler-known typed static layout t
 UnsafeCell byte carrier while keeping its payload opaque. It checks allocation provenance, original
 initializer types, size, alignment and field offsets. Shared fixed arrays support bounded slice
 views and ordered element references; iterator `find_map` executes callbacks with short circuiting.
-Dense groups of atomic fields can also form same-size integer atomic views after compiler layout
-and alignment checks. General mutable payloads remain opaque. See
+Dense atomic prefixes can form integer atomic views after compiler layout and alignment checks,
+even with opaque fields or padding beyond the accessed footprint. General mutable payloads remain
+opaque. See
 [static storage views](docs/proofs.md#opaque-static-storage-views) for the supported boundaries.
 
 Atomic fence coverage checks compiler-identified fence/compiler_fence wrappers and their intrinsic
@@ -354,3 +355,8 @@ synchronization or atomic-history facts. See
 Integer compare_exchange and compare_exchange_weak check ordering arguments and preserve the
 old-value relation within each result. Weak CAS admits spurious failure. Later atomic accesses
 remain independent, with no synchronization or atomic-history facts.
+
+Certified static MaybeUninit::as_ptr addresses stay opaque until initialization is established.
+Local slots can retain and replace static references; concrete zero-argument closure/function-item
+callbacks execute their actual MIR. General payload reads/writes and unknown dynamic calls remain
+UNKNOWN.

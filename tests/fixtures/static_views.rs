@@ -508,3 +508,101 @@ pub fn atomic_overlay_misaligned_field_is_unknown() {
     let record = share_misaligned(MISALIGNED_SAMPLE.get());
     let _ = share_word((&raw const record.bytes).cast());
 }
+
+#[repr(C)]
+union OpaqueUnion {
+    pointer: core::mem::ManuallyDrop<core::sync::atomic::AtomicPtr<()>>,
+    bytes: [u8; 8],
+}
+#[repr(C)]
+struct PrefixSample {
+    word: AtomicU32,
+    opaque_union: OpaqueUnion,
+    pointer: core::sync::atomic::AtomicPtr<()>,
+    unused: MaybeUninit<[u8; 3]>,
+}
+static PREFIX_SAMPLE: SyncUnsafeCell<PrefixSample> = SyncUnsafeCell::new(PrefixSample {
+    word: AtomicU32::new(0),
+    opaque_union: OpaqueUnion { bytes: [0; 8] },
+    pointer: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
+    unused: MaybeUninit::uninit(),
+});
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_prefix(pointer: *mut PrefixSample) -> &'static PrefixSample {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn opaque_fields_outside_an_atomic_prefix() -> u32 {
+    let source = share_prefix(PREFIX_SAMPLE.get());
+    share_word((&raw const *source).cast()).load(Ordering::Relaxed)
+}
+
+pub fn atomic_prefix_cannot_read_a_union() {
+    let source = share_prefix(PREFIX_SAMPLE.get());
+    let _ = share_word((&raw const source.opaque_union).cast()).load(Ordering::Relaxed);
+}
+
+pub fn atomic_prefix_cannot_read_a_pointer() {
+    let source = share_prefix(PREFIX_SAMPLE.get());
+    let _ = share_word((&raw const source.pointer).cast()).load(Ordering::Relaxed);
+}
+
+pub fn maybe_uninit_payload_address() {
+    let source = share_rejected(REJECTED.get());
+    let pointer = source.uninitialized.as_ptr();
+    assert!(!pointer.is_null());
+    assert!(pointer as usize == (&raw const source.uninitialized) as usize);
+}
+
+pub fn maybe_uninit_address_does_not_prove_initialization() {
+    let source = share_rejected(REJECTED.get());
+    let _ = share_word(source.uninitialized.as_ptr()).load(Ordering::Relaxed);
+}
+
+fn capture_reference(value: &'static Record) -> u32 {
+    let read = || value.revision.load(Ordering::Relaxed);
+    read()
+}
+
+pub fn zero_arg_closure_captures_static_reference() -> u32 {
+    capture_reference(restored())
+}
+
+pub fn zero_arg_then_captures_static_reference() -> Option<&'static Record> {
+    let value = restored();
+    true.then(|| value)
+}
+
+pub fn zero_arg_then_calls_function_item() -> Option<&'static Record> {
+    true.then(restored)
+}
+
+fn replace_reference(value: &mut &'static Record) {
+    *value = direct();
+}
+
+pub fn a_mutable_reference_slot_preserves_static_views() -> u32 {
+    let mut value = restored();
+    replace_reference(&mut value);
+    value.revision.load(Ordering::Relaxed)
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_mutable_record(pointer: *mut Record) -> &'static mut Record {
+    mir! { { RET = &mut *pointer; Return() } }
+}
+
+pub fn mutable_static_payload_remains_unknown() {
+    let _ = share_mutable_record(DIRECT.get());
+}
+
+#[cfg(test)]
+#[test]
+fn prefix_and_reference_operations_replay_without_payload_reads() {
+    let _ = opaque_fields_outside_an_atomic_prefix();
+    maybe_uninit_payload_address();
+    let _ = zero_arg_closure_captures_static_reference();
+    let _ = zero_arg_then_captures_static_reference();
+    let _ = zero_arg_then_calls_function_item();
+    let _ = a_mutable_reference_slot_preserves_static_views();
+}

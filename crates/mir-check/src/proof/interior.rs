@@ -196,6 +196,15 @@ impl<'tcx> Engine<'tcx> {
             self.record_model(callee, "UnsafeCell static storage address; no payload read");
             return Ok(Some(value));
         }
+        if let Some(value) =
+            self.static_uninit_pointer(receiver_ty, name.as_str(), values, state)?
+        {
+            self.record_model(
+                callee,
+                "MaybeUninit static payload address; initialization is not assumed",
+            );
+            return Ok(Some(value));
+        }
         if let Some(element) = self.cell_element(receiver_ty) {
             let result = match (name.as_str(), values) {
                 ("new", [value]) => {
