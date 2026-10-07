@@ -56,6 +56,22 @@ fn verify(path: &Path, entries: &[(&str, ProofStatus)], target: Option<&str>, in
             proof.obligations,
         );
         assert!(proof.trusted_calls.is_empty());
+        if *name == "cached_shapes_do_not_hide_unsupported_types" {
+            assert!(
+                proof
+                    .obligations
+                    .iter()
+                    .any(|o| o.detail.contains("input field unused"))
+            );
+        }
+        if *name == "shapes_cached_by_previous_fields_still_obey_depth" {
+            assert!(
+                proof
+                    .obligations
+                    .iter()
+                    .any(|o| o.detail.contains("input field nested"))
+            );
+        }
         if *expected == ProofStatus::Refuted {
             assert!(
                 proof
@@ -71,6 +87,27 @@ fn verify(path: &Path, entries: &[(&str, ProofStatus)], target: Option<&str>, in
 #[test]
 fn large_root_shapes_materialize_only_supported_projected_values() {
     let entries = [
+        (
+            "shared_payload_shapes_keep_guarded_access_safe",
+            ProofStatus::Proved,
+        ),
+        (
+            "shared_payload_shapes_do_not_prove_an_unchecked_index",
+            ProofStatus::Refuted,
+        ),
+        (
+            "reused_shapes_keep_argument_symbols_independent",
+            ProofStatus::Refuted,
+        ),
+        ("reused_shapes_preserve_writes", ProofStatus::Proved),
+        (
+            "shapes_cached_by_previous_fields_still_obey_depth",
+            ProofStatus::Unknown,
+        ),
+        (
+            "cached_shapes_do_not_hide_unsupported_types",
+            ProofStatus::Unknown,
+        ),
         ("lazy_record_membership", ProofStatus::Proved),
         ("lazy_scalar_subarray_membership", ProofStatus::Proved),
         ("a_false_lazy_record_member", ProofStatus::Refuted),
@@ -177,6 +214,17 @@ fn changing_a_guard_or_comparison_refutes_the_root() {
         None,
         false,
     );
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        verify(
+            &path,
+            &[(
+                "shared_payload_shapes_keep_guarded_access_safe",
+                ProofStatus::Refuted,
+            )],
+            target,
+            false,
+        );
+    }
     let comparison = "self.slot == rhs.slot";
     assert_eq!(source.matches(comparison).count(), 1);
     std::fs::write(&path, source.replace(comparison, "self.slot != rhs.slot")).unwrap();
@@ -207,6 +255,6 @@ fn native_lazy_projection_cases_and_failure_mutations_match_the_checker() {
     assert!(output.status.success(), "{output:?}");
     let output = Command::new(executable).output().unwrap();
     assert!(output.status.success(), "{output:?}");
-    assert!(String::from_utf8_lossy(&output.stdout).contains("6 passed"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("8 passed"));
     std::fs::remove_dir_all(directory).unwrap();
 }

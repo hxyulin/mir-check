@@ -33,7 +33,9 @@ struct/tuple/array subtrees with ordinary scalar leaves can instead use lazy des
 types share descriptors while retaining independent values. A bounded eager-size estimate selects
 compact eligible subtrees before other fields consume the budget. Cached descriptor heights must
 fit each occurrence's nesting depth. The descriptor budget
-shares the same 512-node total and 16-level limit; arrays retain their 256-element limit and a root
+shares the same 512-node total and 16-level limit, counting each descriptor/field edge once and each
+lazy occurrence once. Accepted descriptors are shared across eager enum variants and separate
+arguments; unaccepted candidates are discarded. Arrays retain their 256-element limit and a root
 reserves at most 262,144 symbol slots. One level is materialized on access or mutation, leaving
 nested aggregates lazy. Unsupported leaves are checked even when unused. Enums, chars, NonZero and
 compiler patterns retain eager validity constraints, with lazy eligible children. Snapshots and
@@ -44,7 +46,7 @@ require modeling an element value. Struct fields remain arbitrary inputs; privac
 imply no hidden invariant. Enum selectors are constrained to the actual compiler discriminants,
 including explicit signed values. A downcast must prove the active tag before reading its payload.
 Reports expose `value.discriminant` and `value.variantN.field`; inactive payload bindings have no
-runtime meaning.
+runtime meaning. Input-construction failures name the specific field, variant or array element.
 
 Ordinary membership can read lazily represented fixed arrays, including nested scalar arrays and
 custom element records. Custom equality still executes its actual body; changing that body or an

@@ -112,7 +112,7 @@ impl<'tcx> Engine<'tcx> {
             return Ok(None);
         }
         let mut nodes = 0;
-        let mut cache = std::collections::HashMap::new();
+        let mut cache = self.input_shapes.clone();
         let Some(shape) = self.lazy_shape(ty, depth, &mut nodes, &mut cache)? else {
             return Ok(None);
         };
@@ -122,7 +122,8 @@ impl<'tcx> Engine<'tcx> {
         {
             return Ok(None);
         }
-        if nodes > MAX_INPUT_VALUES.saturating_sub(self.input_values) {
+        let cost = nodes + 1;
+        if cost > MAX_INPUT_VALUES.saturating_sub(self.input_values) {
             return Err("lazy input descriptors exceed the 512-node budget".to_owned());
         }
         let start = self.next_symbol;
@@ -134,7 +135,8 @@ impl<'tcx> Engine<'tcx> {
         }
         let seed = self.terms.symbol(start, Sort::Bool)?;
         self.next_symbol = next;
-        self.input_values += nodes;
+        self.input_values += cost;
+        self.input_shapes = cache;
         Ok(Some(Value::Input(symbolic::input::InputValue {
             shape,
             start,

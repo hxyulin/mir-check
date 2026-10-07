@@ -281,6 +281,96 @@ pub fn oversized_symbol_reservation(input: &[[[u16; 256]; 256]; 256]) -> u16 {
     input[0][0][0]
 }
 
+pub enum Shelves {
+    Shelf0(Archive),
+    Shelf1(Archive),
+    Shelf2(Archive),
+    Shelf3(Archive),
+    Shelf4(Archive),
+    Shelf5(Archive),
+    Shelf6(Archive),
+    Shelf7(Archive),
+    Shelf8(Archive),
+    Shelf9(Archive),
+    Shelf10(Archive),
+    Shelf11(Archive),
+    Shelf12(Archive),
+    Shelf13(Archive),
+    Shelf14(Archive),
+    Shelf15(Archive),
+    Shelf16(Archive),
+    Shelf17(Archive),
+    Shelf18(Archive),
+    Shelf19(Archive),
+    Shelf20(Archive),
+    Shelf21(Archive),
+    Shelf22(Archive),
+    Shelf23(Archive),
+    Shelf24(Archive),
+    Shelf25(Archive),
+    Shelf26(Archive),
+    Shelf27(Archive),
+    Shelf28(Archive),
+    Shelf29(Archive),
+    Shelf30(Archive),
+    Shelf31(Archive),
+    Shelf32(Archive),
+    Shelf33(Archive),
+    Shelf34(Archive),
+    Shelf35(Archive),
+    Shelf36(Archive),
+    Shelf37(Archive),
+    Shelf38(Archive),
+    Shelf39(Archive),
+}
+
+pub fn shared_payload_shapes_keep_guarded_access_safe(input: &Shelves) -> u8 {
+    if let Shelves::Shelf0(archive) = input {
+        guarded_field_index(archive)
+    } else {
+        0
+    }
+}
+
+pub fn shared_payload_shapes_do_not_prove_an_unchecked_index(input: &Shelves) -> u8 {
+    if let Shelves::Shelf39(archive) = input {
+        unguarded_field_index(archive)
+    } else {
+        0
+    }
+}
+
+pub fn reused_shapes_keep_argument_symbols_independent(left: &Shelves, right: &Shelves) {
+    if let (Shelves::Shelf0(left), Shelves::Shelf0(right)) = (left, right) {
+        assert!(left.records[5].slot == right.records[5].slot);
+    }
+}
+
+pub fn reused_shapes_preserve_writes(input: &mut Shelves) {
+    if let Shelves::Shelf39(archive) = input {
+        archive.records[5].slot = 19;
+        assert!(archive.records[5].slot == 19);
+    }
+}
+
+pub struct SharedDepthProbe {
+    pub payloads: Shelves,
+    pub nested: Nested13,
+}
+
+pub fn shapes_cached_by_previous_fields_still_obey_depth(input: &SharedDepthProbe) {
+    let _ = &input.payloads;
+}
+
+pub struct SharedUnsupportedProbe {
+    pub payloads: Shelves,
+    pub unused: *const u16,
+}
+
+pub fn cached_shapes_do_not_hide_unsupported_types(input: &SharedUnsupportedProbe) {
+    let _ = &input.payloads;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +401,10 @@ mod tests {
         assert_eq!(tuple_and_nested_arrays(&[([3; 8], true); 128]), 31);
         let mut pair = DescriptorPair { left: archive(), right: archive() };
         repeated_shapes_keep_distinct_storage(&mut pair);
+        let shelves = Shelves::Shelf0(archive());
+        assert_eq!(shared_payload_shapes_keep_guarded_access_safe(&shelves), 11);
+        let mut shelves = Shelves::Shelf39(archive());
+        reused_shapes_preserve_writes(&mut shelves);
     }
 
     #[test]
@@ -348,4 +442,22 @@ mod tests {
         input.records[5].slot = 4;
         owned_lazy_records_do_not_satisfy_a_false_claim(&input);
     }
+
+    #[test]
+    #[should_panic]
+    fn separate_cached_arguments_keep_independent_native_values() {
+        let left = Shelves::Shelf0(archive());
+        let mut right = archive();
+        right.records[5].slot = 4;
+        reused_shapes_keep_argument_symbols_independent(&left, &Shelves::Shelf0(right));
+    }
+
+    #[test]
+    #[should_panic]
+    fn cached_payloads_do_not_protect_an_unchecked_native_index() {
+        let mut archive = archive();
+        archive.records[5].slot = 8;
+        shared_payload_shapes_do_not_prove_an_unchecked_index(&Shelves::Shelf39(archive));
+    }
+
 }

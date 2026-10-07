@@ -56,15 +56,20 @@ Lazy inputs are reference-free, Freeze structs, tuples and fixed arrays built fr
 integers, Booleans, floats, unit and byte arrays. Each subtree is validated before it is accepted,
 including unused fields. Enums, chars, compiler patterns, NonZero and interior mutable types use the
 eager builder and its validity constraints; eligible children inside an eager container can still be
-lazy. Repeated types share a descriptor, but receive independent, pre-reserved symbol ranges.
+lazy. Accepted descriptors are cached by exact compiler type across the whole root, including
+separate eager enum payloads and arguments. Each occurrence receives an independent,
+pre-reserved symbol
+range. Unaccepted candidates do not populate the cache.
 Repeated reads keep the same symbols; by-value copies share their initial immutable descriptors, and
 writes replace only the changed branch. Entry snapshots therefore retain their original values.
 For roots exceeding the eager budget, a bounded size estimate selects useful compact subtrees
 before constructing the other fields. Cached descriptors retain their height and must fit the
 current nesting depth. Sharing describes types, never shared mutable storage or equality of values.
 
-Lazy descriptors share the 512-node input budget and 16-level limit across arguments. Non-byte
-arrays still have at most 256 elements. Materializing one level creates at most 512 immediate
+Lazy descriptors share the 512-node input budget and 16-level limit across arguments. Descriptor
+nodes and field edges are charged once; every accepted lazy occurrence also consumes one node.
+Non-byte arrays still have at most 256 elements. Materializing one level creates at most 512
+immediate
 values; nested aggregates stay lazy. A root reserves at most 262,144 symbol slots, and checked range
 arithmetic rejects larger shapes as UNKNOWN. Byte arrays keep the existing SMT array encoding.
 Reports summarize unmaterialized inputs rather than listing every field. Ambiguous composite

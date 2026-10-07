@@ -55,7 +55,12 @@ impl<'tcx> Engine<'tcx> {
                             field.ty(self.tcx, args),
                         )
                         .map_err(|error| format!("input field normalization failed: {error:?}"))?;
-                    self.argument(id, ty, conditions)
+                    self.argument(id, ty, conditions).map_err(|error| {
+                        format!(
+                            "input variant {} field {}: {error}",
+                            variant.name, field.name
+                        )
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             variants.push(self.constructed(ty, index.as_usize(), fields)?);
@@ -91,7 +96,8 @@ impl<'tcx> Engine<'tcx> {
                     .map_err(|error| format!("input field normalization failed: {error:?}"))?;
                 Ok((
                     field.name.as_str().to_owned(),
-                    self.argument(id, ty, conditions)?,
+                    self.argument(id, ty, conditions)
+                        .map_err(|error| format!("input field {}: {error}", field.name))?,
                 ))
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -121,7 +127,10 @@ impl<'tcx> Engine<'tcx> {
         }
         Ok(Value::Elements(
             (0..count)
-                .map(|_| self.argument(id, *element, conditions))
+                .map(|index| {
+                    self.argument(id, *element, conditions)
+                        .map_err(|error| format!("input array element {index}: {error}"))
+                })
                 .collect::<Result<_, _>>()?,
         ))
     }

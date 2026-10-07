@@ -87,14 +87,18 @@ supported shared references and small arrays of modeled aggregates. Input enums 
 variants; every payload must be modeled, and downcasts require a proven tag check. Input
 construction has a 16-level depth limit and a 512-value budget across arguments. Large eligible
 subtrees use lazy descriptors: reference-free Freeze structs, tuples and fixed arrays with ordinary
-scalar leaves. Repeated types share shapes and retain independent stable symbols; projected writes
+scalar leaves. Accepted type shapes are cached across the entire root, including different enum
+payloads and arguments. Every occurrence retains independent stable symbols; projected writes
 preserve copies and entry snapshots. Descriptors share the 512-node budget and a root reserves at
-most 262,144 symbol slots. Enums, chars, NonZero and compiler patterns keep eager validity
+most 262,144 symbol slots. Each lazy occurrence also consumes one node; cached descriptor fields
+are charged only once. Rejected candidates never enter the shared cache. Enums, chars, NonZero and
+compiler patterns keep eager validity
 constraints, with lazy eligible children. Unsupported leaves, larger reservations and unresolved
 lazy induction state remain unknown. General mutable-reference fields still fail before execution.
 For inputs whose estimated eager size exceeds the budget, compact subtrees are selected before
 other fields consume it. Shape sharing respects each occurrence's nesting depth; fields still have
 independent values. Deferred owned records retain the existing 256-value repeat/iterator budget.
+Input construction errors include the field, enum variant or array element that blocked it.
 Input bindings retain nested names such as packet.header.index and value.1.0.
 Bounded membership resolves lazy slice storage one level before primitive comparisons or checked
 custom equality calls; it preserves the same element identities as ordinary field access.
@@ -286,8 +290,9 @@ contain no owned Cell/atomic identities or destructors and fit 128 elements/256 
 reference preserves its allocation and projection; callbacks read and write that original storage.
 The reference graph must remain live, and frame-local references cannot escape through an iterator.
 Identity-bearing array repeats remain unsupported. Composite reference elements require a uniquely
-resolved cursor index; symbolic skips selecting different reference identities stay UNKNOWN. Models cover
-forward/reverse skips, count/last, all/any and ordered fold/rfold callbacks. Ordinary sum MIR now
+resolved cursor index; symbolic skips selecting different reference identities stay UNKNOWN. Models
+cover forward/reverse skips, count/last, all/any and ordered fold/rfold callbacks. Ordinary sum
+MIR now
 uses typed noncapturing closure constants and the cursor fold model. Captured constant closures,
 including zero-sized captures, remain unknown. Iterator by_ref/IntoIterator preserve writable
 cursor references; consuming methods update the original cursor. Wrapper drop glue is harmless
