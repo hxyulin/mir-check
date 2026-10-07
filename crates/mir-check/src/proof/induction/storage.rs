@@ -128,6 +128,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::Atomic { .. }
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Uninitialized
             | Value::Function) => {
                 return Err(format!("unsupported inductive storage {other:?}"));
             }
@@ -366,6 +367,7 @@ impl<'tcx> Engine<'tcx> {
                         | Value::StaticText
                         | Value::FormatArguments
                         | Value::Input(_)
+                        | Value::Uninitialized
                         | Value::Function
                         | Value::Unit => {
                             return Err("inductive borrow field has unsupported storage".into());
@@ -565,6 +567,7 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             | Value::StaticText
             | Value::FormatArguments
             | Value::Input(_)
+            | Value::Uninitialized
             | Value::Function
             | Value::Unit,
             _,
@@ -615,6 +618,7 @@ pub(super) fn static_projection(value: Value, part: &MemoryProjection) -> Result
             | Value::StaticText
             | Value::FormatArguments
             | Value::Input(_)
+            | Value::Uninitialized
             | Value::Function
             | Value::Unit,
         ) => Err("unsupported inductive reference projection".into()),

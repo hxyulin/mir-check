@@ -79,7 +79,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Evaluated closure constants | Typed noncapturing, zero-field, zero-sized closure values | Captured constants, including zero-sized captures, remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, min/max, saturating add/subtract, zero counts, byte/bit reversal, comparisons, casts, bit operations and shifts | Optional overflow checks depend on build settings; unsafe nonzero count intrinsics remain unsupported |
 | Float operations | Numeric IEEE operations, exact input/from_bits encodings, moves, negation, abs, clamp and to_bits | Arithmetic NaN encodings allow every payload/sign, including signaling NaNs; counterexamples may not replay |
-| Drop | Concrete synchronous rustc drop glue executes user destructors and ordered aggregate field drops | Pointer-based array/slice glue, coroutine drops, unwinding and induction drops remain UNKNOWN |
+| Drop | Concrete synchronous rustc drop glue executes user destructors and ordered aggregate field drops | Pointer-based array/slice glue, unsupported coroutine drops, unwinding and induction drops remain UNKNOWN |
 | MIR assume | Prove its predicate as a validity obligation | Never turn it into an unchecked assumption |
 
 The default execution budget is 8,192 steps per root, including callees, iterator model steps and
@@ -436,3 +436,17 @@ execute ordered resolved `ne` calls. Empty comparisons, unequal unbounded length
 cases, prefix views and custom effects have host/ARM debug and optimized tests. Mutations refute
 and panic during native replay. Arbitrary unbounded equality, general range indexing and induction
 comparison translation remain gaps. Increasing execution budgets does not remove model shape caps.
+
+Constructed async futures execute optimized poll MIR with compiler-provided saved-local layouts.
+Variant fields that share a saved local use one logical slot. Captures, mutable writes, nested
+futures, suspension/resumption and completion-state checks have host/ARM debug and optimized tests.
+Available cancellation drop glue is interpreted, including destructor effects and panics. Saved
+locals are explicitly uninitialized until assigned; unsupported reads never become symbolic data.
+The state model allows at most 64 variants and 512 capture/saved-local slots.
+
+Core Context is an opaque valid argument; its waker/extension fields cannot be observed. The exact
+compiler Context/NonNull reference adapter and core Pin<&mut T> mutable dereference preserve tracked
+storage. Compiler-identified noop-waker/context constructors let a standalone binary fixture prove
+from main through two polls; a bad resumed index refutes and panics natively. Construction-only
+proofs cover the async factory, not deferred execution. Unbounded polling, arbitrary coroutine root
+states, waker operations and executor internals remain incomplete.

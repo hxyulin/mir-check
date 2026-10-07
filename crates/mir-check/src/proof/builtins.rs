@@ -120,6 +120,16 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
+        if let Some(value) = self.pin_mutable_deref(instance, signature, raw_values, state)? {
+            self.record_model(
+                callee,
+                "core Pin<&mut T> mutable dereference; tracked storage",
+            );
+            return Ok(Some(value));
+        }
+        if let Some(value) = self.task_context_constructor(instance, signature, values)? {
+            return Ok(Some(value));
+        }
         if self.tcx.is_intrinsic(callee, Symbol::intern("cold_path"))
             && signature.inputs().is_empty()
             && signature.output().is_unit()

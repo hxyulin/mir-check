@@ -296,9 +296,12 @@ when an independently selected helper refutes under a larger arbitrary input dom
 
 Macro-based entry points can have different MIR names. A missing main selector reports available
 main-related names for explicit selection. Startup wrappers and async task bodies are separate;
-checking a startup wrapper does not execute a future's polling behavior. Coroutines, executor
-state and unsupported hardware operations can still prevent completion. This mode does not run
-the application's main on the host.
+creating or spawning a future does not execute its deferred body. Actual reached poll calls of
+constructed futures are analyzed, including suspension, resumption and available cancellation.
+A main that only constructs and discards a future can prove without proving that future's poll
+body; the report records the construction model explicitly. Arbitrary coroutine inputs, unbounded
+async polling, executor state and unsupported hardware operations can still prevent completion.
+This mode does not run the application's main on the host.
 
 ## Work through UNKNOWN
 

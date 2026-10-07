@@ -325,3 +325,10 @@ See [documentation development](docs/development.md) for previews and GitHub Pag
 
 mir-check is available under either the [MIT license](LICENSE-MIT) or the
 [Apache License 2.0](LICENSE-APACHE), at your option.
+
+Ordinary analysis can also follow constructed async futures through poll, suspension, resumption
+and available cancellation drop glue. It checks actual reached poll bodies, including nested
+futures and captured mutable storage. Future construction alone does not prove deferred execution.
+A standalone binary fixture proves from main through two polls and rejects a bad resumed index.
+Unbounded async polling, arbitrary coroutine inputs, waker operations and executor internals remain
+UNKNOWN. See [constructed async futures](docs/proofs.md#constructed-async-futures).

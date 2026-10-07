@@ -24,6 +24,7 @@ pub enum MemoryProjection {
 
 #[derive(Clone, Debug)]
 pub enum Value {
+    Uninitialized,
     Input(input::InputValue),
     Bool(Term),
     Int {
@@ -118,6 +119,7 @@ impl Value {
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
+            | Self::Uninitialized
             | Self::Function => None,
         }
     }
@@ -159,6 +161,7 @@ impl Value {
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
+            | Self::Uninitialized
             | Self::Function => None,
         }
     }
@@ -185,6 +188,7 @@ impl Value {
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
+            | Self::Uninitialized
             | Self::Function
             | Self::Unit => false,
         }

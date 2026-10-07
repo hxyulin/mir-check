@@ -519,3 +519,28 @@ path constraints remain mandatory, and query limits apply after required relatio
 Static string transport keeps an opaque immutable literal value. Shared reborrows and returned
 references preserve that marker; length/content/equality/pointer operations and mutable storage
 remain unsupported. It does not provide general string reasoning.
+
+## Constructed async futures
+
+The ordinary interpreter accepts coroutine aggregates with a compiler-provided lowered layout.
+Captures use initialized fields; each saved local gets an uninitialized slot. A MIR visitor rewrites
+coroutine variant-field projections to these logical slots, preserving the compiler's shared-local
+mapping across variants. Field types remain the instantiated MIR types. SetDiscriminant changes only
+the constructed coroutine's state, after checking its identity and the state's layout bounds.
+Ordinary scalar and memory operations then execute the actual lowered poll body. Uninitialized
+reads fail as UNKNOWN. A completed future's next poll reaches the compiler's panic-state check.
+
+Opaque Context values represent any valid task context while hiding its fields. The exact core
+Context/NonNull transmute pair preserves a tracked mutable reference, without a general pointer
+memory model. Core Pin<&mut T> mutable dereference preserves the same tracked pointer; user pointer
+implementations execute their own MIR. Core noop-waker and context construction use explicit typed
+models. Waker behavior and context extensions are unsupported rather than assumed harmless.
+
+A factory proof covers construction only. The model report states that the deferred body is checked
+only when polled. A root that polls once covers that poll and reachable cancellation; code after a
+pending await is checked when a later poll reaches it. Available coroutine drop glue executes the
+same saved-local mapping and actual destructors. There is no automatic scheduler analysis or
+induction over arbitrary coroutine state in this stage. Unsupported operations and exhausted
+execution budgets remain UNKNOWN. Fixtures include nested futures, shared slots, mutable captures,
+cancellation effects/panics, completion checks, mutations and native replay. A binary main fixture
+checks its resumed async body, including a refuted index mutation.

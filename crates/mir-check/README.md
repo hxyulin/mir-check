@@ -482,3 +482,21 @@ empty comparisons invoke no element body. Equal-length paths must establish a le
 fixtures check numeric guards, prefix views, custom effects and receiver order, reachable and
 skipped panics, and mutations with native replay. Arbitrary unbounded equality and general range
 indexing still return UNKNOWN. These models are not part of the induction translator.
+
+Constructed async futures now execute their lowered poll MIR. Compiler layouts map variant fields
+onto shared saved-local slots, and captures retain tracked references. Polling can suspend and
+resume, including nested futures and mutable captures; compiler completion-state assertions and
+available cancellation drop glue are checked. Saved locals begin uninitialized and cannot be read
+before assignment. Layouts have at most 64 states and 512 capture/saved-local slots.
+
+A proof of an async factory covers future construction. Its deferred body is checked only when
+polled by the analyzed root; construction models say this explicitly. Host/ARM debug and optimized
+fixtures cover repeated suspensions, later panics, cancellation effects and panics, completed-future
+polls, and source mutations with native replay. A standalone binary fixture checks from main and
+rejects an out-of-bounds index in the resumed body.
+
+Core task contexts are opaque valid values. The compiler's exact Context/NonNull adapter preserves
+tracked mutable references, and core Pin<&mut T> mutable dereference preserves its pointer. Noop
+waker and context construction have explicit compiler-identified models. Waker observations and
+operations, arbitrary coroutine root inputs, unsupported saved values and unbounded async polling
+remain UNKNOWN. Executor infrastructure is not modeled by this support.

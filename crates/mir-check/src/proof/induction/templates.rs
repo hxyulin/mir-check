@@ -32,6 +32,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::StaticText
                 | Value::FormatArguments
                 | Value::Input(_)
+                | Value::Uninitialized
                 | Value::Function
                 | Value::Unit => Err("inductive indexed storage is unsupported".into()),
             },
@@ -178,6 +179,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Uninitialized
             | Value::Function
             | Value::Unit => Ok(value.clone()),
             Value::Input(_) => Err("lazy input snapshots are not supported by induction".into()),

@@ -136,7 +136,7 @@ impl<'tcx> Engine<'tcx> {
     }
 
     pub(super) fn aggregate(
-        &self,
+        &mut self,
         id: DefId,
         body: &Body<'tcx>,
         state: &State,
@@ -151,6 +151,7 @@ impl<'tcx> Engine<'tcx> {
             self.validate_tracked_value(value, state)?;
         }
         match kind {
+            AggregateKind::Coroutine(id, args) => self.construct_coroutine(*id, args, values),
             AggregateKind::Array(element) if *element == self.tcx.types.u8 => {
                 if values.len() as u64 > MAX_ARRAY_BYTES {
                     return Err("byte array model size limit reached".to_owned());

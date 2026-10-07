@@ -146,6 +146,7 @@ impl InputValue {
 impl Value {
     pub fn materialize(&self) -> Result<Value, String> {
         match self {
+            Self::Uninitialized => Err("read of an uninitialized coroutine saved local".to_owned()),
             Self::Input(input) => input.materialize(),
             value => Ok(value.clone()),
         }

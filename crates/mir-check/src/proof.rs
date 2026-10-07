@@ -20,6 +20,7 @@ mod aggregates;
 mod array_equality;
 mod builtins;
 mod constants;
+mod coroutines;
 mod external;
 mod floating_intrinsics;
 mod induction;
@@ -292,6 +293,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Uninitialized
             | Value::Function => {
                 return Err("argument binding is unsupported".to_owned());
             }
@@ -432,6 +434,24 @@ impl<'tcx> Engine<'tcx> {
         if let Some(bits) = self.float_type(ty) {
             let raw = self.fresh(Sort::BitVec(bits));
             return Ok(symbolic::float_from_bits(&self.terms, raw, bits));
+        }
+        if self.is_task_context(ty) {
+            let context = self
+                .tcx
+                .lang_items()
+                .get(LangItem::Context)
+                .ok_or("compiler task context identity is unavailable")?;
+            self.record_model(
+                context,
+                "opaque valid task context; waker operations are unsupported",
+            );
+            return Ok(Value::Adt {
+                name: "opaque task context".to_owned(),
+                variant: 0,
+                is_option: false,
+                discriminant: 0,
+                fields: Vec::new(),
+            });
         }
         match ty.kind() {
             ty::Bool => Ok(Value::Bool(self.fresh(Sort::Bool))),
@@ -616,13 +636,14 @@ impl<'tcx> Engine<'tcx> {
         {
             return Err(self.missing_body_reason(instance.def_id()));
         }
-        let body = instance
+        let mut body = instance
             .try_instantiate_mir_and_normalize_erasing_regions(
                 self.tcx,
                 ty::TypingEnv::fully_monomorphized(),
                 ty::EarlyBinder::bind(self.tcx, self.tcx.instance_mir(instance.def).clone()),
             )
             .map_err(|error| format!("MIR substitution failed: {error:?}"))?;
+        self.flatten_coroutine_places(&mut body)?;
         let body = std::rc::Rc::new(body);
         let mut bodies = self.bodies.borrow_mut();
         if bodies.len() >= 128 {
@@ -1018,6 +1039,7 @@ impl<'tcx> Engine<'tcx> {
                     }
                     if matches!(instance.def, ty::InstanceKind::Item(_))
                         && self.tcx.def_kind(callee) == DefKind::Closure
+                        && self.tcx.coroutine_kind(callee).is_none()
                     {
                         let [closure, Value::Tuple(parameters)] = values.as_slice() else {
                             return Err(
@@ -1118,6 +1140,10 @@ impl<'tcx> Engine<'tcx> {
                 let value = self.rvalue(id, body, state, value)?;
                 self.write(state, *place, value)
             }
+            StatementKind::SetDiscriminant {
+                place,
+                variant_index,
+            } => self.set_coroutine_state(body, state, **place, variant_index.as_usize()),
             StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
                 if let Some(allocation) = state.addresses[local.as_usize()].take() {
                     state.memory[allocation] = None;
@@ -1474,6 +1500,9 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::Cast(CastKind::Transmute, operand, target) => {
                 let source = operand.ty(&body.local_decls, self.tcx);
                 let value = self.operand(id, body, state, operand)?;
+                if let Some(value) = self.context_transmute(source, *target, &value)? {
+                    return Ok(value);
+                }
                 if let Some(bits) = self.float_type(source)
                     && let Some((target_bits, signed)) = self.integer_type(*target)
                     && target_bits == bits

@@ -23,7 +23,10 @@ const ENTRIES: &[(&str, ProofStatus)] = &[
     ("wrong_field_order", ProofStatus::Refuted),
     ("wrong_mutable_guard_effect", ProofStatus::Refuted),
     ("slice_destructor_is_unsupported", ProofStatus::Unknown),
-    ("coroutine_drop_is_unsupported", ProofStatus::Unknown),
+    (
+        "unpolled_coroutines_do_not_construct_body_locals",
+        ProofStatus::Proved,
+    ),
 ];
 
 #[test]

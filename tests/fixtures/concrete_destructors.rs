@@ -156,12 +156,16 @@ pub fn slice_destructor_is_unsupported() {
     let _records = [Record { log: &log, digit: 2 }, Record { log: &log, digit: 3 }];
 }
 
-pub fn coroutine_drop_is_unsupported() {
+pub fn unpolled_coroutines_do_not_construct_body_locals() {
     let log = Cell::new(0);
-    let _future = async move {
-        let _record = Record { log: &log, digit: 2 };
-        core::future::pending::<()>().await;
-    };
+    {
+        let log = &log;
+        let _future = async move {
+            let _record = Record { log, digit: 2 };
+            core::future::pending::<()>().await;
+        };
+    }
+    assert!(log.get() == 0);
 }
 
 #[cfg(test)]
@@ -173,6 +177,7 @@ mod tests {
     #[test]
     fn actual_destructors_preserve_effects_order_and_moves() {
         destructor_then_fields();
+        unpolled_coroutines_do_not_construct_body_locals();
         tuple_fields_in_order();
         mutable_guard_effects();
         moving_a_field_drops_it_once();

@@ -4216,9 +4216,40 @@ fn main_selection_does_not_treat_coroutine_construction_as_execution_and_lists_m
         .arg(&directory.0)
         .output()
         .unwrap();
-    assert!(!output.status.success());
+    assert!(output.status.success());
     let report: Report = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report.coverage.unknown, 1);
+    assert_eq!(report.coverage.proved, 1);
+    let proof = report
+        .functions
+        .iter()
+        .find(|function| function.name == "main")
+        .unwrap()
+        .proof
+        .as_ref()
+        .unwrap();
+    assert!(
+        !proof
+            .analyzed_bodies
+            .iter()
+            .any(|body| body.starts_with("task::{closure"))
+    );
+    assert!(proof.models.iter().any(|model| {
+        model.contains("coroutine construction; execution is checked only when polled")
+    }));
+    let compiler = Path::new(env!("MIR_CHECK_SYSROOT")).join("bin/rustc");
+    let executable = directory.0.join("native-main");
+    assert!(
+        Command::new(compiler)
+            .arg("--edition=2024")
+            .arg(&source)
+            .arg("-o")
+            .arg(&executable)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(Command::new(executable).output().unwrap().status.success());
     std::fs::write(&source, "pub fn generated_main() {}\n").unwrap();
     let output = analyze_from(&source, &directory, &["--verify", "--entry", "main"], &[]);
     assert!(!output.status.success());

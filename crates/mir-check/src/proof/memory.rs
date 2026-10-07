@@ -792,6 +792,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::Atomic { .. }
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Uninitialized
             | Value::Function
             | Value::Unit => Ok(()),
         }

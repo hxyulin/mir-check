@@ -194,6 +194,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Uninitialized
             | Value::Function
             | Value::Unit => {
                 return Err("slice membership storage is not modeled".to_owned());
