@@ -82,10 +82,13 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Drop | Concrete synchronous rustc drop glue executes user destructors and ordered aggregate field drops | Pointer-based array/slice glue, coroutine drops, unwinding and induction drops remain UNKNOWN |
 | MIR assume | Prove its predicate as a validity obligation | Never turn it into an unchecked assumption |
 
-The execution budget is 8,192 steps per root, including callees, iterator model steps and infeasible
-queued branches. Call depth is 16 active frames; recursion can finish within the same limits.
-Queries have at most 200,000 bytes, a five-second solver timeout and a six-second host deadline per
-default solver request. Exceeding a limit returns UNKNOWN. The root budget remains 30 seconds.
+The default execution budget is 8,192 steps per root, including callees, iterator model steps and
+infeasible
+queued branches. The default call depth is 16 active frames; recursion can finish within the same
+limits.
+By default, queries have at most 200,000 bytes, a five-second solver timeout and a six-second host
+deadline per
+default solver request. Exceeding a limit returns UNKNOWN. The default root budget is 30 seconds.
 Root-local solver sessions retain common assertions with push/pop and reset incompatible declaration
 namespaces. Exact-query caching, Boolean/bit-vector folding, exact complementary integer guards
 and a full-Instance MIR cache reduce repeated work. Floating-point ordering keeps its NaN behavior.
@@ -418,3 +421,10 @@ mutation. Solver tests distinguish SAT inductive models from SAT counterexamples
 resets between Horn and ordinary queries. Raw reports store inductive models separately in
 invariants. Horn UNSAT and timeouts remain UNKNOWN pending Rust counterexample replay. See [loop
 execution and limits](proofs.md#loops-and-limits) for the supported operations and budgets.
+
+Both CLIs configure steps, call depth, query bytes, root seconds and solver milliseconds.
+Reports retain the selected analysis_limits; old reports do not invent historical settings.
+Host/ARM tests cover low-budget UNKNOWN results, completed bounded work at larger limits,
+late failures and a mutated deep callee. Horn queries carry the selected timeout and byte cap;
+a stalled persistent session is killed under its configured deadline. Input and model shape
+limits remain independent. See [analysis budgets](usage.md#analysis-budgets).

@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use mir_check::cli::{Color, Progress};
-use mir_check::{ContractConfig, Report};
+use mir_check::limits::LimitOption;
+use mir_check::{AnalysisLimits, ContractConfig, Report};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
@@ -40,7 +41,8 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
             Refuted roots stop at their first counterexample; --all-failures continues them.\n\
             Default output is compact; --verbose shows the full inventory and obligations.\n\
-            cargo mir-check report <file or directory> reads saved JSON/JSONL reports."
+            cargo mir-check report <file or directory> reads saved JSON/JSONL reports.\n\n{}",
+            mir_check::limits::HELP
         );
         return Ok(ExitCode::SUCCESS);
     }
@@ -55,10 +57,23 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut allow_assumptions = false;
     let mut all_failures = false;
     let mut induction = false;
+    let mut limits = AnalysisLimits::default();
     let mut cargo_args = Vec::new();
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.to_str() {
+            Some(value) if LimitOption::parse(value).is_some() => {
+                let (option, inline) = LimitOption::parse(value).expect("matched limit option");
+                let value = match inline {
+                    Some(value) => value.to_owned(),
+                    None => args
+                        .next()
+                        .ok_or_else(|| format!("{} needs a value", option.flag()))?
+                        .into_string()
+                        .map_err(|_| format!("{} needs a UTF-8 integer", option.flag()))?,
+                };
+                option.apply(&mut limits, &value)?;
+            }
             Some("--verify") => verify = true,
             Some("--summary") => verbose = false,
             Some("--verbose") => verbose = true,
@@ -138,6 +153,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env("MIR_CHECK_REPORT_DIR", &reports)
         .env("MIR_CHECK_ENTRIES", serde_json::to_string(&entries)?)
         .env("CARGO_INCREMENTAL", "0");
+    command.env("MIR_CHECK_LIMITS", serde_json::to_string(&limits)?);
     command.env("MIR_CHECK_COLOR", color.argument());
     if quiet {
         command.env("MIR_CHECK_QUIET", "1");

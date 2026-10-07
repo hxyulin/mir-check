@@ -23,12 +23,26 @@ pub struct System {
 
 impl System {
     pub fn smt(&self, context: &Context, max_bytes: usize) -> Result<String, String> {
+        self.smt_with_timeout(context, max_bytes, 5000)
+    }
+
+    pub fn smt_with_timeout(
+        &self,
+        context: &Context,
+        max_bytes: usize,
+        timeout_ms: u32,
+    ) -> Result<String, String> {
+        if timeout_ms == 0 {
+            return Err("Horn solver timeout must be positive".into());
+        }
         let mut output = String::new();
         append(
             &mut output,
-            "(set-logic HORN)\n(set-option :fp.engine spacer)\n\
+            &format!(
+                "(set-logic HORN)\n(set-option :fp.engine spacer)\n\
              (set-option :fp.xform.bit_blast false)\n(set-option :pp.max_indent 0)\n\
-             (set-option :timeout 5000)\n",
+             (set-option :timeout {timeout_ms})\n"
+            ),
             max_bytes,
         )?;
         for (index, sorts) in self.relations.iter().enumerate() {

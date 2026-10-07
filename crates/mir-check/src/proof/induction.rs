@@ -114,7 +114,7 @@ impl<'tcx> Engine<'tcx> {
             if !visited.insert((frame_index, block)) {
                 continue;
             }
-            if self.started.elapsed().as_secs() >= MAX_ROOT_SECONDS {
+            if self.started.elapsed().as_secs() >= self.limits.root_timeout_secs {
                 return Err("loop translation exceeded the root time budget".into());
             }
             let frame = frames[frame_index].clone();
@@ -275,8 +275,11 @@ impl<'tcx> Engine<'tcx> {
                         depth += 1;
                         ancestor = frames[index].resume.as_ref().map(|resume| resume.caller);
                     }
-                    if depth >= MAX_CALL_DEPTH {
-                        return Err("inductive call graph exceeds the 16-frame depth limit".into());
+                    if depth >= self.limits.max_call_depth {
+                        return Err(format!(
+                            "inductive call graph exceeds the {}-frame depth limit",
+                            self.limits.max_call_depth
+                        ));
                     }
                     let mut values = Vec::new();
                     for argument in args {
@@ -361,7 +364,11 @@ impl<'tcx> Engine<'tcx> {
                 pending.push((frame_index, target));
             }
         }
-        let query = system.smt(&self.terms, MAX_QUERY_BYTES)?;
+        let query = system.smt_with_timeout(
+            &self.terms,
+            self.limits.max_query_bytes,
+            self.limits.solver_timeout_ms,
+        )?;
         let result = self.solver.borrow_mut().inductive_model(&query);
         let (status, detail) = match result {
             Ok(model) => {

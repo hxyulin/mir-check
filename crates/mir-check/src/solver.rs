@@ -1,3 +1,4 @@
+use mir_check::AnalysisLimits;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -5,11 +6,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(6);
 const MAX_OUTPUT_BYTES: usize = 262_144;
 const MAX_CACHE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CACHE_ENTRIES: usize = 1024;
-const MAX_QUERY_BYTES: usize = 200_000;
 
 #[cfg(test)]
 pub(crate) mod ground;
@@ -40,6 +39,7 @@ impl Query {
         let mut seen = std::collections::HashSet::new();
         let mut query = Self::from_assertions(
             declarations,
+            AnalysisLimits::default().solver_timeout_ms,
             conditions
                 .iter()
                 .map(String::as_str)
@@ -52,11 +52,12 @@ impl Query {
 
     fn from_assertions<'a>(
         declarations: &[String],
+        timeout_ms: u32,
         assertions: impl Iterator<Item = &'a str>,
     ) -> Self {
         let assertions = assertions.map(str::to_owned).collect();
         let mut query = Self {
-            text: prelude().to_owned(),
+            text: prelude(timeout_ms),
             declarations: declarations.to_vec(),
             assertions,
             ground: None,
@@ -77,12 +78,30 @@ impl Query {
         &self.text
     }
 
+    #[cfg(test)]
     pub fn from_terms(
         context: &mir_check::smt::Context,
         conditions: &[mir_check::smt::Term],
         failure: &mir_check::smt::Term,
         bindings: &std::collections::BTreeMap<u32, mir_check::smt::Term>,
     ) -> Result<Self, String> {
+        Self::from_terms_with_limits(
+            context,
+            conditions,
+            failure,
+            bindings,
+            AnalysisLimits::default(),
+        )
+    }
+
+    pub fn from_terms_with_limits(
+        context: &mir_check::smt::Context,
+        conditions: &[mir_check::smt::Term],
+        failure: &mir_check::smt::Term,
+        bindings: &std::collections::BTreeMap<u32, mir_check::smt::Term>,
+        limits: AnalysisLimits,
+    ) -> Result<Self, String> {
+        limits.validate()?;
         use mir_check::smt::Sort;
         let mut pending: Vec<_> = conditions.iter().chain([failure]).collect();
         let mut included = std::collections::BTreeSet::new();
@@ -103,7 +122,7 @@ impl Query {
             .chain(included.into_iter().map(|symbol| &bindings[&symbol]))
             .chain([failure])
             .collect();
-        let mut query = Self::from_term_assertions(context, &terms)?;
+        let mut query = Self::from_term_assertions(context, &terms, limits)?;
         if query.ground != Some(false)
             && failure.constant().is_none()
             && !failure.uses_floating_point()
@@ -114,7 +133,9 @@ impl Query {
                 .filter(|term| !term.uses_floating_point())
                 .collect();
             if non_float.len() < terms.len() {
-                query.non_float = Some(Box::new(Self::from_term_assertions(context, &non_float)?));
+                query.non_float = Some(Box::new(Self::from_term_assertions(
+                    context, &non_float, limits,
+                )?));
             }
         }
         Ok(query)
@@ -123,6 +144,7 @@ impl Query {
     fn from_term_assertions(
         context: &mir_check::smt::Context,
         terms: &[&mir_check::smt::Term],
+        limits: AnalysisLimits,
     ) -> Result<Self, String> {
         use mir_check::smt::{Constant, Sort};
         let mut seen = std::collections::HashSet::new();
@@ -138,13 +160,13 @@ impl Query {
         let declarations = context.declarations_for(&symbols)?;
         let mut positive = std::collections::HashSet::new();
         let mut negative = std::collections::HashSet::new();
-        let mut bytes = prelude().len()
+        let mut bytes = prelude(limits.solver_timeout_ms).len()
             + "(check-sat)\n".len()
             + declarations
                 .iter()
                 .map(|line| line.len() + 1)
                 .sum::<usize>();
-        if bytes > MAX_QUERY_BYTES {
+        if bytes > limits.max_query_bytes {
             return Err("symbolic query size limit reached".to_owned());
         }
         for term in terms {
@@ -169,7 +191,8 @@ impl Query {
                 None => {}
             }
             if seen.insert(term.id()) {
-                let budget = MAX_QUERY_BYTES
+                let budget = limits
+                    .max_query_bytes
                     .checked_sub(bytes + "(assert )\n".len())
                     .ok_or("symbolic query size limit reached")?;
                 let text = term
@@ -179,14 +202,20 @@ impl Query {
                 assertions.push(text);
             }
         }
-        let mut query = Self::from_assertions(&declarations, assertions.iter().map(String::as_str));
+        let mut query = Self::from_assertions(
+            &declarations,
+            limits.solver_timeout_ms,
+            assertions.iter().map(String::as_str),
+        );
         query.ground = ground;
         Ok(query)
     }
 }
 
-fn prelude() -> &'static str {
-    "(set-logic ALL)\n(set-option :timeout 5000)\n(set-option :pp.bv-literals false)\n"
+fn prelude(timeout_ms: u32) -> String {
+    format!(
+        "(set-logic ALL)\n(set-option :timeout {timeout_ms})\n(set-option :pp.bv-literals false)\n"
+    )
 }
 
 #[derive(Default)]
@@ -203,10 +232,17 @@ pub struct Solver {
     cache_bytes: usize,
     context: Option<Context>,
     failed_feasibility_query: Option<String>,
+    limits: AnalysisLimits,
 }
 
 impl Default for Solver {
     fn default() -> Self {
+        Self::with_limits(AnalysisLimits::default())
+    }
+}
+
+impl Solver {
+    pub fn with_limits(limits: AnalysisLimits) -> Self {
         let custom = std::env::var_os("MIR_CHECK_Z3");
         let local = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.venv/bin/z3");
         let executable = custom.clone().map(PathBuf::from).unwrap_or_else(|| {
@@ -224,6 +260,7 @@ impl Default for Solver {
             cache_bytes: 0,
             context: None,
             failed_feasibility_query: None,
+            limits,
         }
     }
 }
@@ -232,7 +269,7 @@ impl Solver {
     /// HORN satisfiability means the safety clauses have an inductive model.
     /// It has the opposite interpretation to a SAT counterexample query.
     pub fn inductive_model(&mut self, query: &str) -> Result<String, String> {
-        if query.len() > MAX_QUERY_BYTES {
+        if query.len() > self.limits.max_query_bytes {
             return Err("Horn query size limit reached".into());
         }
         self.context = None;
@@ -323,7 +360,12 @@ impl Solver {
             }
             Ok(Decision::Sat) => {
                 let model = if self.custom {
-                    run(&self.executable, &format!("{query}\n(get-model)\n")).and_then(|output| {
+                    run(
+                        &self.executable,
+                        &format!("{query}\n(get-model)\n"),
+                        self.limits,
+                    )
+                    .and_then(|output| {
                         output
                             .strip_prefix("sat\n")
                             .map(str::to_owned)
@@ -354,7 +396,7 @@ impl Solver {
         structured: Option<&Query>,
     ) -> Result<Decision, String> {
         let output = if self.custom {
-            run(&self.executable, query)?
+            run(&self.executable, query, self.limits)?
         } else if let Some(query) = structured {
             self.incremental(query)?
         } else {
@@ -380,7 +422,7 @@ impl Solver {
             .is_none_or(|context| !query.declarations.starts_with(&context.declarations))
         {
             commands.push_str("(reset)\n");
-            commands.push_str(prelude());
+            commands.push_str(&prelude(self.limits.solver_timeout_ms));
             // Symbols outlive assertion scopes, so adding one does not discard the
             // shared prefix. Standalone queries retain their ordinary declarations.
             commands.push_str("(set-option :global-decls true)\n");
@@ -412,7 +454,7 @@ impl Solver {
 
     fn request(&mut self, commands: &str) -> Result<String, String> {
         if self.session.is_none() {
-            match Session::start(&self.executable) {
+            match Session::start(&self.executable, self.limits.solver_host_timeout()) {
                 Ok(session) => self.session = Some(session),
                 Err(error) => {
                     self.context = None;
@@ -476,10 +518,11 @@ struct Session {
     commands: Sender<String>,
     events: Receiver<Event>,
     sequence: u64,
+    timeout: Duration,
 }
 
 impl Session {
-    fn start(executable: &PathBuf) -> Result<Self, String> {
+    fn start(executable: &PathBuf, timeout: Duration) -> Result<Self, String> {
         let mut child = Command::new(executable)
             .args(["-in", "-smt2"])
             .stdin(Stdio::piped())
@@ -533,13 +576,14 @@ impl Session {
             commands,
             events,
             sequence: 0,
+            timeout,
         })
     }
 
     fn request(&mut self, commands: &str) -> Result<String, String> {
         self.sequence += 1;
         let marker = format!("mir_check_response_{}", self.sequence);
-        let deadline = Instant::now() + REQUEST_TIMEOUT;
+        let deadline = Instant::now() + self.timeout;
         self.commands
             .send(format!("{commands}\n(echo \"{marker}\")\n"))
             .map_err(|error| format!("cannot send solver query: {error}"))?;
@@ -557,7 +601,8 @@ impl Session {
                 Ok(Event::Error(error)) => return Err(error),
                 Err(error) => {
                     return Err(format!(
-                        "solver response failed within six seconds: {error}"
+                        "solver response failed within {} milliseconds: {error}",
+                        self.timeout.as_millis()
                     ));
                 }
             }
@@ -572,9 +617,13 @@ impl Drop for Session {
     }
 }
 
-fn run(solver: &PathBuf, query: &str) -> Result<String, String> {
+fn run(solver: &PathBuf, query: &str, limits: AnalysisLimits) -> Result<String, String> {
     let mut child = Command::new(solver)
-        .args(["-in", "-smt2", "-T:6"])
+        .args(["-in", "-smt2"])
+        .arg(format!(
+            "-T:{}",
+            limits.solver_host_timeout().as_millis().div_ceil(1000)
+        ))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -791,6 +840,26 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(solver.session.is_none());
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_configured_host_deadline_kills_a_stalled_session_without_a_decision() {
+        let script = Script::new("exec sleep 20");
+        let limits = AnalysisLimits {
+            solver_timeout_ms: 20,
+            ..AnalysisLimits::default()
+        };
+        let mut solver = Solver {
+            executable: script.0.clone(),
+            ..Solver::with_limits(limits)
+        };
+        let started = Instant::now();
+        assert!(solver.request("(check-sat)\n").is_err());
+        assert!(started.elapsed() >= Duration::from_millis(1000));
+        assert!(started.elapsed() < Duration::from_secs(4));
+        assert!(solver.session.is_none());
+        assert!(solver.decisions.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -877,7 +946,7 @@ mod incremental_tests {
         assert!(solver.context.is_none());
         assert!(solver.feasible_query(&extended).unwrap());
         for query in [&initial, &extended, &other_branch, &impossible] {
-            let standalone = run(&solver.executable, query.text()).unwrap();
+            let standalone = run(&solver.executable, query.text(), solver.limits).unwrap();
             assert_eq!(
                 solver.feasible_query(query).unwrap(),
                 standalone.trim() == "sat"

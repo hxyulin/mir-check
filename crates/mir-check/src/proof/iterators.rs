@@ -506,7 +506,7 @@ impl<'tcx> Engine<'tcx> {
         memory: Vec<Option<Value>>,
     ) -> Result<Vec<Iteration>, String> {
         self.steps += 1;
-        if self.steps > MAX_STEPS {
+        if self.steps > self.limits.max_steps {
             return Err("symbolic execution step limit reached".to_owned());
         }
         let Value::SliceIterator {

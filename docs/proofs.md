@@ -134,10 +134,12 @@ Saved reports predating the flag read it as false.
 
 Loops repeat the interpreter over successive states. This can prove small finite domains, such as
 the fixed three-device CAN configurations, without a loop invariant. Every feasible iteration must
-finish. The execution budget is 8,192 steps per root, including dequeued blocks, local calls and
+finish. The default execution budget is 8,192 steps per root, including dequeued blocks, local calls
+and
 infeasible queued branches. Truncating unfinished paths would be unsound; reaching the budget
 returns unknown. Infinite loops and larger finite loops can therefore remain unknown even when they
-do not panic. Calls, including recursion, can use at most 16 active frames. Finite recursion can
+do not panic. Calls, including recursion, have a default limit of 16 active frames. Finite recursion
+can
 complete within those bounds; an unfinished recursive path returns unknown.
 
 The opt-in `--induction` mode translates cyclic concrete call graphs into constrained Horn
@@ -160,7 +162,7 @@ This first integration supports integer/Boolean locals, tuples, fixed byte array
 checked arithmetic, integer casts, branches, direct byte indexing/writes and loop exits. Scalar
 MIR statements use the existing typed term operations; byte indexing has an explicit Horn safety
 clause before a successful access. The translation is limited to 256 blocks and 512 scalar/array
-state parameters. The 200,000-byte script limit and five-second Z3/six-second host request limits
+state parameters. The default 200,000-byte script and five-second Z3/six-second host request limits
 still apply. There is no iteration limit inside an inductive proof.
 
 Cycle discovery follows concrete callee MIR as well as root backedges. An acyclic main or entry
@@ -266,7 +268,7 @@ changes presentation only; bit-blasting remains disabled and solver strategies/t
 unchanged.
 
 The 256-block budget now includes every translated call context, and each relation's 512-parameter
-budget includes captured caller state and contract snapshots. The call depth remains 16 frames.
+budget includes captured caller state and contract snapshots. The call-depth default is 16 frames.
 Some supported relational bit-vector queries crash or time out in Z3, which produces UNKNOWN. An
 experimental bit-level preprocessing strategy returned a false safety answer for the native-replayed
 12,000-iteration panic mutation. It was rejected; no such retry is enabled.
@@ -278,7 +280,8 @@ the mutated panics. A plain binary `main` also proves. The parser's packet is a 
 input, not a hardware read renewed each iteration. Actual async/executor firmware needs coroutine
 storage, call effects and shared/hardware state modeled before a whole-main proof is possible.
 
-Each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a six-second host
+By default, each SMT query is limited to 200,000 bytes, with a five-second solver timeout and a
+six-second host
 deadline per solver request. Reaching these limits is a verification failure. A root lazily starts
 one Z3 process. Structured queries retain common assertion prefixes, pop the old branch suffix and
 push new assertions. Live declarations are global, so extending the namespace retains shared
@@ -330,7 +333,8 @@ The folder is part of the trusted implementation and has differential tests agai
 string evaluator remains test-only for protocol regressions; production proofs do not use it.
 
 Setting MIR_CHECK_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
-existing -T:6 process option. This compatibility path relies on the executable honoring that
+process timeout option (-T:6 with default limits). This compatibility path relies on the executable
+honoring that
 option; the default persistent backend enforces the host deadline independently.
 
 ## What is trusted and missing
@@ -452,8 +456,10 @@ Postcondition parameter names refer to entry snapshots. The `final_<parameter>` 
 the argument's state at return, for example final_state.count or final_self.integral. Parameter
 names beginning final_ are reserved when a function declares postconditions. Compiler-generated
 metadata-only raw pointers support length extraction; they cannot be dereferenced as data pointers.
-Storage is limited to 512 allocations per path. A 30-second root budget is checked before solver
-queries; an in-flight query remains subject to the existing five/six-second solver/process limits.
+Storage is limited to 512 allocations per path. A default 30-second root budget is checked before
+solver
+queries; an in-flight query remains subject to the configured solver/process limits (five/six
+seconds by default).
 Exhaustion returns UNKNOWN, so expensive floating-point path exploration cannot run indefinitely.
 
 ## Cells and atomic counters

@@ -259,9 +259,10 @@ global, so adding symbols retains shared scopes; incompatible namespaces reset t
 standalone SMT scripts remain in reports. Feasibility checks omit unused counterexample models.
 Refutations obtain their model in the same query context. Exact-query decisions are cached within a
 root, with at most 1,024 entries or two MiB of query text; unknown responses are never cached. A
-six-second host deadline covers pipe writes and reads, and failures discard the session.
-MIR_CHECK_Z3 keeps the existing custom one-shot protocol, which relies on the executable's -T:6
-timeout option. No proofs are reused across compiler invocations.
+host deadline of the solver timeout plus one second covers pipe writes and reads, and failures
+discard the session.
+MIR_CHECK_Z3 keeps the existing custom one-shot protocol, which relies on the executable's process
+timeout option (-T:6 by default). No proofs are reused across compiler invocations.
 
 A bounded in-process evaluator decides fully constant Boolean/bit-vector queries and validates
 the whole script before returning an answer. It supports exact wrapping arithmetic, bitwise
@@ -327,7 +328,8 @@ also borrow their actual environment. Typed aggregate references allow supported
 and user structs/tuples to preserve reference identity without new assumed summaries.
 
 Execution defaults are 8,192 steps and 16 active call frames, including bounded recursive calls.
-Incomplete loops/recursion return UNKNOWN; the 30-second root and 200,000-byte query limits remain.
+Incomplete loops/recursion return UNKNOWN; the default root/query limits are 30 seconds and 200,000
+bytes.
 Exact Boolean/bit-vector folding simplifies closed MIR expressions before building longer terms. A
 root-local cache stores up to 128 normalized instantiated bodies, keyed by the full compiler
 Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes or
@@ -464,3 +466,11 @@ budgets are unchanged.
 A solver preprocessing experiment was rejected after a native-replayed late-panic mutation received
 a false safety answer. The checker retains the ordinary Spacer encoding, and scalar relational
 queries that crash or time out in Z3 remain UNKNOWN. No bit-level retry strategy is enabled.
+
+Analysis budgets can be configured through both CLIs: --max-steps, --max-call-depth,
+--max-query-bytes, --root-timeout-secs and --solver-timeout-ms. Values must be positive;
+defaults preserve existing behavior. Ordinary execution and induction use the configured query,
+call and time limits; step limits apply to ordinary execution. Reports record analysis_limits,
+while older reports retain an unknown historical configuration. Rechecking uses fresh options.
+Input, allocation and library-model shape caps remain implementation bounds. Exhausted or
+unsupported analysis remains UNKNOWN. See [analysis budgets](../../docs/usage.md#analysis-budgets).

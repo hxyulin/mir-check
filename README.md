@@ -237,8 +237,10 @@ Refuted roots stop at their first counterexample while the other selected roots 
 the first failing query and model and indicate when exploration stopped early.
 
 The default execution limits are 8,192 steps and 16 active call frames per root. Finite recursion
-can complete within those limits; unfinished paths remain UNKNOWN. Each root retains a 30-second
-budget and a 200,000-byte query limit. Incremental solver scopes, exact constant folding and a
+can complete within those limits; unfinished paths remain UNKNOWN. Root/query defaults are 30
+seconds
+and 200,000 bytes. Both CLIs support [configurable budgets](docs/usage.md#analysis-budgets).
+Incremental solver scopes, exact constant folding and a
 root-local instantiated MIR cache reduce repeated work without assuming function summaries.
 
 Experimental `--induction` uses Z3 Spacer to prove supported cyclic root bodies without unrolling

@@ -237,6 +237,34 @@ The display clearly labels these as saved results; it does not validate the proo
 or establish a new proof. Stored REFUTED/UNKNOWN results produce a nonzero exit, and conditional
 results require --allow-assumptions, just as in analysis mode.
 
+## Analysis budgets
+
+Both CLIs accept these positive integer options, as `--option VALUE` or `--option=VALUE`:
+
+| Option | Default | Applies to |
+| --- | ---: | --- |
+| `--max-steps` | 8192 | Ordinary execution, including callees and modeled iterator steps |
+| `--max-call-depth` | 16 | Ordinary call frames and the inductive call graph |
+| `--max-query-bytes` | 200000 | Complete ordinary and Horn SMT scripts |
+| `--root-timeout-secs` | 30 | Analysis time checked before queries and during loop translation |
+| `--solver-timeout-ms` | 5000 | Each Z3 query, including Spacer induction |
+
+The default persistent backend enforces a host deadline of the solver timeout plus one second,
+covering pipe writes and reads. A query already in flight can outlast the remaining root budget.
+Induction does not unroll the loop and therefore does not consume the ordinary iteration budget.
+Input shape, allocation and individual library-model limits remain separate implementation bounds.
+Reaching a budget remains UNKNOWN. Increasing a budget cannot bypass unsupported behavior.
+
+```sh
+mir-check --verify --induction --from-report invocation.json --entry main \
+  --max-steps 32768 --max-call-depth 32 --root-timeout-secs 120 \
+  --solver-timeout-ms 15000 --max-query-bytes 1000000
+```
+
+New reports record the effective settings in `analysis_limits`. Older reports leave that field
+absent or null; their historical limits are not inferred. Rechecking a report reuses compiler
+arguments and takes analysis budgets from the new command, rather than the saved settings.
+
 ## Direct whole-crate and main checks
 
 `mir-check --verify -- <rustc arguments>` already checks every inventoried body in the selected

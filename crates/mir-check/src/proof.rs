@@ -13,12 +13,8 @@ use rustc_span::Span;
 use rustc_span::def_id::DefId;
 use std::collections::{BTreeMap, VecDeque};
 
-const MAX_STEPS: usize = 8192;
-const MAX_CALL_DEPTH: usize = 16;
-const MAX_QUERY_BYTES: usize = 200_000;
 const MAX_INPUT_DEPTH: usize = 16;
 const MAX_INPUT_VALUES: usize = 512;
-const MAX_ROOT_SECONDS: u64 = 30;
 
 mod aggregates;
 mod array_equality;
@@ -66,6 +62,7 @@ struct Engine<'tcx> {
     config: mir_check::ContractConfig,
     all_failures: bool,
     induction: bool,
+    limits: mir_check::AnalysisLimits,
     resolved_contracts: BTreeMap<String, DefId>,
     solver: std::cell::RefCell<Solver>,
     bodies:
@@ -78,6 +75,7 @@ pub fn verify(
     config: &mir_check::ContractConfig,
     all_failures: bool,
     induction: bool,
+    limits: mir_check::AnalysisLimits,
 ) -> Proof {
     let mut engine = Engine {
         tcx,
@@ -94,8 +92,9 @@ pub fn verify(
         config: config.clone(),
         all_failures,
         induction,
+        limits,
         resolved_contracts: BTreeMap::new(),
-        solver: std::cell::RefCell::new(Solver::default()),
+        solver: std::cell::RefCell::new(Solver::with_limits(limits)),
         bodies: std::cell::RefCell::new(std::collections::HashMap::new()),
         proof: Proof {
             status: ProofStatus::Proved,
@@ -247,11 +246,11 @@ impl<'tcx> Engine<'tcx> {
             }
             Value::Int { expression, .. }
             | Value::Float { expression, .. }
-            | Value::Bool(expression) => expression.smt(MAX_QUERY_BYTES)?,
+            | Value::Bool(expression) => expression.smt(self.limits.max_query_bytes)?,
             Value::Bytes { length, data } => format!(
                 "len={}, data={}",
-                length.integer()?.0.smt(MAX_QUERY_BYTES)?,
-                data.smt(MAX_QUERY_BYTES)?
+                length.integer()?.0.smt(self.limits.max_query_bytes)?,
+                data.smt(self.limits.max_query_bytes)?
             ),
             Value::Adt { fields, .. } => {
                 for (field, value) in fields {
@@ -527,11 +526,20 @@ impl<'tcx> Engine<'tcx> {
     }
 
     fn query(&self, conditions: &[Term], failure: &Term) -> Result<Query, String> {
-        if self.started.elapsed().as_secs() >= MAX_ROOT_SECONDS {
-            return Err("symbolic root exceeded the 30-second execution budget".to_owned());
+        if self.started.elapsed().as_secs() >= self.limits.root_timeout_secs {
+            return Err(format!(
+                "symbolic root exceeded the {}-second execution budget",
+                self.limits.root_timeout_secs
+            ));
         }
-        let query = Query::from_terms(&self.terms, conditions, failure, &self.float_encodings)?;
-        if query.text().len() > MAX_QUERY_BYTES {
+        let query = Query::from_terms_with_limits(
+            &self.terms,
+            conditions,
+            failure,
+            &self.float_encodings,
+            self.limits,
+        )?;
+        if query.text().len() > self.limits.max_query_bytes {
             return Err("symbolic query size limit reached".to_owned());
         }
         Ok(query)
@@ -632,10 +640,11 @@ impl<'tcx> Engine<'tcx> {
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
         let id = instance.def_id();
-        if stack.len() >= MAX_CALL_DEPTH {
-            return Err(
-                "16-frame call-depth limit reached; recursion may require an invariant".to_owned(),
-            );
+        if stack.len() >= self.limits.max_call_depth {
+            return Err(format!(
+                "{}-frame call-depth limit reached; recursion may require an invariant",
+                self.limits.max_call_depth
+            ));
         }
         let mut stack = stack.to_vec();
         stack.push(id);
@@ -689,7 +698,7 @@ impl<'tcx> Engine<'tcx> {
         let mut returns = Vec::new();
         while let Some((block, mut state)) = queue.pop_front() {
             self.steps += 1;
-            if self.steps > MAX_STEPS {
+            if self.steps > self.limits.max_steps {
                 return Err("symbolic execution step limit reached".to_owned());
             }
             state.conditions.retain(|condition| {

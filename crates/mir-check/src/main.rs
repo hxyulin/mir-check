@@ -12,8 +12,10 @@ extern crate rustc_middle;
 extern crate rustc_span;
 
 use mir_check::cli::{Color, Progress};
+use mir_check::limits::LimitOption;
 use mir_check::{
-    Contract, ContractConfig, ContractKind, ContractStatus, Function, ProofStatus, Report, Source,
+    AnalysisLimits, Contract, ContractConfig, ContractKind, ContractStatus, Function, ProofStatus,
+    Report, Source,
 };
 use rustc_attr_ir::HasAttrs;
 use rustc_driver::{Callbacks, Compilation};
@@ -49,6 +51,7 @@ struct Checker {
     allow_assumptions: bool,
     all_failures: bool,
     induction: bool,
+    limits: AnalysisLimits,
 }
 
 impl Callbacks for Checker {
@@ -63,6 +66,7 @@ impl Callbacks for Checker {
         tcx: TyCtxt<'tcx>,
     ) -> Compilation {
         let mut report = collect(tcx, &self.rustc_arguments);
+        report.analysis_limits = Some(self.limits);
         tcx.dcx().abort_if_errors();
         self.analysis_ran = true;
         let progress = Progress::new(
@@ -173,6 +177,7 @@ impl Callbacks for Checker {
                             &config,
                             self.all_failures,
                             self.induction,
+                            self.limits,
                         ));
                         completed += 1;
                         if function.proof.as_ref().is_some_and(|proof| {
@@ -315,6 +320,7 @@ fn collect(tcx: TyCtxt<'_>, arguments: &[String]) -> Report {
         coverage: mir_check::Coverage::default(),
         contract_config: None,
         matched_contracts: Vec::new(),
+        analysis_limits: None,
     }
 }
 
@@ -388,6 +394,13 @@ fn main() -> ExitCode {
     } else {
         Vec::new()
     };
+    let limits = match AnalysisLimits::from_environment() {
+        Ok(limits) => limits,
+        Err(error) => {
+            eprintln!("mir-check: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let mut checker = Checker {
         json: false,
         report_dir,
@@ -406,6 +419,7 @@ fn main() -> ExitCode {
         allow_assumptions: std::env::var_os("MIR_CHECK_ALLOW_ASSUMPTIONS").is_some(),
         all_failures: std::env::var_os("MIR_CHECK_ALL_FAILURES").is_some(),
         induction: std::env::var_os("MIR_CHECK_INDUCTION").is_some(),
+        limits,
     };
     let mut from_report = None;
     if checker.report_dir.is_some() {
@@ -430,12 +444,32 @@ fn main() -> ExitCode {
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
                 --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
                 Refuted roots stop at their first counterexample; --all-failures continues them.\n\
-                mir-check report <file or directory> reads saved JSON/JSONL reports."
+                mir-check report <file or directory> reads saved JSON/JSONL reports.\n\n{}",
+                mir_check::limits::HELP
             );
             return ExitCode::SUCCESS;
         }
         loop {
             match args.get(1).map(String::as_str) {
+                Some(value) if LimitOption::parse(value).is_some() => {
+                    let (option, inline) = LimitOption::parse(value).expect("matched limit option");
+                    let inline = inline.map(str::to_owned);
+                    args.remove(1);
+                    let value = match inline {
+                        Some(value) => value,
+                        None => {
+                            if args.get(1).is_none_or(|value| value.starts_with('-')) {
+                                eprintln!("mir-check: {} needs a value", option.flag());
+                                return ExitCode::FAILURE;
+                            }
+                            args.remove(1)
+                        }
+                    };
+                    if let Err(error) = option.apply(&mut checker.limits, &value) {
+                        eprintln!("mir-check: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
                 Some("--json") => {
                     checker.json = true;
                     args.remove(1);

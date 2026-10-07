@@ -2,8 +2,10 @@
 
 pub mod cli;
 mod config;
+pub mod limits;
 pub mod smt;
 pub use config::{ContractConfig, FunctionContract};
+pub use limits::AnalysisLimits;
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -26,6 +28,8 @@ pub struct Report {
     pub contract_config: Option<ContractConfig>,
     #[serde(default)]
     pub matched_contracts: Vec<String>,
+    #[serde(default)]
+    pub analysis_limits: Option<AnalysisLimits>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
