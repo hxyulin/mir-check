@@ -19,6 +19,7 @@ const MAX_INPUT_VALUES: usize = 512;
 mod aggregates;
 mod array_equality;
 mod atomic_intrinsics;
+mod atomic_rmw;
 mod builtins;
 mod call_metadata;
 mod constants;

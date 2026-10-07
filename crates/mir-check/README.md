@@ -198,7 +198,8 @@ paths can still exceed the budget.
 
 Compiler-identified scalar Cell new/get/set/replace models share allocation-backed writes through
 supported aliases and calls. Integer atomic constructors executed in analyzed MIR create distinct
-owned allocations. Local load/store/fetch_add/fetch_sub/swap and strong/weak CAS retain exact
+owned allocations. Local loads, stores, swaps, integer arithmetic/bitwise/extrema RMWs and
+strong/weak CAS retain exact
 history through aliases, analyzed calls and owned returns. RMW updates wrap without overflow panics.
 Weak CAS additionally permits spurious failure. Load/store and CAS ordering restrictions are
 checked, including symbolic Ordering arguments.
@@ -707,3 +708,9 @@ vectors, preserving Rust allocation identities, independent owned values and con
 snapshots. Reference validity and escape checks still inspect the complete value graph.
 Call and destructor continuations also take returned memory and conditions directly, avoiding a
 clone of the caller state that would immediately be discarded.
+
+Integer atomic RMWs include `fetch_add`, `fetch_sub`, `fetch_and`, `fetch_or`, `fetch_xor`,
+`fetch_nand`, `fetch_min` and `fetch_max`. Arithmetic wraps, NAND complements the entire integer
+width, and extrema respect signedness. They use one structural transition implementation for owned
+local and explicit startup histories. Shared or invalidated atomics still allow arbitrary old
+values; an RMW does not establish exclusivity. Boolean and pointer RMWs remain UNKNOWN.

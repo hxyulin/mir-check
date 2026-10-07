@@ -286,22 +286,22 @@ impl<'tcx> Engine<'tcx> {
                 signed,
             }));
         }
-        if !matches!(
-            name.as_str(),
-            "load"
-                | "store"
-                | "fetch_add"
-                | "fetch_sub"
-                | "swap"
-                | "compare_exchange"
-                | "compare_exchange_weak"
-        ) {
+        let rmw = atomic_rmw::AtomicRmw::from_method(name.as_str());
+        if rmw.is_none()
+            && !matches!(
+                name.as_str(),
+                "load" | "store" | "swap" | "compare_exchange" | "compare_exchange_weak"
+            )
+        {
             return Ok(None);
+        }
+        let signature = self.call_signature(instance)?;
+        if rmw.is_some() {
+            self.validate_atomic_rmw_signature(receiver_ty, signature, bits, signed)?;
         }
         let receiver = values.first().ok_or("atomic receiver is unavailable")?;
         let (old, allocation) = self.atomic_access(receiver, state, bits, signed)?;
         let order = values.last().ok_or("missing atomic ordering")?;
-        let signature = self.call_signature(instance)?;
         if matches!(name.as_str(), "compare_exchange" | "compare_exchange_weak") {
             return self
                 .atomic_compare_exchange(
@@ -337,40 +337,31 @@ impl<'tcx> Engine<'tcx> {
         self.record_model(
             callee,
             if allocation.is_some() {
-                "local integer atomic; exact allocation-backed history and modular RMW"
+                "integer atomic; exact owned or startup history and modular RMW"
             } else {
                 "integer atomic; arbitrary access state after possible interference"
             },
         );
-        let replacement = match name.as_str() {
-            "load" => None,
-            "store" | "swap" => {
-                let [_, value, _] = values else {
-                    return Err("atomic write needs receiver, value and ordering".into());
-                };
-                let (_, actual_bits, actual_signed) = value.integer()?;
-                if (actual_bits, actual_signed) != (bits, signed) {
-                    return Err("atomic write value type mismatch".into());
+        let replacement = if let Some(operation) = rmw {
+            let [_, value, _] = values else {
+                return Err("atomic RMW needs receiver, value and ordering".into());
+            };
+            Some(operation.replacement(&self.terms, &old, value, bits, signed)?)
+        } else {
+            match name.as_str() {
+                "load" => None,
+                "store" | "swap" => {
+                    let [_, value, _] = values else {
+                        return Err("atomic write needs receiver, value and ordering".into());
+                    };
+                    let (_, actual_bits, actual_signed) = value.integer()?;
+                    if (actual_bits, actual_signed) != (bits, signed) {
+                        return Err("atomic write value type mismatch".into());
+                    }
+                    Some(value.clone())
                 }
-                Some(value.clone())
+                _ => return Err("unsupported integer atomic operation".into()),
             }
-            "fetch_add" | "fetch_sub" => {
-                let [_, value, _] = values else {
-                    return Err("atomic RMW needs receiver, value and ordering".into());
-                };
-                let operation = if name.as_str() == "fetch_add" {
-                    "add"
-                } else {
-                    "sub"
-                };
-                Some(symbolic::binary(
-                    &self.terms,
-                    operation,
-                    old.clone(),
-                    value.clone(),
-                )?)
-            }
-            _ => return Err("unsupported integer atomic operation".into()),
         };
         if let (Some(allocation), Some(replacement)) = (allocation, replacement) {
             self.store_atomic(state, allocation, replacement);

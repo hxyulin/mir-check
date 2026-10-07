@@ -486,8 +486,9 @@ contents. Supported aliases and calls share updates. One shared scalar Cell root
 multiple root locations with unresolved aliases remain unknown. RefCell guards/destructors and
 general UnsafeCell/raw-pointer operations remain gaps.
 
-Compiler-identified integer atomics support new/load/store/fetch_add/fetch_sub/swap and strong/weak
-compare_exchange. A constructor executed in analyzed MIR creates a distinct owned allocation with
+Compiler-identified integer atomics support construction, loads, stores, swaps, arithmetic, bitwise
+and extrema RMWs, and strong/weak compare-exchange. A constructor executed in analyzed MIR creates a
+distinct owned allocation with
 its actual integer value. Supported aliases, ordinary analyzed calls and owned return moves retain
 that identity. Loads read its path-local state; stores, swaps and modular RMW update it. Strong CAS
 updates only on equality, and weak CAS additionally permits spurious failure. No arithmetic overflow
@@ -499,8 +500,9 @@ atomic history, even with an empty modifies clause: the boundary may publish an 
 changing the value during the call. A live backing allocation becomes permanently conservative;
 stores after the boundary cannot restore exclusivity. General unknown effects may also invalidate
 the backing allocation, yielding UNKNOWN. Borrowed frame-owned atomics cannot escape as owned
-snapshots. Pointer atomics, thread publication and induction over owned atomic identities remain
-gaps.
+snapshots. Pointer atomic reads and RMWs, thread publication, and induction over owned atomic
+identities
+remain gaps.
 
 Root/shared static atomics still have conservatively arbitrary values at every access, including
 statics with a zero initializer. Their RMW calls return an arbitrary old value, and later accesses
@@ -834,3 +836,10 @@ are validated. Actual pointer-store wrapper MIR still executes after an early or
 invalid acquire stores are REFUTED even when the error-formatting path is unsupported. Writes retain
 reference evidence and end precise startup history. Pointer loads, integer-derived destinations,
 uncertified type changes and volatile atomic operations stay UNKNOWN.
+
+
+The integer RMW transition family shares structural SMT operations for wrapping add/subtract,
+AND/OR/XOR/NAND and signed/unsigned minimum/maximum. Each RMW returns the pre-update value; tracked
+local and supported startup storage retain its replacement. Compiler receiver identity, primitive
+signature, widths, signedness and SMT sorts are checked. A shared access still receives an arbitrary
+old value and retains no update history. Boolean and pointer RMWs remain UNKNOWN.
