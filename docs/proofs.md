@@ -489,6 +489,22 @@ are not automatically reachable executions. Load/store ordering restrictions are
 including symbolic Ordering arguments. Unsupported operations and targets retain normal unknown
 boundaries. The models and their interference policy appear in reports.
 
+Compiler-identified fence/compiler_fence wrappers establish a panic obligation excluding Relaxed,
+including when the Ordering is symbolic. The wrapper's available MIR still executes on valid
+paths. This catches invalid orderings without requiring a model for the wrapper's panic formatting.
+The atomic_fence and atomic_singlethreadfence intrinsic boundaries validate their signatures and
+compiler-evaluated constant ordering enums. Acquire, Release, AcqRel and SeqCst return unit without
+changing tracked local storage. Invalid or unsupported intrinsic orderings are UNKNOWN, not panic
+counterexamples; the safe wrappers are responsible for their defined Relaxed panic behavior.
+
+Fences add no happens-before or atomic-history constraints. Atomic accesses remain arbitrary and
+uncorrelated across a fence. The interpreter follows sequential MIR control flow but does not treat
+an entire function as indivisible, enumerate concurrent executions, or simulate CPU reordering and
+caches. The fence model is a conservative abstraction for supported atomic-value panic checks; it
+does not establish publication safety, data-race freedom or full weak-memory correctness. See the
+Rust documentation for [fence](https://doc.rust-lang.org/core/sync/atomic/fn.fence.html) and
+[compiler_fence](https://doc.rust-lang.org/core/sync/atomic/fn.compiler_fence.html).
+
 An atomic-only wrapper such as validate::Site can be represented without reading its mutable
 initializer as immutable data. Other interior-mutable constant references remain unsupported.
 

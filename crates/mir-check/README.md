@@ -184,6 +184,11 @@ supported aliases and calls. Integer atomic new/load/store/fetch_add/fetch_sub/s
 arbitrary current values and interference at each access. RMW operations return the old value and
 wrap on overflow. Load/store ordering restrictions are checked, including symbolic Ordering
 arguments. Atomic-only static wrappers are represented without freezing mutable initializers.
+Compiler-identified fence/compiler_fence wrappers check non-Relaxed orderings, including symbolic
+arguments, then execute their available MIR. Valid atomic_fence/atomic_singlethreadfence intrinsic
+calls return unit without adding synchronization facts or changing tracked local storage. Invalid
+intrinsic orderings remain UNKNOWN. This abstraction does not prove memory ordering, publication,
+data-race freedom or whole-function atomicity.
 Reports record these models; atomic history assertions can refute under the conservative
 abstraction. RefCell guards, general UnsafeCell operations and raw pointers remain unsupported.
 

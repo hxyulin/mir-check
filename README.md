@@ -344,3 +344,8 @@ initializer types, size, alignment and field offsets. Shared fixed arrays suppor
 views and ordered element references; iterator `find_map` executes callbacks with short circuiting.
 General mutable payloads remain opaque. See
 [static storage views](docs/proofs.md#opaque-static-storage-views) for the supported boundaries.
+
+Atomic fence coverage checks compiler-identified fence/compiler_fence wrappers and their intrinsic
+boundaries. Relaxed wrapper calls refute; valid fences preserve local storage without adding
+synchronization or atomic-history facts. See
+[cells and atomics](docs/proofs.md#cells-and-atomic-counters) for the abstraction and its limits.

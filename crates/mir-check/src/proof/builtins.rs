@@ -122,6 +122,10 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("builtin signature normalization failed: {error:?}"))?
             .skip_binder();
+        self.check_fence_ordering(instance, signature, values, state, (caller, span))?;
+        if let Some(value) = self.atomic_fence_intrinsic(instance, signature, values, span)? {
+            return Ok(Some(value));
+        }
         if let Some(value) = self.pin_mutable_deref(instance, signature, raw_values, state)? {
             self.record_model(
                 callee,

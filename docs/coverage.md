@@ -24,7 +24,7 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Fixed-array equality | Primitive numeric equality and actual custom/nested comparisons; ordered short-circuit effects | At most 128 elements per array; general slice equality and inlined pointer-based comparisons remain gaps |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | Disjoint mutable root references, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
-| Interior mutation | Scalar Cell aliases/calls and integer atomic load/store/add/sub/swap with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
+| Interior mutation | Scalar Cell aliases/calls, integer atomic load/store/add/sub/swap and fences with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
@@ -480,3 +480,11 @@ strides and distinct storage descriptors. Slice iterator `find_map` executes act
 including side effects and short circuiting. Mutable opaque element storage and ambiguous symbolic
 composite indices remain UNKNOWN. Address checks use symbolic non-null aligned bases without
 enabling arbitrary memory access.
+
+Compiler-identified fence/compiler_fence wrappers validate non-Relaxed Ordering arguments before
+executing actual MIR. Their intrinsic boundaries validate constant ordering enums and preserve
+tracked local storage. Both compiler and hardware fences add no synchronization facts: atomic
+accesses still allow arbitrary per-access values. Host/ARM debug and optimized tests check all valid
+orderings, symbolic guarded and invalid orderings, native panic replay, mutations and unsupported
+payloads. Invalid direct intrinsic orderings remain UNKNOWN. This does not establish whole-function
+atomicity, publication safety or full weak-memory correctness.
