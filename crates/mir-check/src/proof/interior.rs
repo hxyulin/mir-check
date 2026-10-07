@@ -356,7 +356,7 @@ impl<'tcx> Engine<'tcx> {
             _ => return Err("unsupported integer atomic operation".into()),
         };
         if let (Some(allocation), Some(replacement)) = (allocation, replacement) {
-            state.memory[allocation] = Some(replacement);
+            self.store_atomic(state, allocation, replacement);
         }
         Ok(Some(if name.as_str() == "store" {
             Value::Unit
@@ -368,10 +368,13 @@ impl<'tcx> Engine<'tcx> {
     fn atomic_access(
         &mut self,
         receiver: &Value,
-        state: &State,
+        state: &mut State,
         bits: u32,
         signed: bool,
-    ) -> Result<(Value, Option<usize>), String> {
+    ) -> Result<(Value, Option<AtomicStorage>), String> {
+        if self.startup && matches!(receiver, Value::StaticView { .. }) {
+            return self.startup_atomic_access(receiver, state, bits, signed);
+        }
         let (actual_bits, actual_signed, storage) = match receiver {
             Value::Atomic { bits, signed } => (*bits, *signed, None),
             Value::LocalAtomic {
@@ -392,7 +395,9 @@ impl<'tcx> Engine<'tcx> {
                         signed: sign,
                         ..
                     },
-                ) if (*width, *sign) == (bits, signed) => return Ok((value.clone(), storage)),
+                ) if (*width, *sign) == (bits, signed) => {
+                    return Ok((value.clone(), storage.map(AtomicStorage::Tracked)));
+                }
                 Some(Value::Atomic {
                     bits: width,
                     signed: sign,
@@ -400,17 +405,7 @@ impl<'tcx> Engine<'tcx> {
                 _ => return Err("local atomic backing is dead or has an invalid shape".into()),
             }
         }
-        Ok((
-            Value::Int {
-                expression: self.fresh_abstraction(
-                    Sort::BitVec(bits),
-                    "shared atomic reads allow arbitrary old values; exclusivity is unverified",
-                ),
-                bits,
-                signed,
-            },
-            None,
-        ))
+        Ok((self.opaque_atomic_value(bits, signed), None))
     }
 
     fn atomic_compare_exchange(
@@ -418,7 +413,7 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         signature: ty::FnSig<'tcx>,
         values: &[Value],
-        access: (Value, Option<usize>),
+        access: (Value, Option<AtomicStorage>),
         state: &mut State,
         site: (DefId, Span),
     ) -> Result<Value, String> {
@@ -485,13 +480,17 @@ impl<'tcx> Engine<'tcx> {
         if let Some(allocation) = allocation {
             let old_term = old.integer()?.0;
             let replacement_term = replacement.integer()?.0;
-            state.memory[allocation] = Some(Value::Int {
-                expression: self
-                    .terms
-                    .apply(Op::Ite, &[succeeds.clone(), replacement_term, old_term])?,
-                bits,
-                signed,
-            });
+            self.store_atomic(
+                state,
+                allocation,
+                Value::Int {
+                    expression: self
+                        .terms
+                        .apply(Op::Ite, &[succeeds.clone(), replacement_term, old_term])?,
+                    bits,
+                    signed,
+                },
+            );
         }
         let variants = vec![
             self.constructed(result_ty, 0, vec![old.clone()])?,

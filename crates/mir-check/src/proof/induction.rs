@@ -93,7 +93,7 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
         conditions: Vec<Term>,
-        memory: Vec<Option<Value>>,
+        memory: Memory,
     ) -> Result<(), String> {
         let mut system = System {
             relations: Vec::new(),

@@ -6,7 +6,7 @@ pub(super) struct Iteration {
     pub(super) iterator: Value,
     pub(super) item: Option<Value>,
     pub(super) conditions: Vec<Term>,
-    pub(super) memory: Vec<Option<Value>>,
+    pub(super) memory: Memory,
 }
 
 impl<'tcx> Engine<'tcx> {
@@ -519,7 +519,7 @@ impl<'tcx> Engine<'tcx> {
         skip: Value,
         reverse: bool,
         conditions: Vec<Term>,
-        memory: Vec<Option<Value>>,
+        memory: Memory,
     ) -> Result<Vec<Iteration>, String> {
         self.steps += 1;
         if self.steps > self.limits.max_steps {

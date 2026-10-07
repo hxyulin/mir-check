@@ -31,7 +31,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
             [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] \
-            [--all-failures] [--induction] [--replay] \
+            [--all-failures] [--induction] [--startup] [--replay] \
             [--verbose] [--color auto|always|never] [--quiet] [--jsonl FILE|-] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
@@ -39,6 +39,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Dependency MIR is retained by default; --no-dependency-mir disables retention.\n\
             Without --entry, --verify requires all local bodies to pass.\n\
             --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
+            --startup assumes fresh statics for a zero-argument root; reports assumptions.\n\
             Refuted roots stop at their first counterexample; --all-failures continues them.\n\
             --replay compiles and executes supported native inputs after the build.\n\
             Default output is compact; --verbose shows the full inventory and obligations.\n\
@@ -58,6 +59,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut allow_assumptions = false;
     let mut all_failures = false;
     let mut induction = false;
+    let mut startup = false;
     let mut replay = false;
     let mut limits = AnalysisLimits::default();
     let mut cargo_args = Vec::new();
@@ -101,6 +103,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
             Some("--allow-assumptions") => allow_assumptions = true,
             Some("--all-failures") => all_failures = true,
             Some("--induction") => induction = true,
+            Some("--startup") => startup = true,
             Some("--replay") => replay = true,
             Some("--contracts") => {
                 let path = args.next().ok_or("--contracts requires a JSON file")?;
@@ -125,6 +128,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .any(|arg| arg == "--target-dir" || arg.to_string_lossy().starts_with("--target-dir="))
     {
         return Err("--target-dir is managed by mir-check to prevent stale inventories".into());
+    }
+    if startup && !verify {
+        return Err("--startup requires --verify".into());
     }
     if replay && !verify {
         return Err("--replay requires --verify".into());
@@ -170,7 +176,11 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env_remove("MIR_CHECK_CONTRACTS")
         .env_remove("MIR_CHECK_ALLOW_ASSUMPTIONS")
         .env_remove("MIR_CHECK_ALL_FAILURES")
-        .env_remove("MIR_CHECK_INDUCTION");
+        .env_remove("MIR_CHECK_INDUCTION")
+        .env_remove("MIR_CHECK_STARTUP");
+    if startup {
+        command.env("MIR_CHECK_STARTUP", "1");
+    }
     if induction {
         command.env("MIR_CHECK_INDUCTION", "1");
     }

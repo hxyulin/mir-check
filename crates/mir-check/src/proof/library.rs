@@ -40,7 +40,7 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         values: Vec<Value>,
         mut conditions: Vec<Term>,
-        memory: Vec<Option<Value>>,
+        memory: Memory,
         stack: &[DefId],
         site: (DefId, Span),
     ) -> Result<Vec<Return>, String> {

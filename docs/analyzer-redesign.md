@@ -16,7 +16,7 @@ The current stages establish reusable parts without claiming the whole redesign 
 | Area | Implemented foundation | Remaining implementation |
 | --- | --- | --- |
 | Typed locations | Static footprints, initialized-prefix certificates, checked location access and tracked raw addresses | Common typed projections/footprints, subobject initialization and retained static payloads |
-| Atomic state | Exact history for supported fresh local integer atomics and conservative interference boundaries | Static startup environments, overlapping precise views and supported shared interference |
+| Atomic state | Exact local histories and explicit fresh-startup static histories with conservative invalidation | Verified startup environments, precise overlaps and supported shared interference |
 | Aggregate sharing | Interned SMT leaves and compiler-keyed lazy input shapes | Shared owned aggregate values, branch snapshots and compiler-keyed aggregate shapes |
 | Call metadata | Root-local normalized signature cache shared by ordinary and induction models | Common compiler-identified operation descriptions and backend-independent transition semantics |
 | Query construction | Dependency reuse for immutable SMT terms | Measured structural query assembly reuse with complete context keys |
@@ -68,6 +68,10 @@ establishing exclusivity or a happens-before relation.
 Different views with overlapping footprints cannot keep independent precise histories. The first
 extension should decline exact history for these overlaps. Sharing symbolic storage across suitable
 supported views is a later step, with explicit initialization and atomic access rules.
+
+Explicit `--startup` now supplies a conditional initializer domain with branch-local static atomic
+histories, reported entry assumptions and conservative invalidation. It does not verify the entry
+environment or change default arbitrary-root analysis.
 
 Static initializer values are not the runtime atomic state of an arbitrary root. Firmware startup
 precision requires a verified execution environment and checks on task, interrupt and hardware

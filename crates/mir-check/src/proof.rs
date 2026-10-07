@@ -38,10 +38,14 @@ mod owned_iterators;
 mod pointer_handles;
 mod replay_inputs;
 mod slice_equality;
+mod startup;
+mod startup_memory;
 mod static_views;
 mod static_writes;
 mod storage_layout;
 mod storage_locations;
+use startup::AtomicStorage;
+use startup_memory::Memory;
 mod tracked_pointers;
 
 #[derive(Clone)]
@@ -49,13 +53,13 @@ struct State {
     locals: Vec<Option<Value>>,
     conditions: Vec<Term>,
     addresses: Vec<Option<usize>>,
-    memory: Vec<Option<Value>>,
+    memory: Memory,
 }
 
 struct Return {
     value: Value,
     conditions: Vec<Term>,
-    memory: Vec<Option<Value>>,
+    memory: Memory,
 }
 
 struct Engine<'tcx> {
@@ -83,6 +87,7 @@ struct Engine<'tcx> {
     config: mir_check::ContractConfig,
     all_failures: bool,
     induction: bool,
+    startup: bool,
     limits: mir_check::AnalysisLimits,
     resolved_contracts: BTreeMap<String, DefId>,
     solver: std::cell::RefCell<Solver>,
@@ -98,6 +103,7 @@ pub fn verify(
     config: &mir_check::ContractConfig,
     all_failures: bool,
     induction: bool,
+    startup: bool,
     limits: mir_check::AnalysisLimits,
 ) -> Proof {
     let mut engine = Engine {
@@ -124,6 +130,7 @@ pub fn verify(
         config: config.clone(),
         all_failures,
         induction,
+        startup,
         limits,
         resolved_contracts: BTreeMap::new(),
         solver: std::cell::RefCell::new(Solver::with_limits(limits)),
@@ -132,6 +139,7 @@ pub fn verify(
         proof: Proof {
             status: ProofStatus::Proved,
             assumptions: Vec::new(),
+            entry_assumptions: Vec::new(),
             inputs: BTreeMap::new(),
             models: Vec::new(),
             invariants: Vec::new(),
@@ -163,7 +171,7 @@ pub fn verify(
         .any(|o| o.status == ProofStatus::Unknown)
     {
         ProofStatus::Unknown
-    } else if !engine.proof.trusted_calls.is_empty() {
+    } else if !engine.proof.trusted_calls.is_empty() || !engine.proof.entry_assumptions.is_empty() {
         ProofStatus::ProvedWithAssumptions
     } else {
         ProofStatus::Proved
@@ -176,7 +184,18 @@ impl<'tcx> Engine<'tcx> {
         let body = self.tcx.optimized_mir(id);
         let mut conditions = Vec::new();
         let mut arguments = Vec::new();
-        let mut memory = Vec::new();
+        let mut memory = Memory::default();
+        if self.startup {
+            self.proof.entry_assumptions = vec![
+                "Fresh startup: Rust statics have their declared initializer values on entry"
+                    .into(),
+                "No external actor changes static atomics before a publication or opaque boundary"
+                    .into(),
+            ];
+            if body.arg_count != 0 {
+                return Err("fresh startup currently requires a root with no arguments".into());
+            }
+        }
         self.prefer_lazy_inputs = body.args_iter().fold(0_usize, |cost, local| {
             if cost > MAX_INPUT_VALUES {
                 return cost;
@@ -275,6 +294,11 @@ impl<'tcx> Engine<'tcx> {
         self.static_roots = Some(memory.len());
         memory.push(Some(Value::Elements(Vec::new())));
         if self.induction && self.needs_induction(instance) {
+            if self.startup {
+                return Err(
+                    "fresh-startup static histories are not yet supported by induction".into(),
+                );
+            }
             return self.inductive_root(instance, arguments, conditions, memory);
         }
         self.execute(instance, arguments, conditions, memory, &[])?;
@@ -749,7 +773,7 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
         conditions: Vec<Term>,
-        memory: Vec<Option<Value>>,
+        memory: Memory,
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
         let chain = stack.iter().copied().chain([instance.def_id()]).collect();
@@ -767,7 +791,7 @@ impl<'tcx> Engine<'tcx> {
         instance: ty::Instance<'tcx>,
         arguments: Vec<Value>,
         conditions: Vec<Term>,
-        memory: Vec<Option<Value>>,
+        memory: Memory,
         stack: &[DefId],
     ) -> Result<Vec<Return>, String> {
         let id = instance.def_id();

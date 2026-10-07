@@ -815,3 +815,13 @@ and negative Result paths, shared reborrows/aggregates/returns, unchanged format
 rejected dynamic operations, similarly named traits/helpers, reference escape and induction
 rejection. Widening a guard refutes the dependent proof and fails native replay. Positive cases
 replay for every byte input.
+
+### Conditional startup entry
+
+An explicit `--startup` run assumes fresh Rust static initializers for a zero-argument root and no
+external atomic interference before a publication or opaque boundary. This premise is recorded in
+`entry_assumptions`; a successful proof is PROVED_WITH_ASSUMPTIONS. Supported certified integer
+static atomics use checked initializer values and branch-local updates. Overlapping views, typed
+static stores and trusted boundaries invalidate precise history, including future first accesses.
+Default arbitrary roots still allow arbitrary shared atomic state. The mode does not verify reset
+or runtime initialization and does not yet encode startup histories into cyclic induction.

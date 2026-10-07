@@ -7,8 +7,8 @@ impl<'tcx> Engine<'tcx> {
         &self,
         instance: ty::Instance<'tcx>,
         mut arguments: Vec<Value>,
-        mut memory: Vec<Option<Value>>,
-    ) -> Result<(Vec<Value>, Vec<Option<Value>>), String> {
+        mut memory: Memory,
+    ) -> Result<(Vec<Value>, Memory), String> {
         let body = self.instantiated_body(instance)?;
         for (local, argument) in body.args_iter().zip(&mut arguments) {
             if let ty::Ref(_, pointee, mutable) = body.local_decls[local].ty.kind() {

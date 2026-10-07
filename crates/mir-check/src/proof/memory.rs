@@ -477,9 +477,8 @@ impl<'tcx> Engine<'tcx> {
                 return Err("memory allocation budget reached".to_owned());
             }
             let allocation = state.memory.len();
-            state
-                .memory
-                .push(Some(self.local(state, place.local.as_usize())?));
+            let value = self.local(state, place.local.as_usize())?;
+            state.memory.push(Some(value));
             state.addresses[place.local.as_usize()] = Some(allocation);
             allocation
         };
@@ -750,7 +749,7 @@ impl<'tcx> Engine<'tcx> {
         &self,
         callback: &Value,
         state: &State,
-    ) -> Result<(Value, Vec<Option<Value>>), String> {
+    ) -> Result<(Value, Memory), String> {
         self.validate_tracked_value(callback, state)?;
         if state.memory.len() >= MAX_ALLOCATIONS {
             return Err("memory allocation budget reached".to_owned());
@@ -978,7 +977,7 @@ mod tests {
             locals: Vec::new(),
             addresses: Vec::new(),
             conditions: Vec::new(),
-            memory,
+            memory: memory.into(),
         }
     }
 

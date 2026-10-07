@@ -32,7 +32,7 @@ impl<'tcx> Engine<'tcx> {
         };
         if mutability.is_mut()
             || pointee.is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized())
-            || self.atomic_container(*pointee, 0).is_some()
+            || (!self.startup && self.atomic_container(*pointee, 0).is_some())
         {
             return Ok(None);
         }
@@ -257,7 +257,7 @@ impl<'tcx> Engine<'tcx> {
                     );
                 }
                 if let Some(atomic) = self.atomic_shape(view.ty) {
-                    return Ok(atomic);
+                    return Ok(if self.startup { value } else { atomic });
                 }
                 return Err(concat!(
                     "mutable static payload reads need a state model; ",
@@ -387,6 +387,7 @@ impl<'tcx> Engine<'tcx> {
                 }
                 self.static_store_value(view.ty, value, state, 0, &mut 0)?;
                 self.retain_static_store_references(value, state)?;
+                state.memory.invalidate_startup();
                 // Shared payload reads stay opaque; this store supplies no value/history facts.
                 return Ok(true);
             }
@@ -683,7 +684,9 @@ impl<'tcx> Engine<'tcx> {
                 return Err("uninitialized static payload borrowing remains unsupported".into());
             }
         } else {
-            if let Some(atomic) = self.atomic_shape(view.ty) {
+            if !self.startup
+                && let Some(atomic) = self.atomic_shape(view.ty)
+            {
                 return Ok(atomic);
             }
             if !self.certified_static_type(view)? {
@@ -928,5 +931,36 @@ impl<'tcx> Engine<'tcx> {
             symbolic::integer(&self.terms, u128::from(view.offset), bits, false),
         )?;
         symbolic::cast(&self.terms, address, target_bits, signed)
+    }
+}
+
+impl Engine<'_> {
+    pub(super) fn startup_atomic_location(
+        &self,
+        value: &Value,
+        state: &State,
+        bits: u32,
+        signed: bool,
+    ) -> Result<startup_memory::StaticAtomicLocation, String> {
+        let view = self.static_view(value, state)?;
+        if !self.startup
+            || view.kind != ViewKind::Shared
+            || !self.certified_static_type(view)?
+            || !matches!(self.atomic_shape(view.ty), Some(Value::Atomic { bits: b, signed: s })
+                if (bits, signed) == (b, s))
+        {
+            return Err(
+                "startup atomic history requires a certified shared integer atomic view".into(),
+            );
+        }
+        let layout = self.static_layout(view.ty)?;
+        if layout.size.bits() != u64::from(bits) {
+            return Err("startup atomic history requires exactly sized scalar storage".into());
+        }
+        Ok(startup_memory::StaticAtomicLocation {
+            definition: view.static_id,
+            offset: view.offset,
+            bytes: layout.size.bytes(),
+        })
     }
 }

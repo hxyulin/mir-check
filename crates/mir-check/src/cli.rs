@@ -428,6 +428,9 @@ pub fn render_report(report: &Report, verbose: bool, colored: bool) -> String {
             function.name
         );
         if proof.status != ProofStatus::Proved {
+            for assumption in &proof.entry_assumptions {
+                let _ = writeln!(output, "    entry assumption: {assumption}");
+            }
             let _ = writeln!(
                 output,
                 "    {}:{}",

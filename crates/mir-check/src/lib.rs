@@ -155,6 +155,8 @@ pub struct Proof {
     #[serde(default)]
     pub stopped_after_counterexample: bool,
     pub assumptions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entry_assumptions: Vec<String>,
     pub inputs: std::collections::BTreeMap<String, String>,
     pub models: Vec<String>,
     #[serde(default)]
@@ -418,7 +420,7 @@ pub fn render(report: &Report) -> String {
                 ContractStatus::PendingVerification => "pending verification",
                 ContractStatus::VerifiedUnderPreconditions => "verified under preconditions",
                 ContractStatus::VerifiedWithTrustedAssumptions => {
-                    "verified with trusted external assumptions"
+                    "verified with explicit assumptions"
                 }
             };
             let _ = writeln!(output, "    {kind}({predicate}): {status}");
@@ -455,6 +457,9 @@ pub fn render(report: &Report) -> String {
             }
             for (name, expression) in &proof.inputs {
                 let _ = writeln!(output, "      input {name}: {expression}");
+            }
+            for assumption in &proof.entry_assumptions {
+                let _ = writeln!(output, "      entry assumption: {assumption}");
             }
             for assumption in &proof.assumptions {
                 let _ = writeln!(output, "      assumes: {assumption}");

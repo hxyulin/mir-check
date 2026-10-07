@@ -669,3 +669,17 @@ address. Repeated addresses of the same tracked place agree. Addresses are symbo
 to be nonzero and correctly aligned; relative offsets and distinct-allocation address comparisons
 remain conservative. Raw dereferences, pointer arithmetic, untracked reference snapshots and
 frame-owned pointer escape remain UNKNOWN.
+
+`--verify --startup --entry function` selects an explicit fresh-startup domain for a zero-argument
+root. Rust statics start with their declared initializers, with no external atomic interference
+before a publication or opaque boundary. Supported integer atomic views retain compiler-decoded
+initializer values and branch-local updates through calls and callbacks. Separate allocations and
+subobjects keep separate histories; overlapping views discard precise history. Typed static stores
+and trusted boundaries invalidate history, including statics not yet accessed. Shared static
+payloads otherwise remain opaque. Unsupported initializer reads and cyclic induction stay UNKNOWN.
+
+Startup proofs report `entry_assumptions` and use PROVED_WITH_ASSUMPTIONS, requiring
+`--allow-assumptions` for a successful verification exit. Default arbitrary-root analysis keeps its
+existing conservative shared atomic state. Cargo forwards the mode, and saved reports retain its
+assumptions. The runtime initialization environment is an explicit premise, not a verified reset
+handler or a global guarantee about concurrent actors.

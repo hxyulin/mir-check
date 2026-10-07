@@ -51,6 +51,7 @@ struct Checker {
     allow_assumptions: bool,
     all_failures: bool,
     induction: bool,
+    startup: bool,
     limits: AnalysisLimits,
     replay: bool,
     pending_report: Option<Report>,
@@ -180,6 +181,7 @@ impl Callbacks for Checker {
                             &config,
                             self.all_failures,
                             self.induction,
+                            self.startup,
                             self.limits,
                         ));
                         completed += 1;
@@ -421,6 +423,7 @@ fn main() -> ExitCode {
         allow_assumptions: std::env::var_os("MIR_CHECK_ALLOW_ASSUMPTIONS").is_some(),
         all_failures: std::env::var_os("MIR_CHECK_ALL_FAILURES").is_some(),
         induction: std::env::var_os("MIR_CHECK_INDUCTION").is_some(),
+        startup: std::env::var_os("MIR_CHECK_STARTUP").is_some(),
         limits,
         replay: false,
         pending_report: None,
@@ -438,8 +441,8 @@ fn main() -> ExitCode {
         {
             println!(
                 "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] \
-                [--contracts FILE] [--allow-assumptions] [--all-failures] [--induction] [--replay] \
-                [--verbose] [--quiet] \
+                [--contracts FILE] [--allow-assumptions] [--all-failures] [--induction] \
+                [--startup] [--replay] [--verbose] [--quiet] \
                 [--color auto|always|never] [--jsonl FILE|-] -- \
                 <rustc arguments>\n\
                 Or: mir-check --verify --from-report FILE [--entry FUNCTION] [display options]\n\
@@ -447,6 +450,7 @@ fn main() -> ExitCode {
                 --from-report recompiles with saved arguments; it does not reuse saved proofs.\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
                 --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
+                --startup assumes fresh statics for a zero-argument root; reports assumptions.\n\
                 Refuted roots stop at their first counterexample; --all-failures continues them.\n\
                 --replay compiles and executes supported native counterexample inputs.\n\
                 mir-check report <file or directory> reads saved JSON/JSONL reports.\n\n{}",
@@ -481,6 +485,10 @@ fn main() -> ExitCode {
                 }
                 Some("--verify") => {
                     checker.verify = true;
+                    args.remove(1);
+                }
+                Some("--startup") => {
+                    checker.startup = true;
                     args.remove(1);
                 }
                 Some("--induction") => {
@@ -655,6 +663,10 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    }
+    if checker.startup && !checker.verify {
+        eprintln!("mir-check: --startup requires --verify");
+        return ExitCode::FAILURE;
     }
     if checker.replay && !checker.verify {
         eprintln!("mir-check: --replay requires --verify");

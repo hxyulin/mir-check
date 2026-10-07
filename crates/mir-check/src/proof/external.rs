@@ -336,6 +336,7 @@ impl<'tcx> Engine<'tcx> {
             return Ok(Some(Vec::new()));
         }
         let mut memory = state.memory.clone();
+        memory.invalidate_startup();
         if let Some(modifies) = &spec.modifies {
             for name in modifies {
                 let index = names

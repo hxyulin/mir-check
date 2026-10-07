@@ -144,3 +144,32 @@ remain UNKNOWN. Direct projected raw addresses need compiler layout offsets and 
 this avoids assuming that a packed field is aligned merely because its type has alignment.
 Snapshots retain pointer identity rather than copying its pointee as an owned value. Liveness and
 frame-escape checks traverse the retained reference, including pointers nested in stored aggregates.
+
+## Explicit fresh-startup histories
+
+`--startup` chooses a conditional entry domain for a zero-argument root: Rust statics have their
+declared initializer values and no external actor changes their atomics before a publication or
+opaque boundary. This premise is retained in `entry_assumptions`, and successful roots report
+PROVED_WITH_ASSUMPTIONS. Arbitrary-root analysis remains unchanged.
+
+A memory-state container carries retained allocations and a separate bounded map of static atomic
+histories through branches, calls and callbacks. A history key is the compiler static identity plus
+its certified byte offset and extent. Initialization reads use rustc's checked scalar access into
+the actual initializer allocation; uninitialized storage or pointer provenance cannot become an
+integer value. Only compiler-certified integer atomic views receive this history.
+
+Strong and weak compare-exchange use the same transitions as local atomics. Stores, swaps and
+supported modular arithmetic update the selected history. Signed and unsigned views of the same
+extent share bits. Different overlapping extents invalidate precision rather than establishing
+independent histories. Separate statics and disjoint fields retain distinct histories.
+
+Every supported typed static store and trusted call conservatively ends precise startup history,
+even a trusted call declaring no tracked writes. The memory state remembers that invalidation so an
+unseen static cannot later regain its initializer value. Missing bodies and unsupported operations
+remain UNKNOWN. No readable general static payloads or concurrent execution model are introduced.
+
+The current history budget is 128 locations per state. Startup roots with arguments and startup
+histories in cyclic induction remain UNKNOWN until those entry domains and transitions are modeled.
+Native fixtures check first and repeated claims, initializer mutations, callback updates, branch
+histories and invalidation. Initialization of reset-time runtime machinery remains an explicit
+entry premise.
