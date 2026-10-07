@@ -73,7 +73,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Function pointers and unsupported call shapes remain UNKNOWN |
 | Array map | Actual callback bodies in order, retaining capture state and reference-valued elements | At most 16 elements; callback destructors remain UNKNOWN |
 | Array from_fn | Actual callbacks in ascending index order, retaining capture state and effects | At most 128 owned elements and 256 values; drops and identity-bearing results remain UNKNOWN |
-| Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; identities, user destructors, clone and views remain UNKNOWN |
+| Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; owned Cell/atomic identities, user destructors, clone and views remain UNKNOWN |
 | Iterator fold/sum | Actual fold/rfold callbacks preserve accumulator, capture state and effects; sum uses ordinary MIR | Unfinished folds, callback drops and unsupported element/call shapes remain UNKNOWN |
 | Evaluated closure constants | Typed noncapturing, zero-field, zero-sized closure values | Captured constants, including zero-sized captures, remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, min/max, saturating add/subtract, zero counts, byte/bit reversal, comparisons, casts, bit operations and shifts | Optional overflow checks depend on build settings; unsafe nonzero count intrinsics remain unsupported |
@@ -89,6 +89,14 @@ Root-local solver sessions retain common assertions with push/pop and reset inco
 namespaces. Exact-query caching, closed Boolean/bit-vector folding and a full-Instance MIR cache
 reduce repeated work. None reuses function proofs or unchecked summaries; full standalone queries
 remain in reports.
+
+Mixed floating-point paths can discharge an integer/Boolean safety check with a stronger
+non-floating query. Only UNSAT is accepted; SAT/UNKNOWN use the original full query, including all
+floating constraints, and counterexample models come from that full query. Host/ARM and native
+cases cover guarded array accesses, integer facts that require a float constraint, actual linked
+counterexamples, unsupported remainder and an off-by-one mutation. Feasibility checks keep the full
+path, and their failing queries now appear in UNKNOWN reports. No alternate floating-point tactic
+or repeated UNKNOWN retry is enabled.
 
 Explicit core models implement byte lengths/ranges/copies, shared slice-to-array conversion,
 lossless integer conversion, endian decoding, fixed-array map and opaque formatting arguments from

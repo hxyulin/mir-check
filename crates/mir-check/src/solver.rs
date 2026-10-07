@@ -31,6 +31,7 @@ pub struct Query {
     declarations: Vec<String>,
     assertions: Vec<String>,
     ground: Option<bool>,
+    non_float: Option<Box<Query>>,
 }
 
 impl Query {
@@ -59,6 +60,7 @@ impl Query {
             declarations: declarations.to_vec(),
             assertions,
             ground: None,
+            non_float: None,
         };
         for declaration in &query.declarations {
             query.text.push_str(declaration);
@@ -81,16 +83,14 @@ impl Query {
         failure: &mir_check::smt::Term,
         bindings: &std::collections::BTreeMap<u32, mir_check::smt::Term>,
     ) -> Result<Self, String> {
-        use mir_check::smt::{Constant, Sort};
+        use mir_check::smt::Sort;
         let mut pending: Vec<_> = conditions.iter().chain([failure]).collect();
         let mut included = std::collections::BTreeSet::new();
-        let mut symbols = std::collections::BTreeSet::new();
         while let Some(term) = pending.pop() {
             if term.sort() != &Sort::Bool || !term.belongs_to(context) {
                 return Err("query requires Boolean terms from its analysis context".to_owned());
             }
             for symbol in term.symbols() {
-                symbols.insert(symbol);
                 if let Some(binding) = bindings.get(&symbol)
                     && included.insert(symbol)
                 {
@@ -98,9 +98,40 @@ impl Query {
                 }
             }
         }
+        let terms: Vec<_> = conditions
+            .iter()
+            .chain(included.into_iter().map(|symbol| &bindings[&symbol]))
+            .chain([failure])
+            .collect();
+        let mut query = Self::from_term_assertions(context, &terms)?;
+        if failure.constant().is_none() && !failure.uses_floating_point() {
+            let non_float: Vec<_> = terms
+                .iter()
+                .copied()
+                .filter(|term| !term.uses_floating_point())
+                .collect();
+            if non_float.len() < terms.len() {
+                query.non_float = Some(Box::new(Self::from_term_assertions(context, &non_float)?));
+            }
+        }
+        Ok(query)
+    }
+
+    fn from_term_assertions(
+        context: &mir_check::smt::Context,
+        terms: &[&mir_check::smt::Term],
+    ) -> Result<Self, String> {
+        use mir_check::smt::{Constant, Sort};
         let mut seen = std::collections::HashSet::new();
         let mut ground = Some(true);
         let mut assertions = Vec::new();
+        let mut symbols = std::collections::BTreeSet::new();
+        for term in terms {
+            if term.sort() != &Sort::Bool || !term.belongs_to(context) {
+                return Err("query requires Boolean terms from its analysis context".to_owned());
+            }
+            symbols.extend(term.symbols());
+        }
         let declarations = context.declarations_for(&symbols)?;
         let mut bytes = prelude().len()
             + "(check-sat)\n".len()
@@ -111,14 +142,7 @@ impl Query {
         if bytes > MAX_QUERY_BYTES {
             return Err("symbolic query size limit reached".to_owned());
         }
-        for term in conditions
-            .iter()
-            .chain(included.into_iter().map(|symbol| &bindings[&symbol]))
-            .chain([failure])
-        {
-            if term.sort() != &Sort::Bool || !term.belongs_to(context) {
-                return Err("query requires Boolean terms from its analysis context".to_owned());
-            }
+        for term in terms {
             match term.constant() {
                 Some(Constant::Bool(true)) => continue,
                 Some(Constant::Bool(false)) => ground = Some(false),
@@ -162,6 +186,7 @@ pub struct Solver {
     decisions: HashMap<String, Decision>,
     cache_bytes: usize,
     context: Option<Context>,
+    failed_feasibility_query: Option<String>,
 }
 
 impl Default for Solver {
@@ -182,6 +207,7 @@ impl Default for Solver {
             decisions: HashMap::new(),
             cache_bytes: 0,
             context: None,
+            failed_feasibility_query: None,
         }
     }
 }
@@ -206,10 +232,27 @@ impl Solver {
     }
 
     pub fn feasible_query(&mut self, query: &Query) -> Result<bool, String> {
-        self.feasible_inner(query.text(), Some(query))
+        let answer = self.feasible_inner(query.text(), Some(query));
+        self.failed_feasibility_query = answer.as_ref().err().map(|_| query.text().to_owned());
+        answer
+    }
+
+    pub fn take_failed_feasibility_query(&mut self) -> Option<String> {
+        self.failed_feasibility_query.take()
     }
 
     pub fn check_query(&mut self, query: &Query) -> Answer {
+        self.failed_feasibility_query = None;
+        if !self.custom
+            && let Some(non_float) = &query.non_float
+            && matches!(
+                self.feasible_inner(non_float.text(), Some(non_float)),
+                Ok(false)
+            )
+        {
+            self.remember(query.text(), Decision::Unsat);
+            return Answer::Unsat;
+        }
         self.check_inner(query.text(), Some(query))
     }
 
@@ -862,6 +905,131 @@ mod encoding_tests {
     use super::*;
     use mir_check::smt::{Context, Op, Sort};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn non_floating_probes_accept_only_unsat_and_keep_full_counterexample_constraints() {
+        use mir_check::smt::Rounding;
+        let context = Context::default();
+        let index = context.symbol(0, Sort::BitVec(8)).unwrap();
+        let converted = context
+            .apply(
+                Op::UnsignedToFloat {
+                    exponent: 8,
+                    significand: 24,
+                },
+                &[context.rounding(Rounding::NearestEven), index.clone()],
+            )
+            .unwrap();
+        let zero = context
+            .apply(
+                Op::PositiveZero {
+                    exponent: 8,
+                    significand: 24,
+                },
+                &[],
+            )
+            .unwrap();
+        let fp_zero = context
+            .apply(Op::FpEqual, &[converted.clone(), zero.clone()])
+            .unwrap();
+        let is_zero = context
+            .apply(
+                Op::Equal,
+                &[index.clone(), context.bit_vector(0, 8).unwrap()],
+            )
+            .unwrap();
+        let failure = context
+            .apply(Op::Not, std::slice::from_ref(&is_zero))
+            .unwrap();
+        let query = Query::from_terms(
+            &context,
+            &[is_zero, fp_zero.clone()],
+            &failure,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let probe = query.non_float.as_ref().unwrap();
+        assert!(!probe.text().contains("to_fp") && query.text().contains("to_fp"));
+        let mut solver = Solver::default();
+        assert!(matches!(solver.check_query(&query), Answer::Unsat));
+        assert!(
+            !solver
+                .context
+                .as_ref()
+                .unwrap()
+                .assertions
+                .iter()
+                .any(|s| s.contains("to_fp"))
+        );
+
+        let only_float =
+            Query::from_terms(&context, &[fp_zero], &failure, &BTreeMap::new()).unwrap();
+        assert!(
+            solver
+                .feasible_query(only_float.non_float.as_ref().unwrap())
+                .unwrap()
+        );
+        assert!(matches!(solver.check_query(&only_float), Answer::Unsat));
+
+        let one = context
+            .apply(
+                Op::UnsignedToFloat {
+                    exponent: 8,
+                    significand: 24,
+                },
+                &[
+                    context.rounding(Rounding::NearestEven),
+                    context.bit_vector(1, 8).unwrap(),
+                ],
+            )
+            .unwrap();
+        let fp_one = context.apply(Op::FpEqual, &[converted, one]).unwrap();
+        let bad = Query::from_terms(&context, &[fp_one], &failure, &BTreeMap::new()).unwrap();
+        match solver.check_query(&bad) {
+            Answer::Sat(model) => assert!(model.contains("(_ bv1 8)"), "{model}"),
+            Answer::Unsat => panic!("dropping float constraints must not hide a real failure"),
+            Answer::Unknown(reason) => panic!("small scalar counterexample failed: {reason}"),
+        }
+        let fp_failure = context.apply(Op::FpIsNaN, &[zero]).unwrap();
+        let untouched = Query::from_terms(&context, &[], &fp_failure, &BTreeMap::new()).unwrap();
+        assert!(untouched.non_float.is_none());
+    }
+
+    #[test]
+    fn an_unavailable_probe_and_full_solver_stay_unknown_without_cached_success() {
+        let context = Context::default();
+        let integer = context.symbol(0, Sort::Bool).unwrap();
+        let float = context
+            .symbol(
+                1,
+                Sort::Float {
+                    exponent: 8,
+                    significand: 24,
+                },
+            )
+            .unwrap();
+        let nan = context.apply(Op::FpIsNaN, &[float]).unwrap();
+        let query = Query::from_terms(&context, &[nan], &integer, &BTreeMap::new()).unwrap();
+        let mut solver = Solver {
+            executable: std::env::temp_dir().join("mir-check-missing-probe-solver"),
+            custom: false,
+            ..Solver::default()
+        };
+        assert!(matches!(solver.check_query(&query), Answer::Unknown(_)));
+        assert!(solver.decisions.is_empty());
+        assert!(solver.take_failed_feasibility_query().is_none());
+        assert!(solver.feasible_query(&query).is_err());
+        assert_eq!(
+            solver.take_failed_feasibility_query().unwrap(),
+            query.text()
+        );
+        assert!(solver.take_failed_feasibility_query().is_none());
+        assert!(solver.feasible_query(&query).is_err());
+        let valid =
+            Query::from_terms(&context, &[], &context.boolean(true), &BTreeMap::new()).unwrap();
+        assert!(solver.feasible_query(&valid).unwrap());
+        assert!(solver.take_failed_feasibility_query().is_none());
+    }
 
     #[test]
     fn typed_assertions_keep_domains_and_reject_invalid_contexts_before_folding() {

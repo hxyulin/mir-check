@@ -326,6 +326,14 @@ root-local cache stores up to 128 normalized instantiated bodies, keyed by the f
 Instance and shared with Rc. It avoids repeated cloning/substitution; it caches no proof outcomes or
 cross-invocation compiler objects.
 
+Integer/Boolean safety obligations in mixed floating-point paths can first use a stronger query
+that omits floating-point assertions. Only UNSAT discharges the obligation; SAT or UNKNOWN falls
+back to the full path, and counterexamples always come from the full query. This uses typed term
+sorts, retains the target failure condition and adds no assumptions. Custom solver executables and
+Horn induction keep their existing strategy. Reports retain the full obligation query, and failed
+path-feasibility checks now retain their full query too; SAT for a feasibility query describes a
+path rather than a panic. No alternate floating-point tactic or repeated UNKNOWN retry is enabled.
+
 Optimized dependency MIR may return unit without assigning the return local; unit returns preserve
 tracked effects without requiring that assignment. Core Option unwrap/expect panic helpers use the
 actual Option module identity, exact helper names and never-returning signatures. Reachable helper

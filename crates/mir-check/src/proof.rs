@@ -583,7 +583,7 @@ impl<'tcx> Engine<'tcx> {
             kind: ObligationKind::Unsupported,
             detail,
             status: ProofStatus::Unknown,
-            query: None,
+            query: self.solver.borrow_mut().take_failed_feasibility_query(),
             model: None,
         });
     }

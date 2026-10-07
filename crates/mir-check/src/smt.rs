@@ -239,6 +239,31 @@ impl Term {
         Rc::ptr_eq(&self.context.0, &context.0)
     }
 
+    pub fn uses_floating_point(&self) -> bool {
+        fn floating(sort: &Sort) -> bool {
+            match sort {
+                Sort::Float { .. } | Sort::RoundingMode => true,
+                Sort::Array(index, element) => floating(index) || floating(element),
+                Sort::Bool | Sort::BitVec(_) => false,
+            }
+        }
+        let mut visited = HashSet::new();
+        let mut pending = vec![self];
+        while let Some(term) = pending.pop() {
+            if !visited.insert(term.node.id) {
+                continue;
+            }
+            if floating(term.sort()) {
+                return true;
+            }
+            match &term.node.kind {
+                Kind::Apply(_, children) => pending.extend(children),
+                Kind::Constant(_) | Kind::Symbol(_) => {}
+            }
+        }
+        false
+    }
+
     pub fn constant(&self) -> Option<Constant> {
         match self.node.kind {
             Kind::Constant(constant) => Some(constant),

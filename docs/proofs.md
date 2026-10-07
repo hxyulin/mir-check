@@ -288,6 +288,20 @@ Reports still contain full standalone SMT scripts. Malformed output, missing res
 closed pipes and timeouts discard the session and return UNKNOWN. The host deadline covers writes as
 well as reads; responses above 256 KiB also return UNKNOWN.
 
+For a nonconstant failure term without floating-point operations, query construction can also form
+a probe by omitting assertions whose typed term trees contain floating-point or rounding-mode
+sorts. It includes only assertions already present in the complete query, including relevant
+latent encodings, and retains the actual failure term. The complete query implies this weaker
+conjunction: UNSAT of the probe therefore proves the complete query UNSAT. SAT and UNKNOWN are
+inconclusive and fall back to the complete query. Probe SAT never supplies a counterexample model.
+Query validation and the full-query size cap apply before probing. No assertion is strengthened or
+fabricated, and custom executables and Horn queries bypass this optimization. Default Z3 tactics,
+timeouts and the text subprocess protocol are unchanged.
+
+Reports keep complete safety queries even when a probe proves them. An undecided feasibility check
+now also records its complete query in the UNKNOWN obligation. Its SAT answer would establish a
+possible path, not a panic; only a REFUTED safety obligation represents a failing assignment.
+
 An exact-query decision cache is local to the root and holds at most 1,024 entries or two MiB of
 query text. Undecided responses are never cached. A cached satisfiable decision can answer a
 feasibility check, but cannot supply a counterexample model. There is no disk proof cache, state
