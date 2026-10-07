@@ -250,6 +250,129 @@ pub fn borrowed_element() {
     assert!(*pending.next().unwrap() == 7);
 }
 
+pub fn borrowed_aliases() {
+    let label = Cell::new(21_u16);
+    let mut pending = [&label, &label].into_iter();
+    pending.next().unwrap().set(34);
+    assert!(pending.next_back().unwrap().get() == 34);
+    assert!(pending.next().is_none());
+}
+
+pub fn mutable_elements() {
+    let mut left = 12_u16;
+    let mut right = 24_u16;
+    let mut pending = [&mut left, &mut right].into_iter();
+    *pending.next_back().unwrap() = 36;
+    *pending.next().unwrap() = 18;
+    assert!(pending.next().is_none());
+    drop(pending);
+    assert!(left == 18 && right == 36);
+}
+
+pub fn mutable_predicate() {
+    let mut first = 4_u16;
+    let mut second = 8_u16;
+    let mut third = 16_u16;
+    let mut pending = [&mut first, &mut second, &mut third].into_iter();
+    assert!(!pending.all(|item| {
+        *item += 1;
+        *item < 9
+    }));
+    *pending.next().unwrap() = 32;
+    drop(pending);
+    assert!(first == 5 && second == 9 && third == 32);
+}
+
+pub fn borrowed_fold() {
+    let labels = [3_u16, 6, 9];
+    let mut pending = [&labels[0], &labels[1], &labels[2]].into_iter();
+    let total = (&mut pending).rfold(0_u16, |sum, item| sum + *item);
+    assert!(total == 18 && pending.next().is_none());
+}
+
+struct BorrowedParcel<'a> {
+    weight_g: &'a mut u16,
+    label: &'a u16,
+}
+
+pub fn nested_borrowed_elements() {
+    let mut weight_g = 60_u16;
+    let label = 42_u16;
+    let mut pending = [Some(BorrowedParcel {
+        weight_g: &mut weight_g,
+        label: &label,
+    })].into_iter();
+    let parcel = pending.next().unwrap().unwrap();
+    *parcel.weight_g = *parcel.label;
+    assert!(pending.next().is_none());
+    drop(pending);
+    assert!(weight_g == 42);
+}
+
+fn move_pending<'a>(left: &'a mut u16, right: &'a mut u16) -> core::array::IntoIter<&'a mut u16, 2> {
+    [left, right].into_iter()
+}
+
+pub fn returned_borrowed_iterator() {
+    let mut left = 5_u16;
+    let mut right = 10_u16;
+    let mut pending = move_pending(&mut left, &mut right);
+    *pending.next().unwrap() = 15;
+    *pending.next_back().unwrap() = 20;
+    drop(pending);
+    assert!(left == 15 && right == 20);
+}
+
+pub fn borrowed_cursor_copy() {
+    let labels = [17_u16, 29];
+    let mut pending = [&labels[0], &labels[1]].into_iter();
+    let mut copied = pending.clone();
+    assert!(*pending.next().unwrap() == *copied.next().unwrap());
+}
+
+pub fn borrowed_symbolic_skip(skip: usize) {
+    let labels = [17_u16, 29];
+    let mut pending = [&labels[0], &labels[1]].into_iter();
+    if let Some(label) = pending.nth(skip) {
+        assert!(*label == labels[skip]);
+    }
+}
+
+pub fn borrowed_callback_panic() {
+    let labels = [17_u16, 29];
+    [&labels[0], &labels[1]].into_iter().all(|label| {
+        assert!(*label < 29);
+        true
+    });
+}
+
+pub fn borrowed_bad_bound() {
+    let labels = [3_u16, 12];
+    [&labels[0], &labels[1]].into_iter().all(|label| small(*label));
+}
+
+pub fn borrowed_wrong_order() {
+    let labels = [17_u16, 29];
+    let mut pending = [&labels[0], &labels[1]].into_iter();
+    assert!(*pending.next_back().unwrap() == 17);
+}
+
+pub fn mutable_wrong_effect() {
+    let mut left = 12_u16;
+    let mut right = 24_u16;
+    let mut pending = [&mut left, &mut right].into_iter();
+    *pending.next_back().unwrap() = 36;
+    drop(pending);
+    assert!(left == 36);
+}
+
+pub fn borrowed_bad_alias() {
+    let label = Cell::new(21_u16);
+    let mut pending = [&label, &label].into_iter();
+    pending.next().unwrap().set(34);
+    assert!(pending.next().unwrap().get() == 21);
+}
+
 struct HazardousLabel(u16);
 
 impl Clone for HazardousLabel {
@@ -296,6 +419,9 @@ pub fn same_named_user_iterator() {
 }
 
 #[cfg(test)]
+extern crate std;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -328,5 +454,29 @@ mod tests {
         wrapped_iterator_drop();
         borrowed_consuming_methods();
         borrowed_shared_count();
+        borrowed_element();
+        borrowed_aliases();
+        mutable_elements();
+        mutable_predicate();
+        borrowed_fold();
+        nested_borrowed_elements();
+        returned_borrowed_iterator();
+        borrowed_cursor_copy();
+        for skip in [0, 1, 2, usize::MAX] {
+            borrowed_symbolic_skip(skip);
+        }
     }
+
+    #[test]
+    fn borrowed_iterator_failures_replay_as_real_assertion_failures() {
+        for check in [
+            borrowed_callback_panic,
+            borrowed_wrong_order,
+            mutable_wrong_effect,
+            borrowed_bad_alias,
+        ] {
+            assert!(std::panic::catch_unwind(check).is_err());
+        }
+    }
+
 }

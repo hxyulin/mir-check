@@ -122,6 +122,47 @@ impl Value {
         }
     }
 
+    pub fn owned_iterator_size(&self) -> Option<usize> {
+        match self {
+            Self::Reference { .. } => Some(1),
+            Self::Tuple(fields) | Self::Elements(fields) => {
+                fields.iter().try_fold(1_usize, |size, value| {
+                    size.checked_add(value.owned_iterator_size()?)
+                        .filter(|size| *size <= MAX_REPEAT_VALUES)
+                })
+            }
+            Self::Adt { fields, .. } => fields.iter().try_fold(1_usize, |size, (_, value)| {
+                size.checked_add(value.owned_iterator_size()?)
+                    .filter(|size| *size <= MAX_REPEAT_VALUES)
+            }),
+            Self::Enum {
+                discriminant,
+                variants,
+                ..
+            } => {
+                variants
+                    .iter()
+                    .try_fold(1 + discriminant.owned_iterator_size()?, |size, value| {
+                        size.checked_add(value.owned_iterator_size()?)
+                            .filter(|size| *size <= MAX_REPEAT_VALUES)
+                    })
+            }
+            Self::Input(_)
+            | Self::Bool(_)
+            | Self::Int { .. }
+            | Self::Float { .. }
+            | Self::Bytes { .. }
+            | Self::Unit => self.owned_repeat_size(),
+            Self::Cell { .. }
+            | Self::Atomic { .. }
+            | Self::SliceIterator { .. }
+            | Self::MetadataPointer(_)
+            | Self::StaticText
+            | Self::FormatArguments
+            | Self::Function => None,
+        }
+    }
+
     pub fn contains_mutable(&self) -> bool {
         match self {
             Self::Input(_) => false,

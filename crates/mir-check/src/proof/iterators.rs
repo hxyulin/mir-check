@@ -561,8 +561,11 @@ impl<'tcx> Engine<'tcx> {
                     mutable,
                 }
             } else {
-                let snapshot = self.snapshot(&source, &memory, &conditions, 0)?;
-                match snapshot {
+                let storage = match *source.clone() {
+                    Value::Input(input) => input.materialize()?,
+                    value => value,
+                };
+                match storage {
                     Value::Bytes { data, .. } => Value::Int {
                         expression: self
                             .terms

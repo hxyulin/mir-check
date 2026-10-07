@@ -281,7 +281,12 @@ methods or variants when diagnostic items are unavailable; these are exact names
 already identified compiler type/trait, not substring matches over MIR.
 
 Compiler ArrayIntoIter models share bounded cursor storage with slice iteration. Owned elements
-must contain no tracked identities or destructors and fit 128 elements/256 values. Models cover
+can include tracked shared/mutable references and nested reference-bearing aggregates, but must
+contain no owned Cell/atomic identities or destructors and fit 128 elements/256 values. Yielding a
+reference preserves its allocation and projection; callbacks read and write that original storage.
+The reference graph must remain live, and frame-local references cannot escape through an iterator.
+Identity-bearing array repeats remain unsupported. Composite reference elements require a uniquely
+resolved cursor index; symbolic skips selecting different reference identities stay UNKNOWN. Models cover
 forward/reverse skips, count/last, all/any and ordered fold/rfold callbacks. Ordinary sum MIR now
 uses typed noncapturing closure constants and the cursor fold model. Captured constant closures,
 including zero-sized captures, remain unknown. Iterator by_ref/IntoIterator preserve writable

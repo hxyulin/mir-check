@@ -107,7 +107,20 @@ fn owned_iterator_order_effects_failures_and_boundaries_are_checked_on_host_and_
         ("identity_elements", ProofStatus::Unknown),
         ("element_destructor", ProofStatus::Unknown),
         ("enclosing_destructor", ProofStatus::Refuted),
-        ("borrowed_element", ProofStatus::Unknown),
+        ("borrowed_element", ProofStatus::Proved),
+        ("borrowed_aliases", ProofStatus::Proved),
+        ("mutable_elements", ProofStatus::Proved),
+        ("mutable_predicate", ProofStatus::Proved),
+        ("borrowed_fold", ProofStatus::Proved),
+        ("nested_borrowed_elements", ProofStatus::Proved),
+        ("returned_borrowed_iterator", ProofStatus::Proved),
+        ("borrowed_cursor_copy", ProofStatus::Unknown),
+        ("borrowed_symbolic_skip", ProofStatus::Unknown),
+        ("borrowed_callback_panic", ProofStatus::Refuted),
+        ("borrowed_bad_bound", ProofStatus::Refuted),
+        ("borrowed_wrong_order", ProofStatus::Refuted),
+        ("mutable_wrong_effect", ProofStatus::Refuted),
+        ("borrowed_bad_alias", ProofStatus::Refuted),
         ("mutable_capture", ProofStatus::Proved),
         ("unsupported_view", ProofStatus::Unknown),
         ("unsupported_clone", ProofStatus::Unknown),
@@ -136,13 +149,6 @@ fn owned_iterator_order_effects_failures_and_boundaries_are_checked_on_host_and_
                     .map(|o| (&o.status, &o.detail))
                     .collect::<Vec<_>>()
             );
-            if name == "borrowed_element" {
-                assert!(proof.obligations.iter().any(|obligation| {
-                    obligation
-                        .detail
-                        .contains("moving tracked reference elements")
-                }));
-            }
             if expected == ProofStatus::Proved && name != "borrowed_shared_count" {
                 assert!(
                     proof
@@ -210,4 +216,37 @@ fn owned_iterators_match_native_positions_and_callback_effects() {
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
+}
+
+#[test]
+fn changing_the_mutable_cursor_end_refutes_the_storage_effect_on_host_and_arm() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let original = "*pending.next_back().unwrap() = 36;";
+    assert!(source.contains(original));
+    let directory = Directory::new();
+    let path = directory.0.join("owned_iterators.rs");
+    std::fs::write(
+        &path,
+        source.replace(original, "*pending.next().unwrap() = 36;"),
+    )
+    .unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let (output, report) = verify(&path, &["mutable_elements"], target);
+        assert!(!output.status.success());
+        let proof = report
+            .functions
+            .iter()
+            .find(|f| f.name == "mutable_elements")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            proof.status,
+            ProofStatus::Refuted,
+            "{target:?}: {:?}",
+            proof.obligations
+        );
+        assert!(proof.obligations.iter().any(|o| o.model.is_some()));
+    }
 }

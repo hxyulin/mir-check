@@ -69,6 +69,12 @@ values; nested aggregates stay lazy. A root reserves at most 262,144 symbol slot
 arithmetic rejects larger shapes as UNKNOWN. Byte arrays keep the existing SMT array encoding.
 Reports summarize unmaterialized inputs rather than listing every field. Ambiguous composite
 indices, unsupported leaves and unresolved lazy induction state remain UNKNOWN.
+Owned iteration has a separate shape check from array repetition: a tracked reference counts as
+one moved value, while repeats continue to reject references and other storage identities. Cursor
+selection does not dereference element values. This preserves mutations and aliases through yielded
+references and nested aggregates; the ordinary reference graph and frame-escape checks apply.
+A symbolic composite index must select one provably determined element or the result is UNKNOWN.
+
 Deferred records count all logical fields toward the existing 256-value owned repeat and iteration
 budget. Descriptor validation excludes references and interior mutation, while the iterator's
 existing compiler type check rejects drop-bearing elements.

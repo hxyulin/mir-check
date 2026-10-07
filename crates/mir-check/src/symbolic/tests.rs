@@ -191,3 +191,19 @@ fn symbolic_and_wide_arithmetic_remain_terms_and_unsupported_operations_fail() {
             .is_err()
     );
 }
+
+#[test]
+fn moving_references_through_owned_iterators_does_not_enable_identity_repeats() {
+    for mutable in [false, true] {
+        let reference = Value::Reference {
+            allocation: 0,
+            projection: Vec::new(),
+            mutable,
+        };
+        let values = Value::Elements(vec![Value::Tuple(vec![reference])]);
+        assert_eq!(values.owned_iterator_size(), Some(3));
+        assert_eq!(values.owned_repeat_size(), None);
+    }
+    let cells = Value::Elements(vec![Value::Cell { allocation: 0 }]);
+    assert_eq!(cells.owned_iterator_size(), None);
+}

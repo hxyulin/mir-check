@@ -240,6 +240,13 @@ classification. Host/ARM tests compare f64 classification with abs < infinity an
 unconstrained finiteness assertion. This avoids spending MIR steps on the helper implementation
 inside each callback while preserving the predicate's meaning.
 
+Owned arrays can move tracked shared/mutable references and aggregates containing them. Cursor
+steps preserve allocation/projection identity instead of snapshotting pointee values. Shared Cell
+aliases observe writes through earlier yielded references; mutable elements update caller storage.
+Reference liveness and frame-escape checks still apply. Owned Cell/atomic elements, element
+Clone/views/destructors and symbolic skips between different reference identities stay UNKNOWN.
+Repeating identity-bearing values remains unsupported.
+
 Owned array cursors preserve value order, forward/reverse skips, count/last, checked predicate
 callbacks and fold/rfold. Callback bodies execute rather than supplying assumed results. Shared
 slice folds and ordinary sum bodies use the same callback execution. Consuming count/last/fold
