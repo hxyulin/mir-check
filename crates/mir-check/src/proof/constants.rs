@@ -62,6 +62,18 @@ impl<'tcx> Engine<'tcx> {
             }
             return self.constant_value(ecx, &pointee.into(), depth + 1, values);
         }
+        if self.thin_raw_pointer(ty) {
+            let address = ecx
+                .read_scalar(operand)
+                .discard_err()
+                .and_then(|scalar| scalar.to_bits(operand.layout.size).discard_err())
+                .ok_or("pointer constant has unsupported allocation provenance")?;
+            let bits = u32::from(self.tcx.sess.target.pointer_width);
+            return Ok(Value::RawPointer {
+                address: self.terms.bit_vector(address, bits)?,
+                bits,
+            });
+        }
         if ty.is_bool() || self.float_type(ty).is_some() || self.integer_type(ty).is_some() {
             let scalar = ecx
                 .read_scalar(operand)

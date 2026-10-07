@@ -32,6 +32,7 @@ mod library;
 mod membership;
 mod memory;
 mod owned_iterators;
+mod pointer_handles;
 mod slice_equality;
 
 #[derive(Clone)]
@@ -293,6 +294,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::RawPointer { .. }
             | Value::Uninitialized
             | Value::Function => {
                 return Err("argument binding is unsupported".to_owned());
@@ -1481,6 +1483,19 @@ impl<'tcx> Engine<'tcx> {
                     _ => Err("unsupported unary operation".to_owned()),
                 }
             }
+            Rvalue::Cast(
+                kind @ (CastKind::PointerWithExposedProvenance
+                | CastKind::PointerExposeProvenance
+                | CastKind::PtrToPtr),
+                operand,
+                target,
+            ) => {
+                let source = operand.ty(&body.local_decls, self.tcx);
+                let value = self.operand(id, body, state, operand)?;
+                let value = self.pointer_handle_cast(*kind, source, *target, value)?;
+                self.record_model(id, "thin integer-derived pointer handle; no memory access");
+                Ok(value)
+            }
             Rvalue::Cast(CastKind::IntToInt, operand, target) => {
                 let value = self.operand(id, body, state, operand)?;
                 let (bits, signed) = self
@@ -1500,6 +1515,10 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::Cast(CastKind::Transmute, operand, target) => {
                 let source = operand.ty(&body.local_decls, self.tcx);
                 let value = self.operand(id, body, state, operand)?;
+                if let Some(value) = self.pointer_handle_transmute(source, *target, &value)? {
+                    self.record_model(id, "thin pointer representation; no memory access");
+                    return Ok(value);
+                }
                 if let Some(value) = self.context_transmute(source, *target, &value)? {
                     return Ok(value);
                 }

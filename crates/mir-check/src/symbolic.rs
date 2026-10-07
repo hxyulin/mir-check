@@ -25,6 +25,10 @@ pub enum MemoryProjection {
 #[derive(Clone, Debug)]
 pub enum Value {
     Uninitialized,
+    RawPointer {
+        address: Term,
+        bits: u32,
+    },
     Input(input::InputValue),
     Bool(Term),
     Int {
@@ -91,6 +95,7 @@ impl Value {
             | Self::Int { .. }
             | Self::Float { .. }
             | Self::Bytes { .. }
+            | Self::RawPointer { .. }
             | Self::Unit => Some(1),
             Self::Tuple(fields) | Self::Elements(fields) => {
                 fields.iter().try_fold(1_usize, |size, value| {
@@ -154,6 +159,7 @@ impl Value {
             | Self::Int { .. }
             | Self::Float { .. }
             | Self::Bytes { .. }
+            | Self::RawPointer { .. }
             | Self::Unit => self.owned_repeat_size(),
             Self::Cell { .. }
             | Self::Atomic { .. }
@@ -188,6 +194,7 @@ impl Value {
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
+            | Self::RawPointer { .. }
             | Self::Uninitialized
             | Self::Function
             | Self::Unit => false,
@@ -281,6 +288,27 @@ pub fn binary(
     left: Value,
     right: Value,
 ) -> Result<Value, String> {
+    if let (
+        Value::RawPointer {
+            address: left,
+            bits,
+        },
+        Value::RawPointer {
+            address: right,
+            bits: right_bits,
+        },
+    ) = (&left, &right)
+    {
+        if bits != right_bits || !matches!(operation, "eq" | "ne") {
+            return Err("unsupported raw pointer operation".into());
+        }
+        let equal = context.apply(Op::Equal, &[left.clone(), right.clone()])?;
+        return Ok(Value::Bool(if operation == "ne" {
+            not(&equal)
+        } else {
+            equal
+        }));
+    }
     if let (Value::Float { .. }, Value::Float { .. }) = (&left, &right) {
         return floating::binary(context, operation, left, right);
     }

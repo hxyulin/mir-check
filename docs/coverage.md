@@ -450,3 +450,13 @@ storage. Compiler-identified noop-waker/context constructors let a standalone bi
 from main through two polls; a bad resumed index refutes and panics natively. Construction-only
 proofs cover the async factory, not deferred execution. Unbounded polling, arbitrary coroutine root
 states, waker operations and executor internals remain incomplete.
+
+Integer-derived thin pointer handles support address casts, address exposure, equality and null
+checks. Numeric constants without allocation provenance preserve their exact target-width address.
+Copied handles and aggregate storage retain that address. Core pointer-atomic construction checks
+normalized, single-field core wrappers with zero field offset and pointer-sized representation;
+operations on pointer-atomic memory remain unsupported. Constructor bodies still execute and their
+panics remain checked. This is address-value translation only: arbitrary pointer inputs,
+reference-derived pointers, allocation provenance, metadata, arithmetic and dereferences remain
+UNKNOWN. Host/ARM debug and optimized fixtures include positive, negative, unknown and mutated
+cases, with native replay of address operations and failing claims.

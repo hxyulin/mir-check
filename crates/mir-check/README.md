@@ -500,3 +500,12 @@ tracked mutable references, and core Pin<&mut T> mutable dereference preserves i
 waker and context construction have explicit compiler-identified models. Waker observations and
 operations, arbitrary coroutine root inputs, unsupported saved values and unbounded async polling
 remain UNKNOWN. Executor infrastructure is not modeled by this support.
+
+Thin raw pointers constructed from integer addresses now retain target-width address terms through
+casts, equality, null checks and aggregate storage. Numeric pointer constants without allocation
+provenance are accepted. Core pointer-atomic construction checks the actual single-field wrapper
+layouts and stores the handle; pointer-atomic loads/stores remain unsupported. This lets available
+constructor bodies execute without a raw-pointer memory model. Arbitrary pointer inputs, allocation
+provenance, reference-to-pointer conversion, metadata-bearing pointers, pointer arithmetic and
+memory access remain UNKNOWN. Host/ARM tests cover signed and truncating casts, copies,
+constructors, false claims and source mutations with native replay.

@@ -183,6 +183,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::RawPointer { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit => {

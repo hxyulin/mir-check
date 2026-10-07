@@ -2746,7 +2746,7 @@ fn aggregate_constants_preserve_variants_fields_and_initialized_memory_on_host_a
         ("interior_mutable", ProofStatus::Proved),
         ("mutable_static_storage", ProofStatus::Refuted),
         ("initialized_union", ProofStatus::Unknown),
-        ("raw_pointer", ProofStatus::Unknown),
+        ("raw_pointer", ProofStatus::Proved),
         ("oversized_array", ProofStatus::Proved),
         ("oversized_bytes", ProofStatus::Unknown),
         ("oversized_shape", ProofStatus::Unknown),

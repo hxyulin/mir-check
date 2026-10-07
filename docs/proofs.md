@@ -544,3 +544,25 @@ induction over arbitrary coroutine state in this stage. Unsupported operations a
 execution budgets remain UNKNOWN. Fixtures include nested futures, shared slots, mutable captures,
 cancellation effects/panics, completion checks, mutations and native replay. A binary main fixture
 checks its resumed async body, including a refuted index mutation.
+
+## Thin pointer handles
+
+The ordinary interpreter represents an integer-derived thin pointer as a target-width bit-vector
+address, without an allocation or dereference operation. Integer-to-pointer casts truncate or extend
+using the source integer's signedness; pointer-to-integer casts preserve the address and apply the
+requested integer width. Thin pointer casts preserve the same address. Equality and inequality
+compare addresses. Other pointer operations are unsupported. Raw pointer inputs are not introduced
+as symbolic addresses, and pointer constants with allocation provenance remain UNKNOWN.
+
+The pinned core uses pointer/word transmutes for address operations and a pointer/atomic transmute
+for pointer-atomic construction. Address transmutes require equal widths. The atomic translation
+checks the compiler's Atomic identity and pointer parameter, then normalizes the actual storage
+fields. Every wrapper must be a core struct with one field at offset zero, pointer-sized layout and
+no destructor. The leaf must have exactly the source pointer type. This models construction only;
+loads, stores and raw memory operations do not acquire a model. A changed or unsupported layout
+returns UNKNOWN. Available constructor bodies and user checks continue to execute normally.
+
+Tracked references are separate from these address handles. Reference-to-pointer casts, general
+reference transmutes, metadata-bearing pointers, pointer arithmetic and dereferences remain
+incomplete. Tests check host and ARM widths, signed and truncating casts, null constants, copied
+handles, aggregate constructors, rejected operations and mutations, with native replay.

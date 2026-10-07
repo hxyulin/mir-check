@@ -143,6 +143,7 @@ fn normalize(
             | Value::StaticText
             | Value::FormatArguments
             | Value::Input(_)
+            | Value::RawPointer { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit,
