@@ -144,6 +144,7 @@ fn normalize(
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit,

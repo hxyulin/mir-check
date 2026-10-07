@@ -25,6 +25,10 @@ pub enum MemoryProjection {
 #[derive(Clone, Debug)]
 pub enum Value {
     Uninitialized,
+    StaticView {
+        id: usize,
+        epoch: usize,
+    },
     RawPointer {
         address: Term,
         bits: u32,
@@ -124,6 +128,7 @@ impl Value {
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
+            | Self::StaticView { .. }
             | Self::Uninitialized
             | Self::Function => None,
         }
@@ -167,6 +172,7 @@ impl Value {
             | Self::MetadataPointer(_)
             | Self::StaticText
             | Self::FormatArguments
+            | Self::StaticView { .. }
             | Self::Uninitialized
             | Self::Function => None,
         }
@@ -195,6 +201,7 @@ impl Value {
             | Self::StaticText
             | Self::FormatArguments
             | Self::RawPointer { .. }
+            | Self::StaticView { .. }
             | Self::Uninitialized
             | Self::Function
             | Self::Unit => false,

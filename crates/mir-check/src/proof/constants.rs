@@ -11,14 +11,14 @@ const MAX_CONSTANT_DEPTH: usize = 8;
 impl<'tcx> Engine<'tcx> {
     pub(super) fn constant(
         &self,
-        id: DefId,
+        _id: DefId,
         constant: Const<'tcx>,
         span: Span,
     ) -> Result<Value, String> {
-        let typing_env = ty::TypingEnv::post_analysis(self.tcx, id);
-        let value = constant
-            .eval(self.tcx, typing_env, span)
-            .map_err(|error| format!("unsupported MIR constant evaluation: {error:?}"))?;
+        let typing_env = ty::TypingEnv::fully_monomorphized();
+        let value = constant.eval(self.tcx, typing_env, span).map_err(|error| {
+            format!("unsupported MIR constant {constant:?} evaluation: {error:?}")
+        })?;
         if let ty::Ref(_, element, mutability) = constant.ty().kind()
             && !mutability.is_mut()
             && let Some(value) = self.atomic_container(*element, 0)

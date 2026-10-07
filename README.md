@@ -337,3 +337,8 @@ Lifetime-only mutable-reference casts now preserve tracked storage. An explicit 
 `returns_alias` clause can also preserve a named mutable-reference argument, with the claimed
 memory effects and existing escape checks. Assumptions remain visible even when a root ends in
 UNKNOWN or REFUTED. See [trusted boundaries](docs/contracts.md#explicitly-trusted-call-boundaries).
+
+The ordinary interpreter can also recover a compiler-known typed static layout through an
+UnsafeCell byte carrier while keeping its payload opaque. It checks allocation provenance, original
+initializer types, size, alignment and field offsets. See
+[static storage views](docs/proofs.md#opaque-static-storage-views) for the supported boundaries.

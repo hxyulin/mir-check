@@ -71,6 +71,10 @@ impl<'tcx> Engine<'tcx> {
             .instantiate(self.tcx, instance.args)
             .skip_norm_wip();
         let name = self.tcx.item_name(callee);
+        if let Some(value) = self.static_cell_get(receiver_ty, name.as_str(), values, state)? {
+            self.record_model(callee, "UnsafeCell static storage address; no payload read");
+            return Ok(Some(value));
+        }
         if let Some(element) = self.cell_element(receiver_ty) {
             let result = match (name.as_str(), values) {
                 ("new", [value]) => {

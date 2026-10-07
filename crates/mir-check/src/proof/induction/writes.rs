@@ -61,6 +61,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::FormatArguments
                 | Value::Input(_)
                 | Value::RawPointer { .. }
+                | Value::StaticView { .. }
                 | Value::Uninitialized
                 | Value::Function
                 | Value::Unit => Err("unsupported inductive write field".into()),
@@ -88,6 +89,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::FormatArguments
                 | Value::Input(_)
                 | Value::RawPointer { .. }
+                | Value::StaticView { .. }
                 | Value::Uninitialized
                 | Value::Function
                 | Value::Unit => Err("unsupported inductive write variant".into()),
@@ -168,6 +170,7 @@ fn scalar_update(
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit,

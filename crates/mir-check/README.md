@@ -518,3 +518,19 @@ memory effects. Its use remains visible as a user assumption, including on UNKNO
 roots. Missing compiler hashes on local binary builds are reported as unavailable. Host/ARM
 debug and optimized synthetic MIR tests cover writes, projected storage, invalid reference shapes
 and frame escapes; valid scoped calls and failing mutations also replay natively.
+
+Ordinary execution can recover a known typed static layout from an UnsafeCell byte carrier.
+Compiler allocation provenance, the evaluated initializer's typed transmute, and target layouts
+establish the storage identity, size, alignment and field offsets. A direct compiler intrinsic or
+an available single-move transmute helper can establish the original type. UnsafeCell get/raw_get
+and the inlined transparent pointer cast retain that identity. Restoration requires the original
+or projected pointee type; matching sizes alone do not authorize unrelated types.
+
+These are opaque storage views. Initializer bytes never become mutable runtime facts, and general
+payload reads, writes, unions, fat pointers and array-to-slice view coercions remain UNKNOWN.
+Supported integer atomic fields use the existing arbitrary-per-access model. Exposed addresses are
+symbolic, non-null, aligned and non-wrapping; they cannot reconstruct a dereferenceable view from an
+integer. An unknown trusted memory effect invalidates existing views. A root reserves one memory
+slot for this invalidation state, and at most 512 view descriptors are interned. Induction over
+these views remains unsupported. Host/ARM debug and optimized fixtures check restoration, offsets,
+atomic access, rejected layouts, invalidation and mutations, with native replay of valid cases.

@@ -195,6 +195,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
+            | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit => {

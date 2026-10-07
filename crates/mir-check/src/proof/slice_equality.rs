@@ -168,6 +168,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit => Err("slice equality needs byte or element storage".into()),
@@ -210,6 +211,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
+            | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function
             | Value::Unit => Err("slice equality needs modeled element storage".into()),

@@ -34,6 +34,7 @@ mod memory;
 mod owned_iterators;
 mod pointer_handles;
 mod slice_equality;
+mod static_views;
 
 #[derive(Clone)]
 struct State {
@@ -54,6 +55,9 @@ struct Engine<'tcx> {
     terms: Context,
     next_symbol: u32,
     float_encodings: BTreeMap<u32, Term>,
+    static_views: std::cell::RefCell<Vec<static_views::StaticView<'tcx>>>,
+    static_epoch: Option<usize>,
+    static_addresses: std::collections::HashMap<DefId, Term>,
     steps: usize,
     input_depth: usize,
     input_values: usize,
@@ -85,6 +89,9 @@ pub fn verify(
         terms: Context::default(),
         next_symbol: 0,
         float_encodings: BTreeMap::new(),
+        static_views: std::cell::RefCell::new(Vec::new()),
+        static_epoch: None,
+        static_addresses: std::collections::HashMap::new(),
         steps: 0,
         input_depth: 0,
         input_values: 0,
@@ -235,6 +242,11 @@ impl<'tcx> Engine<'tcx> {
                 "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
             );
         }
+        if memory.len() >= MAX_INPUT_VALUES {
+            return Err("memory allocation budget reached before reserving static state".into());
+        }
+        self.static_epoch = Some(memory.len());
+        memory.push(Some(Value::Unit));
         if self.induction && self.needs_induction(instance) {
             return self.inductive_root(instance, arguments, conditions, memory);
         }
@@ -295,6 +307,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
+            | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function => {
                 return Err("argument binding is unsupported".to_owned());
@@ -1165,6 +1178,10 @@ impl<'tcx> Engine<'tcx> {
     fn place(&self, state: &State, place: Place<'tcx>) -> Result<Value, String> {
         let mut value = self.local(state, place.local.as_usize())?;
         for projection in place.projection {
+            if matches!(value, Value::StaticView { .. }) {
+                value = self.static_view_projection(&value, projection, state)?;
+                continue;
+            }
             value = match (projection, value.materialize()?) {
                 (ProjectionElem::Deref, value @ Value::Reference { .. }) => {
                     self.reference_value(&value, &state.memory, &state.conditions)?
@@ -1284,7 +1301,9 @@ impl<'tcx> Engine<'tcx> {
         operand: &Operand<'tcx>,
     ) -> Result<Value, String> {
         match operand {
-            Operand::Copy(place) | Operand::Move(place) => self.place(state, *place),
+            Operand::Copy(place) | Operand::Move(place) => {
+                self.static_view_operand(self.place(state, *place)?, state)
+            }
             Operand::RuntimeChecks(checks) => {
                 Ok(Value::Bool(self.terms.boolean(checks.value(self.tcx.sess))))
             }
@@ -1308,6 +1327,9 @@ impl<'tcx> Engine<'tcx> {
                 {
                     return Ok(Value::StaticText);
                 }
+                if let Some(view) = self.static_view_constant(id, constant.const_, constant.span)? {
+                    return Ok(view);
+                }
                 self.constant(id, constant.const_, constant.span)
             }
         }
@@ -1321,9 +1343,24 @@ impl<'tcx> Engine<'tcx> {
         value: &Rvalue<'tcx>,
     ) -> Result<Value, String> {
         match value {
-            Rvalue::Use(operand, _) => self.operand(id, body, state, operand),
+            Rvalue::Use(operand, _) => {
+                let value = self.operand(id, body, state, operand)?;
+                if matches!(value, Value::StaticView { .. }) {
+                    self.record_model(
+                        id,
+                        "static layout/provenance view; mutable payload is not analyzed",
+                    );
+                }
+                Ok(value)
+            }
             Rvalue::Ref(_, BorrowKind::Shared, place) => self.borrow(state, *place, false),
             Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => self.borrow(state, *place, true),
+            Rvalue::RawPtr(
+                rustc_middle::mir::RawPtrKind::Const | rustc_middle::mir::RawPtrKind::Mut,
+                place,
+            ) if matches!(self.place(state, *place)?, Value::StaticView { .. }) => {
+                self.raw_static_view(&self.place(state, *place)?, state)
+            }
             Rvalue::RawPtr(rustc_middle::mir::RawPtrKind::FakeForPtrMetadata, place) => {
                 let value = self.place(state, *place)?;
                 let length = match value {
@@ -1492,6 +1529,26 @@ impl<'tcx> Engine<'tcx> {
             ) => {
                 let source = operand.ty(&body.local_decls, self.tcx);
                 let value = self.operand(id, body, state, operand)?;
+                if matches!(value, Value::StaticView { .. }) {
+                    if *kind == CastKind::PointerExposeProvenance {
+                        self.record_model(
+                            id,
+                            "symbolic static address; compiler alignment and allocation bounds",
+                        );
+                        return self.expose_static_address(source, *target, &value, state);
+                    }
+                    if *kind != CastKind::PtrToPtr {
+                        return Err(
+                            "static views do not expose or fabricate numeric addresses".into()
+                        );
+                    }
+                    let value = self.cast_static_view(source, *target, &value, state)?;
+                    self.record_model(
+                        id,
+                        "compiler-backed static storage view; payload remains opaque",
+                    );
+                    return Ok(value);
+                }
                 let value = self.pointer_handle_cast(*kind, source, *target, value)?;
                 self.record_model(id, "thin integer-derived pointer handle; no memory access");
                 Ok(value)
@@ -1523,6 +1580,17 @@ impl<'tcx> Engine<'tcx> {
                     self.reference_value(&value, &state.memory, &state.conditions)?;
                     self.record_model(id, "reference lifetime cast; tracked allocation preserved");
                     return Ok(value);
+                }
+                if matches!(value, Value::StaticView { .. })
+                    && self.integer_type(*target).is_some_and(|(bits, _)| {
+                        bits == u32::from(self.tcx.sess.target.pointer_width)
+                    })
+                {
+                    self.record_model(
+                        id,
+                        "symbolic static address; compiler alignment and allocation bounds",
+                    );
+                    return self.expose_static_address(source, *target, &value, state);
                 }
                 if let Some(value) = self.pointer_handle_transmute(source, *target, &value)? {
                     self.record_model(id, "thin pointer representation; no memory access");

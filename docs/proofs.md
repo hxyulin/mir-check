@@ -577,3 +577,40 @@ Tracked references are separate from these address handles. Reference-to-pointer
 reference transmutes, metadata-bearing pointers, pointer arithmetic and dereferences remain
 incomplete. Tests check host and ARM widths, signed and truncating casts, null constants, copied
 handles, aggregate constructors, rejected operations and mutations, with native replay.
+
+## Opaque static storage views
+
+Ordinary execution can retain compiler provenance for a whole reference to an interior-mutable
+Rust static. The static's CTFE MIR identifies an original storage type when the initializer returns
+a direct transmute or calls an available helper whose body only moves its argument through a
+transmute. Multiple incompatible return definitions are rejected. Compiler-normalized types and
+layouts must preserve size and sufficient alignment. Foreign statics, promoted mutable storage
+and unsupported origins remain UNKNOWN. Constants in executed monomorphized MIR are evaluated in
+the fully monomorphized typing environment, including generic alignment-check constants.
+
+A view carries the static identity, original and projected pointee types, byte offset and whether
+it denotes a shared reference, raw pointer or place. Field projections use compiler layouts.
+Compiler-identified UnsafeCell get/raw_get and inlined transparent UnsafeCell pointer casts expose
+its payload address without loading it. A shared reference can restore the original type at
+allocation offset zero or retain the certified projected type. An unrelated same-size type does
+not acquire a model. Each view must fit its allocation and satisfy its required alignment.
+
+Mutable initializer bytes are never interpreted as current runtime state. General payload loads,
+owned copies and writes remain UNKNOWN, including reads of MaybeUninit storage. Supported integer
+atomic fields retain the existing conservative arbitrary-per-access behavior. Views do not prove
+initialization protocols, alias exclusivity, data-race freedom or general Rust validity of mutable
+bytes. Static array-to-slice coercions, arbitrary pointer arithmetic, fat pointers, general unions
+and induction over this storage remain gaps. This is a layout/provenance adapter, not a byte-level
+memory interpreter.
+
+Address exposure uses one symbolic base per static, constrained to be non-null, sufficiently
+aligned and to fit the allocation without wrapping. Projected offsets preserve that base. Absolute
+addresses and disjointness between different statics are not assumed. Casting an exposed integer
+back to a pointer does not restore the view. There is no arbitrary-address dereference operation.
+
+One root memory slot tracks whether unknown effects have invalidated the static views. A trusted
+summary with omitted modifies invalidates it, while an explicit frame preserving storage retains
+it. At most 512 distinct view descriptors are interned per root; exhaustion remains UNKNOWN.
+Compiler integration tests check host/ARM debug and optimized builds, rejected representations,
+uninitialized reads, raw writes, false address claims, effect invalidation and failing mutations.
+Valid scoped reinterpretations and address mutations also replay natively.

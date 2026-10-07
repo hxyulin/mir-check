@@ -68,6 +68,13 @@ impl<'tcx> Engine<'tcx> {
             return Err("memory snapshot nesting limit reached".to_owned());
         }
         match value {
+            Value::StaticView { epoch, .. } => {
+                if matches!(memory.get(*epoch), Some(Some(Value::Unit))) {
+                    Ok(value.clone())
+                } else {
+                    Err("static storage view invalidated by unknown memory effects".into())
+                }
+            }
             Value::Reference { .. } => {
                 let value = self.reference_value(value, memory, conditions)?;
                 self.snapshot(&value, memory, conditions, depth + 1)
@@ -406,6 +413,9 @@ impl<'tcx> Engine<'tcx> {
         mutable: bool,
     ) -> Result<Value, String> {
         let value = self.place(state, place)?;
+        if matches!(value, Value::StaticView { .. }) {
+            return self.borrow_static_view(&value, mutable, state);
+        }
         if !mutable && matches!(value, Value::Bytes { .. } | Value::StaticText) {
             return Ok(value);
         }
@@ -784,6 +794,13 @@ impl<'tcx> Engine<'tcx> {
             Value::SliceIterator { source, .. } | Value::MetadataPointer(source) => {
                 Self::validate_reference_graph(source, state, incoming, visited)
             }
+            Value::StaticView { epoch, .. } => {
+                if matches!(state.memory.get(*epoch), Some(Some(Value::Unit))) {
+                    Ok(())
+                } else {
+                    Err("static storage view invalidated by unknown memory effects".into())
+                }
+            }
             Value::Input(_)
             | Value::Bool(_)
             | Value::Int { .. }
@@ -806,6 +823,7 @@ impl<'tcx> Engine<'tcx> {
         incoming: usize,
     ) -> Result<Value, String> {
         match value {
+            Value::StaticView { .. } => self.static_view_operand(value, state),
             Value::SliceIterator {
                 source,
                 front,

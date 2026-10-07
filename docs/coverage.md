@@ -467,4 +467,13 @@ or general lifetime guarantee is introduced. Explicit trusted returns_alias clau
 one named mutable-reference argument with the same pointee type and the claimed memory effects.
 Assumptions are visible on successful, refuted and unknown roots. Host/ARM synthetic MIR fixtures
 check scoped writes, rejected casts, dead storage and escaping borrows, with native mutation replay.
-Static interior-mutable byte storage reinterpreted through raw pointers remains unsupported.
+General access to interior-mutable byte storage through raw pointers remains unsupported.
+
+Opaque views now support recovering compiler-known typed static storage from UnsafeCell byte
+carriers. Whole static provenance, initializer transmute origins, transparent UnsafeCell layouts,
+size, alignment and field offsets are checked. Pointer casts and shared reference restoration keep
+the storage identity; unrelated same-size types remain UNKNOWN. Initializer bytes are not runtime
+state. Supported integer atomic fields use their existing conservative model; general payload
+reads/writes, MaybeUninit reads, array-to-slice view coercions and induction over this storage
+remain
+gaps. Address checks use symbolic non-null aligned bases without enabling arbitrary memory access.
