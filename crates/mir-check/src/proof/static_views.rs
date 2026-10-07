@@ -4,7 +4,7 @@ use rustc_middle::mir::interpret::GlobalAlloc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ViewKind {
-    Shared,
+    Reference { mutable: bool },
     Raw,
     Place,
 }
@@ -70,7 +70,7 @@ impl<'tcx> Engine<'tcx> {
             ty: *pointee,
             certified: *pointee,
             offset: 0,
-            kind: ViewKind::Shared,
+            kind: ViewKind::Reference { mutable: false },
             writable: false,
         })
         .map(Some)
@@ -350,7 +350,7 @@ impl<'tcx> Engine<'tcx> {
         let compatible = match ty.kind() {
             ty::Ref(_, pointee, mutability) => {
                 !mutability.is_mut()
-                    && view.kind == ViewKind::Shared
+                    && view.kind == (ViewKind::Reference { mutable: false })
                     && *pointee == view.ty
                     && view.certified == view.ty
             }
@@ -573,7 +573,10 @@ impl<'tcx> Engine<'tcx> {
             return Ok(None);
         };
         let mut view = self.static_view(value, state)?;
-        if view.kind != ViewKind::Shared || view.ty != receiver || view.certified != receiver {
+        if view.kind != (ViewKind::Reference { mutable: false })
+            || view.ty != receiver
+            || view.certified != receiver
+        {
             return Err("MaybeUninit address requires a certified shared container view".into());
         }
         let payload = args.type_at(0);
@@ -676,15 +679,18 @@ impl<'tcx> Engine<'tcx> {
         state: &State,
     ) -> Result<Value, String> {
         let mut view = self.static_view(value, state)?;
-        if mutable || view.kind != ViewKind::Place {
-            return Err("static view borrowing requires a shared typed place".into());
+        if view.kind != ViewKind::Place || (mutable && !view.writable) {
+            return Err(
+                "static borrowing requires a typed place with the requested capability".into(),
+            );
         }
         if self.uninit_static_address(view)? {
-            if !self.is_static_unsafe_cell(view.ty) {
+            if mutable || !self.is_static_unsafe_cell(view.ty) {
                 return Err("uninitialized static payload borrowing remains unsupported".into());
             }
         } else {
-            if !self.startup
+            if !mutable
+                && !self.startup
                 && let Some(atomic) = self.atomic_shape(view.ty)
             {
                 return Ok(atomic);
@@ -696,8 +702,8 @@ impl<'tcx> Engine<'tcx> {
             }
             view.certified = view.ty;
         }
-        view.kind = ViewKind::Shared;
-        if matches!(view.ty.kind(), ty::Array(..)) {
+        view.kind = ViewKind::Reference { mutable };
+        if !mutable && matches!(view.ty.kind(), ty::Array(..)) {
             return self.static_array_elements(&self.intern_static_view(view)?, state);
         }
         self.intern_static_view(view)
@@ -712,7 +718,11 @@ impl<'tcx> Engine<'tcx> {
         let ty::Array(element, _) = view.ty.kind() else {
             return Err("static slice views require a certified fixed array".into());
         };
-        if !matches!(view.kind, ViewKind::Shared | ViewKind::Place) || view.certified != view.ty {
+        if !matches!(
+            view.kind,
+            ViewKind::Reference { mutable: false } | ViewKind::Place
+        ) || view.certified != view.ty
+        {
             return Err("static slice views require a shared certified array reference".into());
         }
         let layout = self.static_layout(view.ty)?;
@@ -733,7 +743,7 @@ impl<'tcx> Engine<'tcx> {
                 ty: *element,
                 certified: *element,
                 offset,
-                kind: ViewKind::Shared,
+                kind: ViewKind::Reference { mutable: false },
                 ..view
             })?);
         }
@@ -842,7 +852,7 @@ impl<'tcx> Engine<'tcx> {
         };
         let mut view = self.static_view(value, state)?;
         let expected = if name == "get" {
-            ViewKind::Shared
+            ViewKind::Reference { mutable: false }
         } else {
             ViewKind::Raw
         };
@@ -854,6 +864,9 @@ impl<'tcx> Engine<'tcx> {
             return Err("UnsafeCell does not have its transparent storage layout".into());
         }
         let uninit = self.uninit_static_address(view)?;
+        if !uninit && !self.certified_static_type(view)? {
+            return Err("UnsafeCell address derivation requires a certified receiver".into());
+        }
         view.ty = args.type_at(0);
         if !uninit {
             view.certified = view.ty;
@@ -944,7 +957,7 @@ impl Engine<'_> {
     ) -> Result<startup_memory::StaticAtomicLocation, String> {
         let view = self.static_view(value, state)?;
         if !self.startup
-            || view.kind != ViewKind::Shared
+            || view.kind != (ViewKind::Reference { mutable: false })
             || !self.certified_static_type(view)?
             || !matches!(self.atomic_shape(view.ty), Some(Value::Atomic { bits: b, signed: s })
                 if (bits, signed) == (b, s))

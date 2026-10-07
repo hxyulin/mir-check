@@ -696,6 +696,12 @@ including compiler alignment wrappers. The wrapper must preserve its payload lay
 subobject follows compiler fields and alignment checks. Equal sizes, padding, unions and
 uninitialized members do not establish a certificate or write capability.
 
+Certified writable static places can form mutable reference descriptors for address operations and
+supported opaque stores. Reference mutability supplies no exclusivity or retained-payload facts;
+ordinary static loads stay UNKNOWN, and mutable array-to-slice coercions remain unsupported.
+`UnsafeCell::raw_get` preserves the receiver's initialization certificate. An unrelated raw cast or
+uninitialized payload cannot acquire initialized type evidence through address derivation.
+
 ADT field vectors share immutable host storage across branch clones. Writes copy the affected
 vectors, preserving Rust allocation identities, independent owned values and contract entry
 snapshots. Reference validity and escape checks still inspect the complete value graph.

@@ -191,3 +191,15 @@ uninitialized members and packed fields cannot acquire certification through tha
 
 Numeric raw destinations, unmodeled pointer loads and volatile atomic operations remain UNKNOWN.
 General raw-pointer loads and stores remain outside this model.
+
+## Mutable static address views
+
+Static reference descriptors retain whether the reference is shared or mutable. Forming a mutable
+reference requires a live, certified, initialized place and writable capability. It does not prove
+exclusive access, absence of interference or a readable payload. Supported stores remain opaque and
+invalidate startup histories. Mutable array references preserve their typed descriptor; coercion to
+a mutable slice remains UNKNOWN.
+
+`UnsafeCell::get` and `raw_get` derive addresses from certified receivers. The explicit
+uninitialized wrapper case retains its initialization limitation. A cast to an unrelated
+`UnsafeCell` does not certify that wrapper or its payload, even if its size and alignment match the original storage.

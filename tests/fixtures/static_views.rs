@@ -592,7 +592,7 @@ fn share_mutable_record(pointer: *mut Record) -> &'static mut Record {
     mir! { { RET = &mut *pointer; Return() } }
 }
 
-pub fn mutable_static_payload_remains_unknown() {
+pub fn mutable_static_addresses_are_supported() {
     let _ = share_mutable_record(DIRECT.get());
 }
 
@@ -605,4 +605,101 @@ fn prefix_and_reference_operations_replay_without_payload_reads() {
     let _ = zero_arg_then_captures_static_reference();
     let _ = zero_arg_then_calls_function_item();
     let _ = a_mutable_reference_slot_preserves_static_views();
+}
+
+static INNER_WORD: SyncUnsafeCell<u32> = SyncUnsafeCell::new(3);
+#[repr(C, align(4))]
+struct ByteWord {
+    bytes: [u8; 4],
+}
+static BYTE_WORD: SyncUnsafeCell<ByteWord> = SyncUnsafeCell::new(ByteWord { bytes: [0; 4] });
+static UNINITIALIZED_WORD: SyncUnsafeCell<MaybeUninit<u32>> =
+    SyncUnsafeCell::new(MaybeUninit::uninit());
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_plain_word(pointer: *mut u32) -> &'static u32 {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn certified_raw_get_preserves_an_address() {
+    let pointer = core::cell::UnsafeCell::<u32>::raw_get(raw_word_container(&INNER_WORD).cast());
+    assert!(!pointer.is_null());
+    let _ = share_plain_word(pointer);
+}
+
+pub fn a_certified_raw_get_cannot_return_null() {
+    let pointer = core::cell::UnsafeCell::<u32>::raw_get(raw_word_container(&INNER_WORD).cast());
+    assert!(pointer.is_null());
+}
+
+pub fn raw_get_cannot_certify_an_unrelated_pointee() {
+    let pointer = core::cell::UnsafeCell::<u32>::raw_get(BYTE_WORD.get().cast());
+    let _ = share_plain_word(pointer);
+}
+
+pub fn raw_get_cannot_initialize_a_payload() {
+    let pointer = core::cell::UnsafeCell::<u32>::raw_get(UNINITIALIZED_WORD.get().cast());
+    let _ = share_plain_word(pointer);
+}
+
+#[cfg(test)]
+#[test]
+fn a_certified_raw_get_preserves_a_native_address() {
+    certified_raw_get_preserves_an_address();
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn raw_word_container(reference: &SyncUnsafeCell<u32>) -> *const SyncUnsafeCell<u32> {
+    mir! { { RET = &raw const *reference; Return() } }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_mutable_plain_word(pointer: *mut u32) -> &'static mut u32 {
+    mir! { { RET = &mut *pointer; Return() } }
+}
+
+pub fn a_mutable_static_borrow_does_not_retain_a_payload() -> u32 {
+    *share_mutable_plain_word(INNER_WORD.get())
+}
+
+pub fn mutable_static_stores_remain_opaque() {
+    *share_mutable_plain_word(INNER_WORD.get()) = 7;
+}
+
+pub fn a_panic_after_a_mutable_static_borrow_is_reachable() {
+    let _ = share_mutable_plain_word(INNER_WORD.get());
+    panic!();
+}
+
+pub fn uninitialized_static_payloads_cannot_be_borrowed_mutably() {
+    let _ = share_mutable_plain_word(UNINITIALIZED_WORD.get().cast());
+}
+
+#[cfg(test)]
+#[test]
+fn mutable_static_address_operations_replay_without_payload_reads() {
+    mutable_static_addresses_are_supported();
+    mutable_static_stores_remain_opaque();
+}
+
+pub fn changing_pointer_spelling_does_not_grant_write_access() {
+    let pointer = raw_word_container(&INNER_WORD).cast::<u32>().cast_mut();
+    let _ = share_mutable_plain_word(pointer);
+}
+
+static WORD_PAIR: SyncUnsafeCell<[u32; 2]> = SyncUnsafeCell::new([1, 2]);
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_mutable_words(pointer: *mut [u32; 2]) -> &'static mut [u32; 2] {
+    mir! { { RET = &mut *pointer; Return() } }
+}
+
+pub fn a_mutable_static_array_keeps_its_typed_address() {
+    let _ = share_mutable_words(WORD_PAIR.get());
+}
+
+fn consume_mutable_slice(_value: &mut [u32]) {}
+
+pub fn mutable_static_slice_coercions_remain_unknown() {
+    consume_mutable_slice(share_mutable_words(WORD_PAIR.get()));
 }

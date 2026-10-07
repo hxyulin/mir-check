@@ -111,7 +111,12 @@ fn native_tests(path: &Path, directory: &Directory) -> bool {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    Command::new(executable).output().unwrap().status.success()
+    Command::new(executable)
+        .arg("--test-threads=1")
+        .output()
+        .unwrap()
+        .status
+        .success()
 }
 
 #[test]
@@ -482,13 +487,102 @@ fn atomic_prefixes_opaque_addresses_and_reference_slots_keep_their_boundaries() 
             ProofStatus::Proved,
         ),
         (
-            "mutable_static_payload_remains_unknown",
+            "mutable_static_addresses_are_supported",
+            ProofStatus::Proved,
+        ),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized, None);
+        }
+    }
+}
+
+#[test]
+fn raw_get_preserves_certificates_without_promoting_casts_or_initializing_payloads() {
+    let entries = [
+        (
+            "certified_raw_get_preserves_an_address",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_certified_raw_get_cannot_return_null",
+            ProofStatus::Refuted,
+        ),
+        (
+            "raw_get_cannot_certify_an_unrelated_pointee",
+            ProofStatus::Unknown,
+        ),
+        ("raw_get_cannot_initialize_a_payload", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized, None);
+        }
+    }
+}
+
+#[test]
+fn mutable_static_borrows_preserve_addresses_without_readable_or_initialization_facts() {
+    let entries = [
+        (
+            "mutable_static_addresses_are_supported",
+            ProofStatus::Proved,
+        ),
+        ("mutable_static_stores_remain_opaque", ProofStatus::Proved),
+        (
+            "a_mutable_static_array_keeps_its_typed_address",
+            ProofStatus::Proved,
+        ),
+        (
+            "mutable_static_slice_coercions_remain_unknown",
+            ProofStatus::Unknown,
+        ),
+        (
+            "changing_pointer_spelling_does_not_grant_write_access",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_mutable_static_borrow_does_not_retain_a_payload",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_panic_after_a_mutable_static_borrow_is_reachable",
+            ProofStatus::Refuted,
+        ),
+        (
+            "uninitialized_static_payloads_cannot_be_borrowed_mutably",
             ProofStatus::Unknown,
         ),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         for optimized in [false, true] {
             verify(&fixture(), &entries, target, optimized, None);
+        }
+    }
+    assert!(native_tests(&fixture(), &Directory::new()));
+    let directory = Directory::new();
+    let mutant = directory.0.join("mutant.rs");
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let original = "raw_word_container(&INNER_WORD).cast()";
+    assert!(source.contains(original));
+    std::fs::write(
+        &mutant,
+        source.replacen(original, "UNINITIALIZED_WORD.get().cast()", 1),
+    )
+    .unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(
+                &mutant,
+                &[(
+                    "certified_raw_get_preserves_an_address",
+                    ProofStatus::Unknown,
+                )],
+                target,
+                optimized,
+                None,
+            );
         }
     }
 }
