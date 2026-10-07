@@ -109,10 +109,17 @@ impl<'tcx> Engine<'tcx> {
             let [source] = values else {
                 return Err("owned array iterator constructor arity mismatch".to_owned());
             };
-            source
+            let size = source
                 .owned_repeat_size()
-                .filter(|size| *size <= symbolic::MAX_REPEAT_VALUES)
-                .ok_or("owned array iterator requires owned values within a 256-value budget")?;
+                .filter(|size| *size <= symbolic::MAX_REPEAT_VALUES);
+            if size.is_none() {
+                let reason = if matches!(element.kind(), ty::Ref(..)) {
+                    "owned array iterator moving tracked reference elements is not modeled"
+                } else {
+                    "owned array iterator requires owned values within a 256-value budget"
+                };
+                return Err(reason.to_owned());
+            }
             let length = match source {
                 Value::Bytes { length, .. } => (**length).clone(),
                 Value::Elements(elements) if elements.len() as u64 == count => {

@@ -85,9 +85,19 @@ determined indices. Struct inputs do not acquire implicit invariants.
 Root inputs include tuples, nested local/dependency structs and enums, concrete generic fields,
 supported shared references and small arrays of modeled aggregates. Input enums have at most 64
 variants; every payload must be modeled, and downcasts require a proven tag check. Input
-construction has a 16-level depth limit and a 512-value budget across arguments; recursive
-references and larger shapes remain unknown. General mutable-reference fields still fail before
-execution. Input bindings retain nested names such as packet.header.index and value.1.0.
+construction has a 16-level depth limit and a 512-value budget across arguments. Large eligible
+subtrees use lazy descriptors: reference-free Freeze structs, tuples and fixed arrays with ordinary
+scalar leaves. Repeated types share shapes and retain independent stable symbols; projected writes
+preserve copies and entry snapshots. Descriptors share the 512-node budget and a root reserves at
+most 262,144 symbol slots. Enums, chars, NonZero and compiler patterns keep eager validity
+constraints, with lazy eligible children. Unsupported leaves, larger reservations and unresolved
+lazy induction state remain unknown. General mutable-reference fields still fail before execution.
+For inputs whose estimated eager size exceeds the budget, compact subtrees are selected before
+other fields consume it. Shape sharing respects each occurrence's nesting depth; fields still have
+independent values. Deferred owned records retain the existing 256-value repeat/iterator budget.
+Input bindings retain nested names such as packet.header.index and value.1.0.
+Bounded membership resolves lazy slice storage one level before primitive comparisons or checked
+custom equality calls; it preserves the same element identities as ordinary field access.
 
 Constant decoding reads evaluated values through rustc_const_eval, using compiler layouts,
 discriminants and initialized scalar reads. It supports nested structs/tuples, active enum
@@ -203,11 +213,11 @@ regressions reject bad bounds, same-named user methods and mutated guards/count 
 
 Repeated arrays support small owned tuples, structs, enums and nested arrays, preserving each copy's
 fields and independent writes. Generated repeats have at most 128 elements and 256 modeled values.
-Non-byte root arrays allow 256 elements within the 512-value input budget; evaluated constants
-permit 128 elements. Byte arrays retain their 128-byte limit. Storage identities (Cell, atomics,
-tracked references and mutable byte views) are not cloned by the repeat model. Accessing repeated
-inline-constant interior mutable storage remains unknown. Composite indices still require a unique
-value on each path; this stage does not extend alias or iterator semantics.
+Non-byte root arrays allow 256 elements with eager values or bounded lazy descriptors; evaluated
+constants permit 128 elements. Byte arrays retain their 128-byte limit. Storage identities (Cell,
+atomics, tracked references and mutable byte views) are not cloned by the repeat model. Accessing
+repeated inline-constant interior mutable storage remains unknown. Composite indices still require a
+unique value on each path; this stage does not extend alias or iterator semantics.
 
 Compiler-identified shared slice iterators retain a source and front/back cursors. Models cover
 construction, next/next_back, nth/nth_back, len/count/size_hint, clone and all/any. Advancing
@@ -323,7 +333,7 @@ Queries declare only symbols reachable from their assertions and required encodi
 Unobserved arithmetic storage therefore does not enlarge the script or change an otherwise
 identical query's cache key. Sparse declaration sets still use the checked session reset path when
 the existing declaration prefix cannot be reused. Counterexample models may omit unused,
-unconstrained inputs; the report's input mapping still records the full modeled root domain.
+unconstrained inputs; the input mapping records eager fields and summaries of lazy subtrees.
 
 Evaluated static string literals can pass through shared dereferences, reborrows, arguments and
 returns as opaque immutable values. This reaches Option expect panic boundaries without modeling

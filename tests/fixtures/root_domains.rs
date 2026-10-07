@@ -42,7 +42,7 @@ pub fn deep_record(value: Level10) -> u16 {
         .value
         .value
 }
-pub fn too_many_values(values: [[u16; 64]; 8]) -> u16 {
+pub fn repeated_fields_beyond_the_eager_budget(values: [[u16; 64]; 8]) -> u16 {
     values[0][0]
 }
 pub fn too_many_elements(values: [u16; 257]) -> u16 {
@@ -205,6 +205,7 @@ mod tests {
             );
         }
         assert_eq!(packed_records([[11; 32]; 8]), 11);
+        assert_eq!(repeated_fields_beyond_the_eager_budget([[13; 64]; 8]), 13);
         for value in 1..1000 {
             assert_eq!(
                 ticket_divisor(NonZeroU32::new(value).unwrap(), 4000),

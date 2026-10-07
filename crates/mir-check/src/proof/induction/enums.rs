@@ -142,6 +142,7 @@ fn normalize(
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Input(_)
             | Value::Function
             | Value::Unit,
             _,

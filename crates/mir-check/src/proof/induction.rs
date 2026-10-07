@@ -1045,6 +1045,9 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
         }
         Value::MetadataPointer(length) => flatten_value(length, result)?,
         Value::Unit => {}
+        Value::Input(_) => {
+            return Err("unmaterialized lazy input is unsupported by induction".into());
+        }
         other @ (Value::Float { .. }
         | Value::Cell { .. }
         | Value::Atomic { .. }

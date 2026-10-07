@@ -100,7 +100,8 @@ impl<'tcx> Engine<'tcx> {
                 return Err("slice len receiver is not modeled".to_owned());
             };
             self.record_model(callee, "slice length");
-            return match receiver {
+            let receiver = receiver.materialize()?;
+            return match &receiver {
                 Value::Bytes { length, .. } => Ok(Some((**length).clone())),
                 Value::Elements(elements) => Ok(Some(symbolic::integer(
                     &self.terms,

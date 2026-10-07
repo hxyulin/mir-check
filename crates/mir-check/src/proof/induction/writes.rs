@@ -59,6 +59,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::MetadataPointer(_)
                 | Value::StaticText
                 | Value::FormatArguments
+                | Value::Input(_)
                 | Value::Function
                 | Value::Unit => Err("unsupported inductive write field".into()),
             },
@@ -83,6 +84,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::MetadataPointer(_)
                 | Value::StaticText
                 | Value::FormatArguments
+                | Value::Input(_)
                 | Value::Function
                 | Value::Unit => Err("unsupported inductive write variant".into()),
             },
@@ -160,6 +162,7 @@ fn scalar_update(
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Input(_)
             | Value::Function
             | Value::Unit,
             _,

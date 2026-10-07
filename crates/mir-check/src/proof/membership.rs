@@ -104,11 +104,12 @@ impl<'tcx> Engine<'tcx> {
         } else {
             (second, first)
         };
+        let slice = slice.materialize()?;
         if !(element.is_bool()
             || self.integer_type(*element).is_some()
             || self.float_type(*element).is_some())
         {
-            let Value::Elements(elements) = slice else {
+            let Value::Elements(elements) = &slice else {
                 return Err("custom membership needs fixed modeled element storage".to_owned());
             };
             if elements.len() > MAX_MEMBERSHIP_ELEMENTS {
@@ -134,7 +135,7 @@ impl<'tcx> Engine<'tcx> {
                 .map(Some);
         }
         let mut member = self.terms.boolean(false);
-        match slice {
+        match &slice {
             Value::Elements(elements) => {
                 if elements.len() > MAX_MEMBERSHIP_ELEMENTS {
                     return Err("slice membership exceeds the 128-element model budget".to_owned());
@@ -178,7 +179,8 @@ impl<'tcx> Engine<'tcx> {
                     member = self.terms.apply(Op::Or, &[member, equal])?;
                 }
             }
-            Value::Bool(_)
+            Value::Input(_)
+            | Value::Bool(_)
             | Value::Int { .. }
             | Value::Float { .. }
             | Value::Bytes { .. }

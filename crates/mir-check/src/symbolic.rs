@@ -1,4 +1,5 @@
 mod floating;
+pub mod input;
 #[cfg(test)]
 mod tests;
 pub use floating::{float, float_cast, float_from_bits, float_negate};
@@ -23,6 +24,7 @@ pub enum MemoryProjection {
 
 #[derive(Clone, Debug)]
 pub enum Value {
+    Input(input::InputValue),
     Bool(Term),
     Int {
         expression: Term,
@@ -80,6 +82,10 @@ pub enum Value {
 impl Value {
     pub fn owned_repeat_size(&self) -> Option<usize> {
         match self {
+            Self::Input(input) => {
+                let size = input.shape.slots as usize;
+                (size <= MAX_REPEAT_VALUES).then_some(size)
+            }
             Self::Bool(_)
             | Self::Int { .. }
             | Self::Float { .. }
@@ -118,6 +124,7 @@ impl Value {
 
     pub fn contains_mutable(&self) -> bool {
         match self {
+            Self::Input(_) => false,
             Self::Reference { mutable: true, .. } => true,
             Self::SliceIterator {
                 mutable, source, ..
@@ -143,6 +150,9 @@ impl Value {
     }
 
     pub fn field(&self, name: &str) -> Result<Value, String> {
+        if let Self::Input(input) = self {
+            return input.materialize()?.field(name);
+        }
         if let Self::Tuple(fields) = self {
             let index = name.parse::<usize>().map_err(|error| error.to_string())?;
             return fields

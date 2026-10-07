@@ -48,9 +48,30 @@ constructor invariant is inferred for an arbitrary struct parameter.
 Tuples and nested local/dependency structs and enums recursively carry modeled fields and shared
 references to supported values. Input bindings retain names such as packet.header.index and
 value.1.0. Reference snapshots do not track pointer identity or alias relationships; general mutable
-roots support one reference to a pointee without reference fields. Input construction is limited to
-16 levels and 512 values across arguments, so recursive reference shapes and large aggregate trees
-fail as unknown.
+roots support disjoint references to modeled pointees without reference fields. Eager input
+construction is limited to 16 levels and 512 values across arguments. Eligible large subtrees use
+shared lazy shape descriptors instead of eagerly creating a value for every repeated field.
+
+Lazy inputs are reference-free, Freeze structs, tuples and fixed arrays built from ordinary
+integers, Booleans, floats, unit and byte arrays. Each subtree is validated before it is accepted,
+including unused fields. Enums, chars, compiler patterns, NonZero and interior mutable types use the
+eager builder and its validity constraints; eligible children inside an eager container can still be
+lazy. Repeated types share a descriptor, but receive independent, pre-reserved symbol ranges.
+Repeated reads keep the same symbols; by-value copies share their initial immutable descriptors, and
+writes replace only the changed branch. Entry snapshots therefore retain their original values.
+For roots exceeding the eager budget, a bounded size estimate selects useful compact subtrees
+before constructing the other fields. Cached descriptors retain their height and must fit the
+current nesting depth. Sharing describes types, never shared mutable storage or equality of values.
+
+Lazy descriptors share the 512-node input budget and 16-level limit across arguments. Non-byte
+arrays still have at most 256 elements. Materializing one level creates at most 512 immediate
+values; nested aggregates stay lazy. A root reserves at most 262,144 symbol slots, and checked range
+arithmetic rejects larger shapes as UNKNOWN. Byte arrays keep the existing SMT array encoding.
+Reports summarize unmaterialized inputs rather than listing every field. Ambiguous composite
+indices, unsupported leaves and unresolved lazy induction state remain UNKNOWN.
+Deferred records count all logical fields toward the existing 256-value owned repeat and iteration
+budget. Descriptor validation excludes references and interior mutation, while the iterator's
+existing compiler type check rejects drop-bearing elements.
 
 Input enums have a symbolic discriminant restricted to actual compiler tags and separate modeled
 payloads for each variant. The engine proves the tag before reading a downcast payload. At most 64

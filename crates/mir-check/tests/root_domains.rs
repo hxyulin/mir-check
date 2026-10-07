@@ -21,7 +21,10 @@ fn larger_root_domains_preserve_bounds_scalar_validity_and_unknown_limits() {
         ("wrong_signed_ticket", ProofStatus::Refuted),
         ("wrong_codepoint", ProofStatus::Refuted),
         ("custom_get", ProofStatus::Refuted),
-        ("too_many_values", ProofStatus::Unknown),
+        (
+            "repeated_fields_beyond_the_eager_budget",
+            ProofStatus::Proved,
+        ),
         ("too_many_elements", ProofStatus::Unknown),
         ("too_many_variants", ProofStatus::Unknown),
     ];

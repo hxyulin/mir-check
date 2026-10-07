@@ -267,6 +267,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Input(_)
             | Value::Function
             | Value::Unit => {
                 Err("inductive slice iterator needs byte or scalar element storage".into())

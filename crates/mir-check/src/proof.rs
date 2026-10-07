@@ -57,6 +57,7 @@ struct Engine<'tcx> {
     steps: usize,
     input_depth: usize,
     input_values: usize,
+    prefer_lazy_inputs: bool,
     building_mutable_input: bool,
     started: std::time::Instant,
     proof: Proof,
@@ -84,6 +85,7 @@ pub fn verify(
         steps: 0,
         input_depth: 0,
         input_values: 0,
+        prefer_lazy_inputs: false,
         building_mutable_input: false,
         started: std::time::Instant::now(),
         config: config.clone(),
@@ -139,6 +141,14 @@ impl<'tcx> Engine<'tcx> {
         let mut conditions = Vec::new();
         let mut arguments = Vec::new();
         let mut memory = Vec::new();
+        self.prefer_lazy_inputs = body.args_iter().fold(0_usize, |cost, local| {
+            if cost > MAX_INPUT_VALUES {
+                return cost;
+            }
+            let ty = body.local_decls[local].ty;
+            let cost = cost.saturating_add(self.root_input_cost(ty));
+            cost.min(MAX_INPUT_VALUES + 1)
+        }) > MAX_INPUT_VALUES;
         let mutable_inputs = body
             .args_iter()
             .filter_map(|local| match body.local_decls[local].ty.kind() {
@@ -229,6 +239,9 @@ impl<'tcx> Engine<'tcx> {
 
     fn input_binding(&mut self, name: &str, value: &Value) -> Result<(), String> {
         let description = match value {
+            Value::Input(input) => {
+                format!("lazy input; {} reserved symbol slots", input.shape.slots)
+            }
             Value::Int { expression, .. }
             | Value::Float { expression, .. }
             | Value::Bool(expression) => expression.smt(MAX_QUERY_BYTES)?,
@@ -343,6 +356,9 @@ impl<'tcx> Engine<'tcx> {
         ty: Ty<'tcx>,
         conditions: &mut Vec<Term>,
     ) -> Result<Value, String> {
+        if let Some(value) = self.lazy_argument(ty)? {
+            return Ok(value);
+        }
         if self.input_depth >= MAX_INPUT_DEPTH {
             return Err("input shape exceeds 16 levels of nesting".to_owned());
         }
@@ -1108,7 +1124,7 @@ impl<'tcx> Engine<'tcx> {
     fn place(&self, state: &State, place: Place<'tcx>) -> Result<Value, String> {
         let mut value = self.local(state, place.local.as_usize())?;
         for projection in place.projection {
-            value = match (projection, value) {
+            value = match (projection, value.materialize()?) {
                 (ProjectionElem::Deref, value @ Value::Reference { .. }) => {
                     self.reference_value(&value, &state.memory, &state.conditions)?
                 }
@@ -1216,7 +1232,7 @@ impl<'tcx> Engine<'tcx> {
                 _ => return Err(format!("unsupported place projection {projection:?}")),
             };
         }
-        Ok(value)
+        value.materialize()
     }
 
     fn operand(
@@ -1380,6 +1396,7 @@ impl<'tcx> Engine<'tcx> {
                 let value = self.operand(id, body, state, operand)?;
                 let value = if matches!(operation, UnOp::PtrMetadata) {
                     self.snapshot(&value, &state.memory, &state.conditions, 0)?
+                        .materialize()?
                 } else {
                     value
                 };
@@ -1489,7 +1506,9 @@ impl<'tcx> Engine<'tcx> {
                     mutable,
                 } = &value
                 {
-                    let inner = self.reference_value(&value, &state.memory, &state.conditions)?;
+                    let inner = self
+                        .reference_value(&value, &state.memory, &state.conditions)?
+                        .materialize()?;
                     if matches!(inner, Value::Bytes { .. } | Value::Elements(_))
                         && (!mutability.is_mut() || *mutable)
                     {

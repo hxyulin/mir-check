@@ -19,7 +19,7 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Bytes | Shared byte slices and fixed arrays; symbolic contents and valid-reference length bounds | Disjoint mutable byte-slice roots support guarded writes; general aliases remain unsupported |
 | Tuples | Nested values, shared references, field projections and numeric contract fields such as `value.1.0` | Destructured argument names with projected debug bindings are not contract bindings |
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
-| Fixed non-byte arrays | At most 256 input elements within the 512-value budget; evaluated constants and generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
+| Fixed non-byte arrays | At most 256 input elements; large eligible subtrees use bounded lazy descriptors; evaluated constants and generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | Disjoint mutable root references, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
@@ -27,14 +27,31 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
-Root input construction has at most 16 recursive levels and 512 values across all arguments.
-References, aggregate containers and their children consume the budget. A symbolic byte array or
-slice is one modeled value rather than one value per byte. Recursive reference shapes and budget
-exhaustion return UNKNOWN before execution. Zero-length arrays do not require modeling an element
-value. Struct fields remain arbitrary inputs; privacy and constructors imply no hidden invariant.
-Enum selectors are constrained to the actual compiler discriminants, including explicit signed
-values. A downcast must prove the active tag before reading its payload. Reports expose
-`value.discriminant` and `value.variantN.field`; inactive payload bindings have no runtime meaning.
+Eager root input construction has at most 16 recursive levels and 512 values across all arguments.
+References, aggregate containers and their children consume the budget. Large reference-free Freeze
+struct/tuple/array subtrees with ordinary scalar leaves can instead use lazy descriptors. Repeated
+types share descriptors while retaining independent values. A bounded eager-size estimate selects
+compact eligible subtrees before other fields consume the budget. Cached descriptor heights must
+fit each occurrence's nesting depth. The descriptor budget
+shares the same 512-node total and 16-level limit; arrays retain their 256-element limit and a root
+reserves at most 262,144 symbol slots. One level is materialized on access or mutation, leaving
+nested aggregates lazy. Unsupported leaves are checked even when unused. Enums, chars, NonZero and
+compiler patterns retain eager validity constraints, with lazy eligible children. Snapshots and
+by-value copies retain initial values after writes. Induction does not yet accept lazy state. A
+symbolic byte array or slice is one modeled value rather than one value per byte. Recursive
+reference shapes and budget exhaustion return UNKNOWN before execution. Zero-length arrays do not
+require modeling an element value. Struct fields remain arbitrary inputs; privacy and constructors
+imply no hidden invariant. Enum selectors are constrained to the actual compiler discriminants,
+including explicit signed values. A downcast must prove the active tag before reading its payload.
+Reports expose `value.discriminant` and `value.variantN.field`; inactive payload bindings have no
+runtime meaning.
+
+Ordinary membership can read lazily represented fixed arrays, including nested scalar arrays and
+custom element records. Custom equality still executes its actual body; changing that body or an
+index guard refutes the original proof. Host/ARM cases and native execution check these
+interactions.
+Owned repeats and iteration count deferred fields against the same 256-value limit; small no-drop
+records can remain deferred, while oversized values and identity-bearing storage remain UNKNOWN.
 
 Constants use rustc_const_eval to read compiler layouts, discriminants and initialized scalars.
 The decoder inspects only the active variant; it does not invent values for inactive or
@@ -167,9 +184,9 @@ intrinsic declaration and primitive clamp implementation; they do not trust appl
 Small repeated tuples, structs, enum values and nested arrays preserve their contents and variant
 tags. Each copy owns its data: changing a field or byte in one copy does not change another copy.
 Generated repeats have at most 128 elements and 256 modeled values, counting aggregate containers
-and their children. Non-byte root arrays allow 256 elements within the 512-value input budget;
-evaluated constants permit 128 elements. Byte arrays retain their 128-byte limit. Tracked
-references, Cell/atomic identities and mutable views are excluded from repeat cloning.
+and their children. Non-byte root arrays allow 256 elements with eager values or bounded lazy
+descriptors; evaluated constants permit 128 elements. Byte arrays retain their 128-byte limit.
+Tracked references, Cell/atomic identities and mutable views are excluded from repeat cloning.
 
 Host/ARM tests prove six-by-six float matrix initialization, tuple/struct/enum copies, 18-element
 scalar/enum arrays, 128-element generated arrays and byte writes inside nested tuples. An incorrect
@@ -311,10 +328,10 @@ The existing Cargo `-Zbuild-std=core` path captures rebuilt core MIR, but unsupp
 inside those bodies still remain UNKNOWN. Primitive integer endian encoding and decoding use
 exact compiler identities, signatures and byte order.
 
-Root arrays allow 256 non-byte elements within the shared 512-value and 16-level budgets, and
-enums allow 64 variants. Integer compiler patterns and Unicode char validity constrain the
-input domain. The exact core NonZero getter reads the modeled scalar; other struct invariants
-are not inferred. Exhausted budgets and unresolved input types remain UNKNOWN.
+Root arrays allow 256 non-byte elements with eager values or bounded lazy descriptors, and enums
+allow 64 variants. Integer compiler patterns and Unicode char validity constrain the input domain.
+The exact core NonZero getter reads the modeled scalar; other struct invariants are not inferred.
+Exhausted budgets and unresolved input types remain UNKNOWN.
 
 Original host/ARM cases check mutable region writes, returned views, caller bounds, callback
 dispatch, endian boundaries and valid scalar domains. Native tests and failing mutations check

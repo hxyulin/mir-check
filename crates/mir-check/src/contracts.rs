@@ -103,7 +103,7 @@ fn evaluate(
             let index = index
                 .base10_parse::<usize>()
                 .map_err(|error| error.to_string())?;
-            match evaluate(context, &expr.expr, bindings, pointer_bits, None)? {
+            match evaluate(context, &expr.expr, bindings, pointer_bits, None)?.materialize()? {
                 Value::Elements(elements) => elements
                     .get(index)
                     .cloned()
@@ -342,7 +342,7 @@ fn evaluate(
         Expr::MethodCall(expr)
             if expr.method == "len" && expr.args.is_empty() && expr.turbofish.is_none() =>
         {
-            match evaluate(context, &expr.receiver, bindings, pointer_bits, None)? {
+            match evaluate(context, &expr.receiver, bindings, pointer_bits, None)?.materialize()? {
                 Value::Bytes { length, .. } => Ok(*length),
                 Value::Elements(elements) => Ok(symbolic::integer(
                     context,

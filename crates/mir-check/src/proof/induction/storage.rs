@@ -120,6 +120,9 @@ impl<'tcx> Engine<'tcx> {
                 Value::MetadataPointer(Box::new(self.loop_fresh_value(length)?))
             }
             Value::Unit => Value::Unit,
+            Value::Input(_) => {
+                return Err("unmaterialized lazy input is unsupported by induction".into());
+            }
             other @ (Value::Float { .. }
             | Value::Cell { .. }
             | Value::Atomic { .. }
@@ -362,6 +365,7 @@ impl<'tcx> Engine<'tcx> {
                         | Value::MetadataPointer(_)
                         | Value::StaticText
                         | Value::FormatArguments
+                        | Value::Input(_)
                         | Value::Function
                         | Value::Unit => {
                             return Err("inductive borrow field has unsupported storage".into());
@@ -560,6 +564,7 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Input(_)
             | Value::Function
             | Value::Unit,
             _,
@@ -609,6 +614,7 @@ pub(super) fn static_projection(value: Value, part: &MemoryProjection) -> Result
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::Input(_)
             | Value::Function
             | Value::Unit,
         ) => Err("unsupported inductive reference projection".into()),

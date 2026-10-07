@@ -136,6 +136,13 @@ fn owned_iterator_order_effects_failures_and_boundaries_are_checked_on_host_and_
                     .map(|o| (&o.status, &o.detail))
                     .collect::<Vec<_>>()
             );
+            if name == "borrowed_element" {
+                assert!(proof.obligations.iter().any(|obligation| {
+                    obligation
+                        .detail
+                        .contains("moving tracked reference elements")
+                }));
+            }
             if expected == ProofStatus::Proved && name != "borrowed_shared_count" {
                 assert!(
                     proof

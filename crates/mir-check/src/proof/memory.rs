@@ -184,7 +184,7 @@ impl<'tcx> Engine<'tcx> {
         projection: &MemoryProjection,
         conditions: &[Term],
     ) -> Result<Value, String> {
-        match (projection, value) {
+        match (projection, value.materialize()?) {
             (MemoryProjection::Field(index), Value::Adt { fields, .. }) => fields
                 .get(*index)
                 .map(|(_, value)| value.clone())
@@ -331,6 +331,7 @@ impl<'tcx> Engine<'tcx> {
         let mut value = self.local(state, local)?;
         let mut writable = true;
         for projection in place.projection {
+            value = value.materialize()?;
             match projection {
                 ProjectionElem::Deref => {
                     if let Value::Reference {
@@ -560,6 +561,7 @@ impl<'tcx> Engine<'tcx> {
             translated.extend_from_slice(rest);
             return self.write_projection(storage, &translated, value, conditions);
         }
+        *storage = storage.materialize()?;
         // Establish downcast/bounds conditions before mutating the selected field.
         self.memory_projection(storage.clone(), projection, conditions)?;
         match (projection, storage) {
@@ -782,7 +784,8 @@ impl<'tcx> Engine<'tcx> {
             Value::SliceIterator { source, .. } | Value::MetadataPointer(source) => {
                 Self::validate_reference_graph(source, state, incoming, visited)
             }
-            Value::Bool(_)
+            Value::Input(_)
+            | Value::Bool(_)
             | Value::Int { .. }
             | Value::Float { .. }
             | Value::Bytes { .. }
