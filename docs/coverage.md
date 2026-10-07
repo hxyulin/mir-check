@@ -21,6 +21,7 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Structs | Nested local/dependency structs, concrete generic fields and supported shared-reference fields | Unions, reference fields in mutable root pointees and unresolved generics remain unsupported |
 | Fixed non-byte arrays | At most 256 input elements; large eligible subtrees use bounded lazy descriptors; evaluated constants and generated owned repeats support up to 128 | Larger arrays fail as UNKNOWN |
 | Array indexing | Symbolic bounded integer/bool/float selection, start/end pattern offsets and uniquely determined composite indices | An ambiguous tuple/struct/enum index remains UNKNOWN |
+| Fixed-array equality | Primitive numeric equality and actual custom/nested comparisons; ordered short-circuit effects | At most 128 elements per array; general slice equality and inlined pointer-based comparisons remain gaps |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | Disjoint mutable root references, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
 | Interior mutation | Scalar Cell aliases/calls and integer atomic load/store/add/sub/swap with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
@@ -118,6 +119,19 @@ positive, negative, unknown and source-mutated cases, plus native replay. Inlini
 supported call boundary remains a limitation, including inlined custom comparisons that expose
 unsupported interior-storage or panic-formatting internals. Mutable Subslice addresses remain
 unsupported.
+
+Fixed-array equality and inequality recognize core's PartialEq implementations and its exact
+SpecArrayEq trait, with shared-reference array signatures and matching fixed lengths. Primitive
+elements use numeric equality, including char, NaN non-reflexivity and signed-zero equality.
+Custom and nested elements call actual resolved `ne` MIR, matching the pinned core slice comparator;
+the model preserves receiver order, call checks, panics, interior effects and early termination.
+Arrays with no elements call no comparison body. Comparisons have at most 128 elements per array;
+unsupported callees and exhausted execution/solver budgets remain UNKNOWN. Host/ARM debug and
+optimized cases cover guarded comparisons, byte arrays at the limit, nested and derived records,
+cross-type comparisons, overridden inequality, reachable and skipped panics, counterfeit method
+names and the budget boundary. Three failing mutations are refuted and replayed natively.
+Unsupported float remainder inside an element comparison remains UNKNOWN.
+This comparison model currently applies to ordinary execution.
 
 ## Contracts and root selection
 

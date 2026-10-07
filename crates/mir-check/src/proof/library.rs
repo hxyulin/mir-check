@@ -98,6 +98,11 @@ impl<'tcx> Engine<'tcx> {
             return Ok(None);
         }
         if let Some(results) =
+            self.array_equality(instance, values, raw_values, state, stack, site)?
+        {
+            return Ok(Some(results));
+        }
+        if let Some(results) =
             self.slice_membership(instance, values, raw_values, state, stack, site)?
         {
             return Ok(Some(results));

@@ -21,6 +21,7 @@ const MAX_INPUT_VALUES: usize = 512;
 const MAX_ROOT_SECONDS: u64 = 30;
 
 mod aggregates;
+mod array_equality;
 mod builtins;
 mod constants;
 mod external;

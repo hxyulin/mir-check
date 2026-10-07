@@ -350,10 +350,21 @@ fused multiply-add with explicit IEEE rounding.
 Min/max ignores one NaN and permits either operand on equal numeric inputs, including signed-zero
 ties. Numeric NaN outputs permit all storage encodings rather than selecting an assumed payload.
 Array map executes each actual callable body; the model supplies array traversal and storage.
+Fixed-array equality models core's typed comparison boundary for up to 128 elements per array.
+Primitive elements use exact numeric equality; float NaNs remain unequal and signed zeros equal.
+Custom and nested elements execute their actual resolved inequality body in index order, stopping
+at the first mismatch and retaining effects, panics and call obligations. This follows the pinned
+[core slice comparator][core-array-eq], which uses `ne` rather than assuming it complements `eq`.
+Zero-length comparisons invoke no element body. Model selection checks the core crate, compiler
+trait identity, shared-reference signature and fixed lengths. General slice equality, oversized
+arrays and unavailable or unsupported element bodies remain incomplete. Native tests check custom
+overrides, numeric edge cases and failing mutations; this model is trusted translation code.
 Compiler identities and
 instantiated types select models. Dependencies and dynamic formatters are not assumed safe.
 A solver model is not automatically replayed as a Rust test;
 confirmed examples currently have separate runtime replay tests.
+
+[core-array-eq]: https://github.com/rust-lang/rust/blob/1303417/library/core/src/slice/cmp.rs
 
 Concrete generic arguments are substituted and normalized before execution. Static trait dispatch
 resolves to a concrete implementation. Available dependency bodies, supported mutable closures and
