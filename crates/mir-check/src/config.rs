@@ -28,6 +28,8 @@ pub struct FunctionContract {
     pub no_panic: bool,
     #[serde(default)]
     pub modifies: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns_alias: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
 }
@@ -87,8 +89,19 @@ impl ContractConfig {
                 {
                     return Err("modifies must name declared positional arguments".to_owned());
                 }
-            } else if function.modifies.is_some() || function.reason.is_some() {
-                return Err("effects and reasons apply only to trusted summaries".to_owned());
+                if let Some(name) = &function.returns_alias
+                    && !function.arguments.contains(name)
+                {
+                    return Err("returns_alias must name a declared positional argument".to_owned());
+                }
+            } else if function.modifies.is_some()
+                || function.returns_alias.is_some()
+                || function.reason.is_some()
+            {
+                return Err(
+                    "effects, return aliases and reasons apply only to trusted summaries"
+                        .to_owned(),
+                );
             }
         }
         Ok(config)

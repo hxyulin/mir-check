@@ -3715,6 +3715,7 @@ fn malformed_contract_configuration_fails_before_compilation() {
         ("reason", serde_json::json!(" ")),
         ("no_panic", serde_json::json!(false)),
         ("modifies", serde_json::json!(["typo"])),
+        ("returns_alias", serde_json::json!("typo")),
         ("arguments", serde_json::json!(["result"])),
         ("function", serde_json::json!("external_contracts::*")),
         ("requires", serde_json::json!(["value <"])),

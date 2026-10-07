@@ -445,6 +445,13 @@ retain tracked references. Returns can retain references into incoming storage, 
 iterators or closures. The returned graph and incoming storage are checked for references into the
 returning frame or dead allocations. A local mutable borrow cannot escape by being nested.
 
+Ordinary execution accepts mutable-reference transmutes whose erased MIR types are identical.
+The reference must already identify live tracked storage, and its allocation, projection and
+mutability are preserved. This covers a lifetime-only cast without inventing a static allocation.
+Frame escape checks still apply. Shared snapshots, different pointees or mutability, and raw
+pointer-to-reference conversions do not acquire this model. This is panic analysis with tracked
+storage, not a proof of Rust lifetime validity.
+
 FnMut calls borrow the actual closure environment. Models for map/from_fn, predicates and folds
 allocate one environment per invocation and propagate owned field updates and captured writes
 between callbacks. The temporary environment is retired after traversal. Local byte borrows use
@@ -497,9 +504,13 @@ proves its preconditions, generates fresh supported return values, applies the c
 effects and assumes its ensures clauses. Missing effects invalidate modeled storage facts;
 an explicit effect list includes a trusted frame claim for storage outside that list. Supported
 reference writes update known aliases. Unsupported ownership/alias shapes and inconsistent
-summary constraints remain UNKNOWN. Generic summaries require a concrete instance selector.
+summary constraints remain UNKNOWN. An explicit returns_alias clause can preserve one tracked
+mutable-reference argument with the same pointee type, subject to the claimed memory effects and
+existing escape checks. Generic summaries require a concrete instance selector.
 
-The engine records every used summary, reason, call site, instance and crate hash. Such a root
+The engine records every used summary, reason, call site, instance and available crate hash.
+Local binary builds without compiler HIR hashing report an unavailable hash rather than requesting
+an unsupported compiler query. Such a root
 is PROVED_WITH_ASSUMPTIONS and is excluded from ordinary PROVED counts. Default verification
 rejects it; --allow-assumptions explicitly accepts that conditional outcome. REFUTED and UNKNOWN
 take precedence and still fail. A trusted function selected as a root executes its real body,

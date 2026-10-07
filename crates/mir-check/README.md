@@ -509,3 +509,12 @@ constructor bodies execute without a raw-pointer memory model. Arbitrary pointer
 provenance, reference-to-pointer conversion, metadata-bearing pointers, pointer arithmetic and
 memory access remain UNKNOWN. Host/ARM tests cover signed and truncating casts, copies,
 constructors, false claims and source mutations with native replay.
+
+Lifetime-only mutable-reference transmutes preserve the tracked allocation and projection when
+their erased MIR types match. Existing dead-storage and frame-escape checks remain enforced; this
+does not establish general lifetime validity. An opt-in trusted returns_alias clause can return a
+named mutable-reference argument with the same pointee type, preserving its alias under the claimed
+memory effects. Its use remains visible as a user assumption, including on UNKNOWN and REFUTED
+roots. Missing compiler hashes on local binary builds are reported as unavailable. Host/ARM
+debug and optimized synthetic MIR tests cover writes, projected storage, invalid reference shapes
+and frame escapes; valid scoped calls and failing mutations also replay natively.

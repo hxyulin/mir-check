@@ -460,3 +460,11 @@ panics remain checked. This is address-value translation only: arbitrary pointer
 reference-derived pointers, allocation provenance, metadata, arithmetic and dereferences remain
 UNKNOWN. Host/ARM debug and optimized fixtures include positive, negative, unknown and mutated
 cases, with native replay of address operations and failing claims.
+
+Lifetime-only mutable-reference casts keep their tracked allocation and projection when the erased
+MIR reference types match. Typed writes and frame-escape checks still apply; no static allocation
+or general lifetime guarantee is introduced. Explicit trusted returns_alias clauses can preserve
+one named mutable-reference argument with the same pointee type and the claimed memory effects.
+Assumptions are visible on successful, refuted and unknown roots. Host/ARM synthetic MIR fixtures
+check scoped writes, rejected casts, dead storage and escaping borrows, with native mutation replay.
+Static interior-mutable byte storage reinterpreted through raw pointers remains unsupported.

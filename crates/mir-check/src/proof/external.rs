@@ -346,21 +346,44 @@ impl<'tcx> Engine<'tcx> {
         } else {
             memory.fill(None);
         }
-        // Opaque reference, pointer, callable or destructor-bearing return values need a model.
         let output = signature.output();
-        if output.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
-            || output.is_ref()
-            || output.is_raw_ptr()
-        {
-            return Err("summary return type needs an explicit ownership/alias model".to_owned());
-        }
-        if !self.summary_shape(output, 0) {
-            return Err(
-                "summary return shape contains unsupported ownership or aliases".to_owned(),
+        let (result, result_binding) = if let Some(name) = &spec.returns_alias {
+            let index = names
+                .iter()
+                .position(|candidate| candidate == name)
+                .ok_or("summary return alias argument unavailable")?;
+            let same_pointee = matches!(
+                (signature.inputs()[index].kind(), output.kind()),
+                (ty::Ref(_, input, input_mut), ty::Ref(_, output, output_mut))
+                    if input == output && input_mut.is_mut() && output_mut.is_mut()
             );
-        }
-        let result = self.argument(instance.def_id(), output, &mut conditions)?;
-        bindings.insert("result".to_owned(), result.clone());
+            if !same_pointee || !matches!(values[index], Value::Reference { mutable: true, .. }) {
+                return Err(
+                    "summary return alias needs identical tracked mutable reference types"
+                        .to_owned(),
+                );
+            }
+            self.validate_tracked_value(&values[index], state)?;
+            let binding = self.reference_value(&values[index], &memory, &conditions)?;
+            (values[index].clone(), binding)
+        } else {
+            if output.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
+                || output.is_ref()
+                || output.is_raw_ptr()
+            {
+                return Err(
+                    "summary return type needs an explicit ownership/alias model".to_owned(),
+                );
+            }
+            if !self.summary_shape(output, 0) {
+                return Err(
+                    "summary return shape contains unsupported ownership or aliases".to_owned(),
+                );
+            }
+            let result = self.argument(instance.def_id(), output, &mut conditions)?;
+            (result.clone(), result)
+        };
+        bindings.insert("result".to_owned(), result_binding);
         if spec.ensures.iter().try_fold(false, |found, predicate| {
             Ok::<_, String>(found | contracts::uses_post_state(predicate)?)
         })? {
@@ -378,7 +401,11 @@ impl<'tcx> Engine<'tcx> {
         self.proof.trusted_calls.push(TrustedCall {
             contract: spec,
             instance: format!("{:?}", instance.args),
-            crate_hash: format!("{:?}", self.tcx.crate_hash(instance.def_id().krate)),
+            crate_hash: if instance.def_id().is_local() && !self.tcx.needs_hir_hash() {
+                String::new()
+            } else {
+                format!("{:?}", self.tcx.crate_hash(instance.def_id().krate))
+            },
             source: crate::source(self.tcx, site.1),
         });
         Ok(Some(vec![Return {

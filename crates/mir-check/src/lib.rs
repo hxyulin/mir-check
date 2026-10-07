@@ -170,6 +170,7 @@ pub struct Proof {
 pub struct TrustedCall {
     pub contract: FunctionContract,
     pub instance: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub crate_hash: String,
     pub source: Source,
 }
@@ -454,17 +455,22 @@ pub fn render(report: &Report) -> String {
                     output,
                     concat!(
                         "      USER TRUSTED {} {} crate {} at {}:{}; reason: {}; ",
-                        "requires {:?}; ensures {:?}; modifies {:?}"
+                        "requires {:?}; ensures {:?}; modifies {:?}; returns_alias {:?}"
                     ),
                     trusted.contract.function,
                     trusted.instance,
-                    trusted.crate_hash,
+                    if trusted.crate_hash.is_empty() {
+                        "hash unavailable for this build"
+                    } else {
+                        &trusted.crate_hash
+                    },
                     trusted.source.file,
                     trusted.source.line,
                     trusted.contract.reason.as_deref().unwrap_or(""),
                     trusted.contract.requires,
                     trusted.contract.ensures,
-                    trusted.contract.modifies
+                    trusted.contract.modifies,
+                    trusted.contract.returns_alias
                 );
             }
             for body in &proof.analyzed_bodies {

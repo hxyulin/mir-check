@@ -115,13 +115,29 @@ cargo mir-check --verify --summary --contracts contracts.json --allow-assumption
 The flag never accepts REFUTED or UNKNOWN. Selecting the trusted function itself as a root still
 executes its actual body. An assumption about a callee cannot verify the callee's implementation.
 Reports retain the full configuration and each used summary's clauses, reason, concrete compiler
-instance, crate hash and call-site source. The hash is recorded provenance, not a configured
-version pin. A trusted function requires no_panic=true and a nonempty reason.
+instance, available crate hash and call-site source. The hash is recorded provenance, not a
+configured version pin. A trusted function requires no_panic=true and a nonempty reason.
+Some local binary builds do not compute a compiler crate hash. Reports omit that hash and the
+verbose output explicitly says it is unavailable; the assumption is still recorded.
 
 The return value is fresh within its supported Rust type. A fmt::Result can still be Err: assuming
 no panic does not assume success, and a caller that panics on Err can be refuted. Trusted ensures
 restrict the fresh return/state; ill-typed or inconsistent clauses yield UNKNOWN. Reference,
 pointer, callable, destructor-bearing and alias-containing return shapes require further models.
+
+A trusted boundary returning its mutable-reference argument can declare `returns_alias`, naming
+one of its positional argument aliases. The input and output must both be mutable references to
+the same pointee type; only the outer lifetime can differ. The returned value keeps the original
+tracked allocation and field/index projection. For example, `"arguments": ["storage"]`,
+`"returns_alias": "storage"` and `"modifies": []` claim that the function returns that reference
+without modifying modeled storage. This is an explicit alias claim, not a fresh symbolic result.
+An ensures predicate's `result` reads the returned pointee after the claimed effects.
+
+Missing effects still invalidate storage, so such an alias cannot be used to retain stale facts.
+Dead storage, escaping local mutable borrows, different pointee types, shared references, raw
+pointers and aggregate alias returns remain unsupported. Returning an alias does not verify
+Rust lifetime validity or make a local allocation live forever. It never verifies the assumed
+function's implementation; selecting that function as a root still checks its body.
 
 Effects are also explicit claims. Omitting modifies invalidates all modeled storage facts after
 the call. Setting modifies to an empty array claims that no modeled storage changes. Listing an

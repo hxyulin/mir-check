@@ -332,3 +332,8 @@ futures and captured mutable storage. Future construction alone does not prove d
 A standalone binary fixture proves from main through two polls and rejects a bad resumed index.
 Unbounded async polling, arbitrary coroutine inputs, waker operations and executor internals remain
 UNKNOWN. See [constructed async futures](docs/proofs.md#constructed-async-futures).
+
+Lifetime-only mutable-reference casts now preserve tracked storage. An explicit trusted
+`returns_alias` clause can also preserve a named mutable-reference argument, with the claimed
+memory effects and existing escape checks. Assumptions remain visible even when a root ends in
+UNKNOWN or REFUTED. See [trusted boundaries](docs/contracts.md#explicitly-trusted-call-boundaries).

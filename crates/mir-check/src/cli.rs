@@ -255,19 +255,17 @@ pub fn render_report(report: &Report, verbose: bool, colored: bool) -> String {
             if proof.stopped_after_counterexample {
                 let _ = writeln!(output, "    stopped after first counterexample");
             }
-            if proof.status == ProofStatus::ProvedWithAssumptions {
-                for trusted in &proof.trusted_calls {
-                    let _ = writeln!(
-                        output,
-                        "    assumes {}: {}",
-                        trusted.contract.function,
-                        trusted
-                            .contract
-                            .reason
-                            .as_deref()
-                            .unwrap_or("unspecified reason")
-                    );
-                }
+            for trusted in &proof.trusted_calls {
+                let _ = writeln!(
+                    output,
+                    "    assumes {}: {}",
+                    trusted.contract.function,
+                    trusted
+                        .contract
+                        .reason
+                        .as_deref()
+                        .unwrap_or("unspecified reason")
+                );
             }
         }
     }

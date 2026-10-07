@@ -1515,6 +1515,15 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::Cast(CastKind::Transmute, operand, target) => {
                 let source = operand.ty(&body.local_decls, self.tcx);
                 let value = self.operand(id, body, state, operand)?;
+                if source == *target
+                    && matches!(source.kind(), ty::Ref(_, _, mutability) if mutability.is_mut())
+                    && matches!(value, Value::Reference { mutable: true, .. })
+                {
+                    self.validate_tracked_value(&value, state)?;
+                    self.reference_value(&value, &state.memory, &state.conditions)?;
+                    self.record_model(id, "reference lifetime cast; tracked allocation preserved");
+                    return Ok(value);
+                }
                 if let Some(value) = self.pointer_handle_transmute(source, *target, &value)? {
                     self.record_model(id, "thin pointer representation; no memory access");
                     return Ok(value);
