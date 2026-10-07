@@ -527,10 +527,17 @@ and the inlined transparent pointer cast retain that identity. Restoration requi
 or projected pointee type; matching sizes alone do not authorize unrelated types.
 
 These are opaque storage views. Initializer bytes never become mutable runtime facts, and general
-payload reads, writes, unions, fat pointers and array-to-slice view coercions remain UNKNOWN.
+payload reads, writes, unions and general fat pointers remain UNKNOWN.
 Supported integer atomic fields use the existing arbitrary-per-access model. Exposed addresses are
 symbolic, non-null, aligned and non-wrapping; they cannot reconstruct a dereferenceable view from an
 integer. An unknown trusted memory effect invalidates existing views. A root reserves one memory
 slot for this invalidation state, and at most 512 view descriptors are interned. Induction over
 these views remains unsupported. Host/ARM debug and optimized fixtures check restoration, offsets,
 atomic access, rejected layouts, invalidation and mutations, with native replay of valid cases.
+
+Shared static arrays also support slice coercions and iterators over at most 128 opaque element
+views. Compiler array strides preserve element addresses and field offsets. Direct indexing needs
+a uniquely selected element; ambiguous composite indices and mutable opaque storage remain UNKNOWN.
+Slice iterator `find_map` executes concrete callback MIR, retains captured side effects and stops
+at the first modeled Some result. Unsupported callback shapes and destructors remain UNKNOWN.
+Empty slice descriptors retain effect invalidation. These views do not load array payloads.

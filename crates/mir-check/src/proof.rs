@@ -307,6 +307,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
+            | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function => {
@@ -1178,6 +1179,9 @@ impl<'tcx> Engine<'tcx> {
     fn place(&self, state: &State, place: Place<'tcx>) -> Result<Value, String> {
         let mut value = self.local(state, place.local.as_usize())?;
         for projection in place.projection {
+            if matches!(value, Value::StaticSlice { .. }) {
+                self.validate_tracked_value(&value, state)?;
+            }
             if matches!(value, Value::StaticView { .. }) {
                 value = self.static_view_projection(&value, projection, state)?;
                 continue;
@@ -1192,6 +1196,7 @@ impl<'tcx> Engine<'tcx> {
                     | Value::Adt { .. }
                     | Value::Enum { .. }
                     | Value::Elements(_)
+                    | Value::StaticSlice { .. }
                     | Value::Tuple(_)
                     | Value::Unit
                     | Value::Int { .. }
@@ -1276,6 +1281,11 @@ impl<'tcx> Engine<'tcx> {
                     let index = self.local(state, index.as_usize())?;
                     self.fixed_element(&elements, &index, &state.conditions)?
                 }
+                (ProjectionElem::Index(index), Value::StaticSlice { elements, .. }) => {
+                    let index = self.local(state, index.as_usize())?;
+                    let selected = self.fixed_element(&elements, &index, &state.conditions)?;
+                    self.static_view_projection(&selected, ProjectionElem::Deref, state)?
+                }
                 (ProjectionElem::Subslice { from, to, from_end }, value @ Value::Bytes { .. }) => {
                     self.byte_subslice(value, from, to, from_end, &state.conditions)?
                 }
@@ -1285,10 +1295,13 @@ impl<'tcx> Engine<'tcx> {
                         min_length,
                         from_end,
                     },
-                    value @ (Value::Bytes { .. } | Value::Elements(_)),
+                    value @ (Value::Bytes { .. } | Value::Elements(_) | Value::StaticSlice { .. }),
                 ) => self.constant_element(state, value, offset, min_length, from_end)?,
                 _ => return Err(format!("unsupported place projection {projection:?}")),
             };
+        }
+        if matches!(value, Value::StaticSlice { .. }) {
+            self.validate_tracked_value(&value, state)?;
         }
         value.materialize()
     }
@@ -1365,12 +1378,14 @@ impl<'tcx> Engine<'tcx> {
                 let value = self.place(state, *place)?;
                 let length = match value {
                     Value::Bytes { length, .. } => *length,
-                    Value::Elements(elements) => symbolic::integer(
-                        &self.terms,
-                        elements.len() as u128,
-                        u32::from(self.tcx.sess.target.pointer_width),
-                        false,
-                    ),
+                    Value::Elements(elements) | Value::StaticSlice { elements, .. } => {
+                        symbolic::integer(
+                            &self.terms,
+                            elements.len() as u128,
+                            u32::from(self.tcx.sess.target.pointer_width),
+                            false,
+                        )
+                    }
                     _ => {
                         return Err("metadata-only pointer needs array or slice storage".to_owned());
                     }
@@ -1511,7 +1526,10 @@ impl<'tcx> Engine<'tcx> {
                     }),
                     (UnOp::PtrMetadata, Value::MetadataPointer(length)) => Ok(*length),
                     (UnOp::PtrMetadata, Value::Bytes { length, .. }) => Ok(*length),
-                    (UnOp::PtrMetadata, Value::Elements(elements)) => Ok(symbolic::integer(
+                    (
+                        UnOp::PtrMetadata,
+                        Value::Elements(elements) | Value::StaticSlice { elements, .. },
+                    ) => Ok(symbolic::integer(
                         &self.terms,
                         elements.len() as u128,
                         u32::from(self.tcx.sess.target.pointer_width),
@@ -1638,6 +1656,19 @@ impl<'tcx> Engine<'tcx> {
                     return Err("only slice coercions are modeled".to_owned());
                 };
                 let value = self.operand(id, body, state, operand)?;
+                if matches!(value, Value::StaticView { .. }) {
+                    let value = self.coerce_static_slice(
+                        operand.ty(&body.local_decls, self.tcx),
+                        *target,
+                        &value,
+                        state,
+                    )?;
+                    self.record_model(
+                        id,
+                        "bounded static slice; element views preserve allocation offsets",
+                    );
+                    return Ok(value);
+                }
                 if let Value::Reference {
                     allocation,
                     projection,
@@ -1657,7 +1688,9 @@ impl<'tcx> Engine<'tcx> {
                         });
                     }
                 }
-                if !mutability.is_mut() && matches!(value, Value::Elements(_)) {
+                if !mutability.is_mut()
+                    && matches!(value, Value::Elements(_) | Value::StaticSlice { .. })
+                {
                     return Ok(value);
                 }
                 if *element != self.tcx.types.u8 {

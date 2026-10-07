@@ -274,3 +274,94 @@ fn induction_does_not_treat_unsupported_static_state_as_success() {
     );
     assert!(!output.status.success());
 }
+
+#[test]
+fn static_slices_preserve_element_references_and_execute_short_circuit_callbacks() {
+    let entries = [
+        ("rows", ProofStatus::Proved),
+        ("static_slice_cursor_offsets", ProofStatus::Proved),
+        ("static_array_index", ProofStatus::Proved),
+        (
+            "array_of_references_preserves_reference_values",
+            ProofStatus::Proved,
+        ),
+        ("static_find_map_skips_later_panic", ProofStatus::Proved),
+        ("static_find_map_reaches_later_panic", ProofStatus::Refuted),
+        ("static_find_map_exhausts", ProofStatus::Proved),
+        (
+            "static_find_map_returns_later_reference",
+            ProofStatus::Proved,
+        ),
+        (
+            "static_find_map_callback_read_is_unknown",
+            ProofStatus::Unknown,
+        ),
+        ("static_slice_payload_read_is_unknown", ProofStatus::Unknown),
+        ("static_slice_budget_is_unknown", ProofStatus::Unknown),
+        ("empty_static_slice", ProofStatus::Proved),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized, None);
+        }
+    }
+}
+
+#[test]
+fn empty_static_slices_keep_their_effect_invalidation_marker() {
+    let mut specification = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"static_views::boundary", "trusted":true,"no_panic":true,
+        "reason":"Explicit boundary for empty storage invalidation testing"
+    }]});
+    for (framed, status) in [
+        (false, ProofStatus::Unknown),
+        (true, ProofStatus::ProvedWithAssumptions),
+    ] {
+        if framed {
+            specification["functions"][0]["modifies"] = serde_json::json!([]);
+        }
+        for target in [None, Some("thumbv7em-none-eabihf")] {
+            verify(
+                &fixture(),
+                &[
+                    ("empty_static_slice_is_invalidated", status),
+                    ("empty_static_iterator_is_invalidated", status),
+                ],
+                target,
+                false,
+                Some(specification.clone()),
+            );
+        }
+    }
+}
+
+#[test]
+fn incorrect_static_slice_offsets_and_short_circuit_claims_fail() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    for (original, mutation, name) in [
+        (
+            "as usize + 32",
+            "as usize + 31",
+            "static_slice_cursor_offsets",
+        ),
+        (
+            "assert!(calls == 1);",
+            "assert!(calls == 2);",
+            "static_find_map_skips_later_panic",
+        ),
+        (
+            "assert!(calls == 3);",
+            "assert!(calls == 2);",
+            "static_find_map_exhausts",
+        ),
+    ] {
+        assert!(source.contains(original));
+        let directory = Directory::new();
+        let path = directory.0.join("mutant.rs");
+        std::fs::write(&path, source.replace(original, mutation)).unwrap();
+        for target in [None, Some("thumbv7em-none-eabihf")] {
+            verify(&path, &[(name, ProofStatus::Refuted)], target, false, None);
+        }
+        assert!(!native_tests(&path, &directory));
+    }
+}

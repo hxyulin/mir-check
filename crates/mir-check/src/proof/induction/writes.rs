@@ -61,6 +61,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::FormatArguments
                 | Value::Input(_)
                 | Value::RawPointer { .. }
+                | Value::StaticSlice { .. }
                 | Value::StaticView { .. }
                 | Value::Uninitialized
                 | Value::Function
@@ -89,6 +90,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::FormatArguments
                 | Value::Input(_)
                 | Value::RawPointer { .. }
+                | Value::StaticSlice { .. }
                 | Value::StaticView { .. }
                 | Value::Uninitialized
                 | Value::Function
@@ -170,6 +172,7 @@ fn scalar_update(
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
             | Value::Function

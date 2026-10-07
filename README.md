@@ -340,5 +340,7 @@ UNKNOWN or REFUTED. See [trusted boundaries](docs/contracts.md#explicitly-truste
 
 The ordinary interpreter can also recover a compiler-known typed static layout through an
 UnsafeCell byte carrier while keeping its payload opaque. It checks allocation provenance, original
-initializer types, size, alignment and field offsets. See
+initializer types, size, alignment and field offsets. Shared fixed arrays support bounded slice
+views and ordered element references; iterator `find_map` executes callbacks with short circuiting.
+General mutable payloads remain opaque. See
 [static storage views](docs/proofs.md#opaque-static-storage-views) for the supported boundaries.

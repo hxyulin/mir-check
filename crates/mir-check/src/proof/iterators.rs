@@ -108,6 +108,21 @@ impl<'tcx> Engine<'tcx> {
                 Value::Elements(elements) => {
                     (source.clone(), self.iterator_index(elements.len() as u128))
                 }
+                Value::StaticSlice { ref elements, .. } => {
+                    let back = self.iterator_index(elements.len() as u128);
+                    (snapshot, back)
+                }
+                Value::StaticView { .. } if !mutable => {
+                    let elements = self.static_array_elements(&snapshot, state)?;
+                    let Value::StaticSlice {
+                        elements: items, ..
+                    } = &elements
+                    else {
+                        unreachable!();
+                    };
+                    let back = self.iterator_index(items.len() as u128);
+                    (elements, back)
+                }
                 _ => return Err("iterator needs modeled slice storage".to_owned()),
             };
             if mutable && !matches!(source, Value::Reference { mutable: true, .. }) {
@@ -150,9 +165,18 @@ impl<'tcx> Engine<'tcx> {
         }
         let receiver = values.first().ok_or("iterator receiver is missing")?;
         let iterator = self.snapshot(receiver, &state.memory, &state.conditions, 0)?;
-        let Value::SliceIterator { front, back, .. } = &iterator else {
+        let Value::SliceIterator {
+            source,
+            front,
+            back,
+            ..
+        } = &iterator
+        else {
             return Err("slice iterator state is not modeled".to_owned());
         };
+        if matches!(source.as_ref(), Value::StaticSlice { .. }) {
+            self.snapshot(source, &state.memory, &state.conditions, 0)?;
+        }
         let trait_id = if matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: true }) {
             Some(
                 self.tcx
@@ -169,9 +193,8 @@ impl<'tcx> Engine<'tcx> {
         let iterator_trait = self.tcx.get_diagnostic_item(Symbol::intern("Iterator"));
         let clone_trait = self.tcx.lang_items().get(LangItem::Clone);
         let supported = match name.as_str() {
-            "next" | "nth" | "count" | "size_hint" | "all" | "any" | "fold" | "by_ref" => {
-                trait_id.is_some() && trait_id == iterator_trait
-            }
+            "next" | "nth" | "count" | "size_hint" | "all" | "any" | "find_map" | "fold"
+            | "by_ref" => trait_id.is_some() && trait_id == iterator_trait,
             "into_iter" => {
                 trait_id.is_some()
                     && trait_id == self.tcx.get_diagnostic_item(Symbol::intern("IntoIterator"))
@@ -215,7 +238,7 @@ impl<'tcx> Engine<'tcx> {
             callee,
             "slice iterator; ordered elements and tracked cursor",
         );
-        if matches!(name.as_str(), "all" | "any") {
+        if matches!(name.as_str(), "all" | "any" | "find_map") {
             return self
                 .iterator_predicate(instance, values, iterator, state, stack, site)
                 .map(Some);
@@ -518,6 +541,9 @@ impl<'tcx> Engine<'tcx> {
         else {
             return Err("expected modeled slice iterator".to_owned());
         };
+        if matches!(source.as_ref(), Value::StaticSlice { .. }) {
+            self.snapshot(&source, &memory, &conditions, 0)?;
+        }
         let remaining = symbolic::binary(&self.terms, "sub", (*back).clone(), (*front).clone())?;
         let inside = symbolic::binary(&self.terms, "lt", skip.clone(), remaining)?.boolean()?;
         let mut results = Vec::new();
@@ -573,7 +599,7 @@ impl<'tcx> Engine<'tcx> {
                         bits: 8,
                         signed: false,
                     },
-                    Value::Elements(elements) if !mutable => {
+                    Value::Elements(elements) | Value::StaticSlice { elements, .. } if !mutable => {
                         self.fixed_element(&elements, &index, &conditions)?
                     }
                     _ => return Err("iterator element storage is not modeled".to_owned()),
@@ -635,7 +661,9 @@ impl<'tcx> Engine<'tcx> {
         } else {
             (predicate.clone(), state.memory.clone())
         };
-        let all = self.tcx.item_name(instance.def_id()) == Symbol::intern("all");
+        let name = self.tcx.item_name(instance.def_id());
+        let all = name == Symbol::intern("all");
+        let find_map = name == Symbol::intern("find_map");
         let mut pending = vec![(iterator, state.conditions.clone(), memory)];
         let mut returns = Vec::new();
         while let Some((iterator, conditions, memory)) = pending.pop() {
@@ -651,7 +679,11 @@ impl<'tcx> Engine<'tcx> {
                 )?;
                 let Some(item) = iteration.item else {
                     returns.push(Return {
-                        value: Value::Bool(self.terms.boolean(all)),
+                        value: if find_map {
+                            self.constructed(signature.output(), 0, vec![])?
+                        } else {
+                            Value::Bool(self.terms.boolean(all))
+                        },
                         conditions: iteration.conditions,
                         memory,
                     });
@@ -670,6 +702,26 @@ impl<'tcx> Engine<'tcx> {
                     stack,
                     site,
                 )? {
+                    if find_map {
+                        let Value::Adt {
+                            is_option: true,
+                            variant,
+                            ..
+                        } = &result.value
+                        else {
+                            return Err("find_map callback needs a modeled Option result".into());
+                        };
+                        match variant {
+                            0 => pending.push((
+                                iteration.iterator.clone(),
+                                result.conditions,
+                                result.memory,
+                            )),
+                            1 => returns.push(result),
+                            _ => return Err("find_map callback returned an invalid variant".into()),
+                        }
+                        continue;
+                    }
                     let keep = result.value.boolean()?;
                     let keep = if all { keep } else { symbolic::not(&keep) };
                     let stopped = [result.conditions.clone(), vec![symbolic::not(&keep)]].concat();

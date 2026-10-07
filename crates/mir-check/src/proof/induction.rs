@@ -1061,6 +1061,7 @@ fn flatten_value(value: &Value, result: &mut Vec<Term>) -> Result<(), String> {
         | Value::StaticText
         | Value::FormatArguments
         | Value::RawPointer { .. }
+        | Value::StaticSlice { .. }
         | Value::StaticView { .. }
         | Value::Uninitialized
         | Value::Function) => return Err(format!("unsupported inductive value {other:?}")),

@@ -68,7 +68,7 @@ impl<'tcx> Engine<'tcx> {
             return Err("memory snapshot nesting limit reached".to_owned());
         }
         match value {
-            Value::StaticView { epoch, .. } => {
+            Value::StaticSlice { epoch, .. } | Value::StaticView { epoch, .. } => {
                 if matches!(memory.get(*epoch), Some(Some(Value::Unit))) {
                     Ok(value.clone())
                 } else {
@@ -416,7 +416,13 @@ impl<'tcx> Engine<'tcx> {
         if matches!(value, Value::StaticView { .. }) {
             return self.borrow_static_view(&value, mutable, state);
         }
-        if !mutable && matches!(value, Value::Bytes { .. } | Value::StaticText) {
+        if !mutable
+            && matches!(
+                value,
+                Value::Bytes { .. } | Value::StaticText | Value::StaticSlice { .. }
+            )
+        {
+            self.validate_tracked_value(&value, state)?;
             return Ok(value);
         }
         if mutable && matches!(value, Value::StaticText) {
@@ -794,6 +800,15 @@ impl<'tcx> Engine<'tcx> {
             Value::SliceIterator { source, .. } | Value::MetadataPointer(source) => {
                 Self::validate_reference_graph(source, state, incoming, visited)
             }
+            Value::StaticSlice { epoch, elements } => {
+                if !matches!(state.memory.get(*epoch), Some(Some(Value::Unit))) {
+                    return Err("static slice invalidated by unknown memory effects".into());
+                }
+                for element in elements {
+                    Self::validate_reference_graph(element, state, incoming, visited)?;
+                }
+                Ok(())
+            }
             Value::StaticView { epoch, .. } => {
                 if matches!(state.memory.get(*epoch), Some(Some(Value::Unit))) {
                     Ok(())
@@ -823,6 +838,10 @@ impl<'tcx> Engine<'tcx> {
         incoming: usize,
     ) -> Result<Value, String> {
         match value {
+            Value::StaticSlice { .. } => {
+                self.validate_tracked_value(&value, state)?;
+                Ok(value)
+            }
             Value::StaticView { .. } => self.static_view_operand(value, state),
             Value::SliceIterator {
                 source,

@@ -474,6 +474,9 @@ carriers. Whole static provenance, initializer transmute origins, transparent Un
 size, alignment and field offsets are checked. Pointer casts and shared reference restoration keep
 the storage identity; unrelated same-size types remain UNKNOWN. Initializer bytes are not runtime
 state. Supported integer atomic fields use their existing conservative model; general payload
-reads/writes, MaybeUninit reads, array-to-slice view coercions and induction over this storage
-remain
-gaps. Address checks use symbolic non-null aligned bases without enabling arbitrary memory access.
+reads/writes, MaybeUninit reads and induction over this storage remain gaps. Shared fixed arrays
+support slice coercions and ordered element references for at most 128 elements, with compiler
+strides and distinct storage descriptors. Slice iterator `find_map` executes actual callback MIR,
+including side effects and short circuiting. Mutable opaque element storage and ambiguous symbolic
+composite indices remain UNKNOWN. Address checks use symbolic non-null aligned bases without
+enabling arbitrary memory access.

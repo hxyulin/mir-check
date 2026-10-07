@@ -599,9 +599,18 @@ Mutable initializer bytes are never interpreted as current runtime state. Genera
 owned copies and writes remain UNKNOWN, including reads of MaybeUninit storage. Supported integer
 atomic fields retain the existing conservative arbitrary-per-access behavior. Views do not prove
 initialization protocols, alias exclusivity, data-race freedom or general Rust validity of mutable
-bytes. Static array-to-slice coercions, arbitrary pointer arithmetic, fat pointers, general unions
-and induction over this storage remain gaps. This is a layout/provenance adapter, not a byte-level
-memory interpreter.
+bytes. Arbitrary pointer arithmetic, general fat pointers, unions and induction over this storage
+remain gaps. This is a layout/provenance adapter, not a byte-level memory interpreter.
+
+Shared fixed arrays can coerce to slices of at most 128 opaque element views. Compiler array
+strides determine each element offset. Direct indexing requires a uniquely selected element;
+ambiguous symbolic composite indices remain UNKNOWN. A separate slice descriptor distinguishes
+storage elements from arrays whose values are references. Shared slice iterators retain selected
+element references as their cursors advance, including reverse steps. `find_map` executes the
+concrete callback MIR with its captured storage and stops at the first modeled Some result;
+exhaustion produces None. Unmodeled callback results or destructors remain UNKNOWN. Payload loads
+and mutable iterators into opaque storage remain unsupported. Empty slices retain an invalidation
+marker even though they have no element views.
 
 Address exposure uses one symbolic base per static, constrained to be non-null, sufficiently
 aligned and to fit the allocation without wrapping. Projected offsets preserve that base. Absolute

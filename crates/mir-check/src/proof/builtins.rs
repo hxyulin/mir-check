@@ -103,12 +103,14 @@ impl<'tcx> Engine<'tcx> {
             let receiver = receiver.materialize()?;
             return match &receiver {
                 Value::Bytes { length, .. } => Ok(Some((**length).clone())),
-                Value::Elements(elements) => Ok(Some(symbolic::integer(
-                    &self.terms,
-                    elements.len() as u128,
-                    u32::from(self.tcx.sess.target.pointer_width),
-                    false,
-                ))),
+                Value::Elements(elements) | Value::StaticSlice { elements, .. } => {
+                    Ok(Some(symbolic::integer(
+                        &self.terms,
+                        elements.len() as u128,
+                        u32::from(self.tcx.sess.target.pointer_width),
+                        false,
+                    )))
+                }
                 _ => Err("slice len receiver is not modeled".to_owned()),
             };
         }

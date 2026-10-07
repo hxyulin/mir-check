@@ -244,6 +244,9 @@ impl<'tcx> Engine<'tcx> {
     }
 
     pub(super) fn static_view_operand(&self, value: Value, state: &State) -> Result<Value, String> {
+        if matches!(value, Value::StaticSlice { .. }) {
+            self.validate_tracked_value(&value, state)?;
+        }
         if matches!(value, Value::StaticView { .. }) {
             let view = self.static_view(&value, state)?;
             if view.kind == ViewKind::Place {
@@ -303,6 +306,32 @@ impl<'tcx> Engine<'tcx> {
                 view.ty = target;
                 view.certified = target;
             }
+            ProjectionElem::Index(index) if view.kind == ViewKind::Place => {
+                let Value::StaticSlice { elements, .. } =
+                    self.static_array_elements(value, state)?
+                else {
+                    unreachable!();
+                };
+                let selected = self.fixed_element(
+                    &elements,
+                    &self.local(state, index.as_usize())?,
+                    &state.conditions,
+                )?;
+                return self.static_view_projection(&selected, ProjectionElem::Deref, state);
+            }
+            ProjectionElem::ConstantIndex {
+                offset,
+                min_length,
+                from_end,
+            } if view.kind == ViewKind::Place => {
+                return self.constant_element(
+                    state,
+                    self.static_array_elements(value, state)?,
+                    offset,
+                    min_length,
+                    from_end,
+                );
+            }
             _ => return Err("unsupported static storage projection".into()),
         }
         self.intern_static_view(view)
@@ -326,7 +355,79 @@ impl<'tcx> Engine<'tcx> {
         }
         view.certified = view.ty;
         view.kind = ViewKind::Shared;
+        if matches!(view.ty.kind(), ty::Array(..)) {
+            return self.static_array_elements(&self.intern_static_view(view)?, state);
+        }
         self.intern_static_view(view)
+    }
+
+    pub(super) fn static_array_elements(
+        &self,
+        value: &Value,
+        state: &State,
+    ) -> Result<Value, String> {
+        let view = self.static_view(value, state)?;
+        let ty::Array(element, _) = view.ty.kind() else {
+            return Err("static slice views require a certified fixed array".into());
+        };
+        if !matches!(view.kind, ViewKind::Shared | ViewKind::Place) || view.certified != view.ty {
+            return Err("static slice views require a shared certified array reference".into());
+        }
+        let layout = self.static_layout(view.ty)?;
+        let rustc_abi::FieldsShape::Array { stride, count } = layout.fields else {
+            return Err("static array does not have an array layout".into());
+        };
+        if count > 128 {
+            return Err("static slice view exceeds the 128-element budget".into());
+        }
+        let mut elements = Vec::new();
+        for index in 0..count {
+            let offset = stride
+                .bytes()
+                .checked_mul(index)
+                .and_then(|offset| view.offset.checked_add(offset))
+                .ok_or("static array element offset overflow")?;
+            elements.push(self.intern_static_view(StaticView {
+                ty: *element,
+                certified: *element,
+                offset,
+                kind: ViewKind::Shared,
+                ..view
+            })?);
+        }
+        let Value::StaticView { epoch, .. } = value else {
+            unreachable!();
+        };
+        Ok(Value::StaticSlice {
+            elements,
+            epoch: *epoch,
+        })
+    }
+
+    pub(super) fn coerce_static_slice(
+        &self,
+        source: Ty<'tcx>,
+        target: Ty<'tcx>,
+        value: &Value,
+        state: &State,
+    ) -> Result<Value, String> {
+        let (ty::Ref(_, array, source_mut), ty::Ref(_, slice, target_mut)) =
+            (source.kind(), target.kind())
+        else {
+            return Err("static slice coercion requires shared reference types".into());
+        };
+        let (ty::Array(element, _), ty::Slice(target_element)) = (array.kind(), slice.kind())
+        else {
+            return Err("static slice coercion requires an array and slice".into());
+        };
+        if source_mut.is_mut()
+            || target_mut.is_mut()
+            || element != target_element
+            || self.static_view(value, state)?.ty != *array
+        {
+            return Err("static slice coercion changes element type or mutability".into());
+        }
+        self.static_array_elements(value, state)
     }
 
     pub(super) fn cast_static_view(

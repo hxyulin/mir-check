@@ -312,7 +312,7 @@ impl<'tcx> Engine<'tcx> {
         let bits = u32::from(self.tcx.sess.target.pointer_width);
         let length = match &value {
             Value::Bytes { length, .. } => length.as_ref().clone(),
-            Value::Elements(elements) => {
+            Value::Elements(elements) | Value::StaticSlice { elements, .. } => {
                 symbolic::integer(&self.terms, elements.len() as u128, bits, false)
             }
             _ => return Err("constant indexing needs a modeled array or slice".to_owned()),
@@ -342,6 +342,10 @@ impl<'tcx> Engine<'tcx> {
         };
         match value {
             Value::Elements(elements) => self.fixed_element(&elements, &index, &state.conditions),
+            Value::StaticSlice { elements, .. } => {
+                let selected = self.fixed_element(&elements, &index, &state.conditions)?;
+                self.static_view_projection(&selected, ProjectionElem::Deref, state)
+            }
             Value::Bytes { data, .. } => {
                 let inside =
                     symbolic::binary(&self.terms, "lt", index.clone(), length)?.boolean()?;
