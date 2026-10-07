@@ -259,11 +259,11 @@ impl<'tcx> Engine<'tcx> {
                 if let Some(atomic) = self.atomic_shape(view.ty) {
                     return Ok(if self.startup { value } else { atomic });
                 }
-                return Err(concat!(
-                    "mutable static payload reads need a state model; ",
-                    "initializer is not runtime state"
-                )
-                .into());
+                return Err(format!(
+                    "mutable static payload reads need a state model for {}; \
+                    initializer is not runtime state",
+                    view.ty
+                ));
             }
         }
         Ok(value)

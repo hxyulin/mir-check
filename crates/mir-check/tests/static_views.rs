@@ -586,3 +586,34 @@ fn mutable_static_borrows_preserve_addresses_without_readable_or_initialization_
         }
     }
 }
+
+#[test]
+fn an_opaque_static_discriminant_names_the_payload_and_missing_runtime_state() {
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let report = verify(
+            &fixture(),
+            &[(
+                "opaque_static_variants_need_runtime_storage",
+                ProofStatus::Unknown,
+            )],
+            target,
+            false,
+            None,
+        );
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == "opaque_static_variants_need_runtime_storage")
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert!(proof.obligations.iter().any(|obligation| {
+            obligation.detail.contains("Option<u32>")
+                && obligation.detail.contains("need a state model")
+                && obligation
+                    .detail
+                    .contains("initializer is not runtime state")
+        }));
+    }
+}

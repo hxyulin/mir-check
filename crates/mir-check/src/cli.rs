@@ -105,6 +105,9 @@ fn next_step(detail: &str) -> &'static str {
         "Try Cargo -Zbuild-std=core to retain core MIR for this target."
     } else if detail.contains("MIR body unavailable") {
         "Rebuild with dependency MIR retention; inspect the named callee and build artifacts."
+    } else if detail.contains("mutable static payload reads need a state model") {
+        "Add support for this storage's initialization and updates; larger limits \
+         cannot supply its runtime value."
     } else if detail.contains("root input") || detail.contains("root parameter") {
         "Select a concrete caller that constructs the input, or add support for its shape."
     } else {

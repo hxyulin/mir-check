@@ -358,3 +358,16 @@ fn native_replay_records_uncontrolled_choices_even_when_it_confirms_a_panic() {
         );
     }
 }
+
+#[test]
+fn opaque_static_state_points_to_storage_support_instead_of_a_larger_budget() {
+    let detail = "mutable static payload reads need a state model for Option<u32>; \
+        initializer is not runtime state";
+    for verbose in [false, true] {
+        let display = cli::render_report(&report(ProofStatus::Unknown, detail), verbose, false);
+        assert!(display.contains("Option<u32>"));
+        assert!(display.contains("this storage's initialization and updates"));
+        assert!(display.contains("cannot supply its runtime value"));
+        assert!(!display.contains("Try --max-"));
+    }
+}

@@ -703,3 +703,14 @@ fn consume_mutable_slice(_value: &mut [u32]) {}
 pub fn mutable_static_slice_coercions_remain_unknown() {
     consume_mutable_slice(share_mutable_words(WORD_PAIR.get()));
 }
+
+static OPTIONAL_WORD: SyncUnsafeCell<Option<u32>> = SyncUnsafeCell::new(None);
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_optional_word(pointer: *mut Option<u32>) -> &'static Option<u32> {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn opaque_static_variants_need_runtime_storage() -> bool {
+    share_optional_word(OPTIONAL_WORD.get()).is_none()
+}

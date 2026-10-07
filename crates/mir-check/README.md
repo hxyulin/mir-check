@@ -709,6 +709,9 @@ snapshots. Reference validity and escape checks still inspect the complete value
 Call and destructor continuations also take returned memory and conditions directly, avoiding a
 clone of the caller state that would immediately be discarded.
 
+UNKNOWN reports for mutable static enum discriminants name the payload type and the missing runtime
+storage model. Terminal guidance distinguishes those gaps from execution and solver budgets.
+
 Integer atomic RMWs include `fetch_add`, `fetch_sub`, `fetch_and`, `fetch_or`, `fetch_xor`,
 `fetch_nand`, `fetch_min` and `fetch_max`. Arithmetic wraps, NAND complements the entire integer
 width, and extrema respect signedness. They use one structural transition implementation for owned

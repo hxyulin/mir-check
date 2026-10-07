@@ -1606,6 +1606,7 @@ impl<'tcx> Engine<'tcx> {
                     ));
                 }
                 let modeled = self.place(state, *place)?;
+                let modeled = self.static_view_operand(modeled, state)?;
                 match modeled {
                     Value::Adt { discriminant, .. } => {
                         Ok(symbolic::integer(&self.terms, discriminant, bits, signed))

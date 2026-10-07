@@ -53,6 +53,37 @@ complete obligation queries for representation-only changes. Add initialization 
 then payload retention where the visibility policy justifies it. Type invariants follow complete
 construction and mutation hooks, including field writes, moves and callee effects.
 
+### Admission rules for the next initialization stage
+
+Intern compiler-backed type and projection shapes in the engine; memory records keep lifetime-free
+shape IDs, liveness and bounded subobject initialization. A typed location needs its projection path
+as well as its footprint: zero-sized fields and enum variants cannot be identified by offset and
+size alone. Invalidated records need a generation or tombstone so a later read cannot resurrect an
+initializer.
+
+Initialization and history permission are separate. A valid typed write can establish initialization
+without supplying a retained runtime value. Exact mutable static history additionally needs verified
+exclusive access or a separately authorized quiescent region. The current startup condition protects
+static atomics; it does not authorize retained non-atomic `UnsafeCell` payloads. A mutable reference
+or writable capability supplies no interference argument.
+
+Before retaining additional payloads, split effectful moves from copies and give projected drops
+explicit initialization transitions, or decline them. A move retires the selected subobject. Drop
+keeps its value available to supported destructor MIR, then retires it. Whole and field stores
+update
+only their addressed initialization; changing an enum variant invalidates its former fields.
+Reference-escape evidence survives loss of retained values.
+
+Shape validation is insufficient for restricted types. Retained `NonNull` values need nonzero
+address validity evidence, and enums need a valid discriminant and initialized selected payload.
+Unsupported union members, conflicting overlaps and unmodeled effects remain UNKNOWN.
+
+A separate coverage stage can model a fresh arbitrary legal discriminant from initialized opaque
+static storage, without constructing pointer payloads or assuming the initializer's variant. It must
+report the abstraction and preserve no relation across separate storage reads. Such a model may
+produce conservative counterexamples; exact startup safety still needs an interference permission.
+This snapshot stage and mutable static retention are not implemented yet.
+
 ## Atomic histories and interference
 
 An atomic operation uses the same allocation identity and footprint as other typed storage.

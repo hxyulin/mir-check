@@ -202,4 +202,9 @@ a mutable slice remains UNKNOWN.
 
 `UnsafeCell::get` and `raw_get` derive addresses from certified receivers. The explicit
 uninitialized wrapper case retains its initialization limitation. A cast to an unrelated
-`UnsafeCell` does not certify that wrapper or its payload, even if its size and alignment match the original storage.
+`UnsafeCell` does not certify that wrapper or its payload, even if its size and alignment match the
+original storage.
+
+An enum discriminant is a payload read too. An initialized static address does not provide the
+current variant. UNKNOWN reports name that type and point to runtime initialization and update
+tracking, rather than suggesting a larger resource budget.
