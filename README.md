@@ -359,11 +359,17 @@ remain independent, with no synchronization or atomic-history facts.
 
 Certified static MaybeUninit::as_ptr addresses stay opaque until initialization is established.
 Local slots can retain and replace static references; concrete zero-argument closure/function-item
-callbacks execute their actual MIR. General payload reads/writes and unknown dynamic calls remain
-UNKNOWN.
+callbacks execute their actual MIR. General payload reads, arbitrary writes and unknown dynamic
+calls remain UNKNOWN.
 
 Known function-item coercions retain their resolved target and signature through tracked local
 storage and returns. Direct pointer calls and Fn/FnMut/FnOnce adapters execute that target's actual
 MIR and check its contracts. Unknown targets, closure-to-pointer coercions, compiler reification
 shims, pointer address casts, missing bodies and induction over pointer values remain UNKNOWN. See
 [known function pointers](docs/proofs.md#known-function-pointers).
+
+Certified UnsafeCell static places now accept supported typed stores, including known callbacks and
+freshly constructed futures. MaybeUninit/UnsafeCell address chains retain their initialization
+barrier, and a store supplies no shared-read or atomic-history facts. Stored tracked references
+remain subject to frame escape checks. Thin NonNull wrappers preserve known static provenance.
+See [typed static stores](docs/proofs.md#typed-static-stores).

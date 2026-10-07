@@ -470,6 +470,9 @@ impl<'tcx> Engine<'tcx> {
             }
             return Ok(());
         }
+        if self.write_static_place(state, place, &value)? {
+            return Ok(());
+        }
         let (allocation, path, writable) = self.memory_path(state, place)?;
         if !writable {
             return Err("write through a shared snapshot is unsupported".to_owned());

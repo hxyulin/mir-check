@@ -344,7 +344,13 @@ impl<'tcx> Engine<'tcx> {
                 }
             }
         } else {
+            let roots = self
+                .static_roots
+                .and_then(|allocation| memory[allocation].clone());
             memory.fill(None);
+            if let Some(allocation) = self.static_roots {
+                memory[allocation] = roots;
+            }
         }
         let output = signature.output();
         let (result, result_binding) = if let Some(name) = &spec.returns_alias {

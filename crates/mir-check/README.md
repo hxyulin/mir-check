@@ -533,12 +533,13 @@ and the inlined transparent pointer cast retain that identity. Restoration requi
 or projected pointee type; matching sizes alone do not authorize unrelated types.
 
 These are opaque storage views. Initializer bytes never become mutable runtime facts, and general
-payload reads, writes, unions and general fat pointers remain UNKNOWN.
+payload reads, arbitrary writes, unions and general fat pointers remain UNKNOWN.
 Supported integer atomic fields use the existing arbitrary-per-access model. Exposed addresses are
 symbolic, non-null, aligned and non-wrapping; they cannot reconstruct a dereferenceable view from an
-integer. An unknown trusted memory effect invalidates existing views. A root reserves one memory
-slot for this invalidation state, and at most 512 view descriptors are interned. Induction over
-these views remains unsupported. Host/ARM debug and optimized fixtures check restoration, offsets,
+integer. An unknown trusted memory effect invalidates existing views. A root reserves two memory
+slots for invalidation state and stored-reference escape evidence. At most 512 view descriptors
+are interned. Induction over these views remains unsupported. Host/ARM debug and optimized fixtures
+check restoration, offsets,
 atomic access, rejected layouts, invalidation and mutations, with native replay of valid cases.
 
 Shared static arrays also support slice coercions and iterators over at most 128 opaque element
@@ -567,7 +568,8 @@ CAS remains UNKNOWN. Host/ARM debug and optimized fixtures test signed values, r
 ordering guards, spurious failure, mutations and native replay.
 
 MaybeUninit::as_ptr exposes the address of a certified shared static container without certifying
-payload initialization. Payload reads and initialization/writes remain UNKNOWN. Static reference
+payload initialization. Payload reads remain UNKNOWN; supported typed stores are described below.
+Static reference
 values can be captured and replaced in tracked local slots while mutable static payload borrows
 remain rejected. Concrete zero-argument closures and function items support Rust-call's empty-tuple
 unit representation and execute their actual MIR. Host/ARM fixtures test these boundaries and
@@ -579,6 +581,28 @@ returns and Fn/FnMut/FnOnce adapters retain the selected target. Calls execute a
 preconditions/postconditions and memory effects as usual. Missing dependency MIR, arbitrary root
 function pointers, closure-to-pointer coercions, compiler reification shims, signature-changing
 and numeric casts remain
-UNKNOWN. Pointer values are not supported by induction or general opaque static writes. Independent
+UNKNOWN. Induction over pointer values and arbitrary opaque static writes remain unsupported.
+Independent
 host/ARM debug and optimized fixtures cover target selection, generic instances, adapter calls,
 mutable effects, panic detection, contracts, missing bodies, target mutations and native replay.
+
+Certified UnsafeCell static places accept supported whole typed stores without reading their old
+payload or establishing facts about subsequent shared reads. Scalar, tuple, struct, enum, bounded
+array, known callback and tracked address shapes are checked against compiler types. General union
+values and unsupported interior-mutable payloads remain UNKNOWN. Address-only dereference/borrowing
+of `MaybeUninit<UnsafeCell<T>>` retains its initialization barrier through get and transparent
+casts; ordinary payload references and uninitialized atomic reads remain rejected.
+
+A fresh constructed coroutine can be stored after checking its identity, capture types and
+uninitialized saved-state slots. Its constructor executes normally; deferred poll/drop bodies are
+not proved by the store. Payload reads, future polling through opaque static storage and resumed
+future stores remain UNKNOWN. Stored tracked references are retained in a root memory slot for
+existing frame/dead-storage escape checks, including across unknown trusted effects. This list is
+conservative: overwrite does not remove earlier references. Each store has depth 16 and 512-value
+limits, and a root can retain at most 512 reference entries. Unsupported shapes or limits fail.
+
+Compiler-identified thin NonNull wrapping/unwrapping preserves a known static raw address after
+pointee, size, alignment and field-offset checks. Numeric handles, unknown pointer inputs and fat
+pointers do not gain this model. Independent host/ARM debug and optimized fixtures cover stores,
+callback values, constructed futures, uninitialized-address chains, rejected shared reads,
+read-only/numeric destinations, reference escape, unknown effects, mutations and native replay.

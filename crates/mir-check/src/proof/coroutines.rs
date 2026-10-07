@@ -4,7 +4,7 @@ use rustc_index::IndexVec;
 use rustc_middle::mir::visit::{MutVisitor, PlaceContext};
 use rustc_middle::mir::{Local, LocalDecl, Location};
 
-fn coroutine_name(id: DefId, args: ty::GenericArgsRef<'_>) -> String {
+pub(super) fn coroutine_name(id: DefId, args: ty::GenericArgsRef<'_>) -> String {
     format!("coroutine {id:?} {args:?}")
 }
 

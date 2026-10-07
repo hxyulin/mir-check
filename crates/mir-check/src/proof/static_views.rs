@@ -17,6 +17,7 @@ pub(super) struct StaticView<'tcx> {
     certified: Ty<'tcx>,
     offset: u64,
     kind: ViewKind,
+    writable: bool,
 }
 
 impl<'tcx> Engine<'tcx> {
@@ -70,6 +71,7 @@ impl<'tcx> Engine<'tcx> {
             certified: *pointee,
             offset: 0,
             kind: ViewKind::Shared,
+            writable: false,
         })
         .map(Some)
     }
@@ -250,6 +252,11 @@ impl<'tcx> Engine<'tcx> {
         if matches!(value, Value::StaticView { .. }) {
             let view = self.static_view(&value, state)?;
             if view.kind == ViewKind::Place {
+                if self.uninit_static_address(view)? {
+                    return Err(
+                        "uninitialized static payload reads need an initialization model".into(),
+                    );
+                }
                 if let Some(atomic) = self.atomic_shape(view.ty) {
                     return Ok(atomic);
                 }
@@ -261,6 +268,142 @@ impl<'tcx> Engine<'tcx> {
             }
         }
         Ok(value)
+    }
+
+    pub(super) fn static_non_null_transmute(
+        &self,
+        source: Ty<'tcx>,
+        target: Ty<'tcx>,
+        value: &Value,
+        state: &State,
+    ) -> Result<Option<Value>, String> {
+        let non_null = |ty: Ty<'tcx>| match ty.kind() {
+            ty::Adt(def, args)
+                if self.tcx.lang_items().get(LangItem::NonNull) == Some(def.did()) =>
+            {
+                Some((*def, *args))
+            }
+            _ => None,
+        };
+        let (wrapper, pointer, wrapped) = if non_null(target).is_some() {
+            (target, source, false)
+        } else if non_null(source).is_some() {
+            (source, target, true)
+        } else {
+            return Ok(None);
+        };
+        let (def, args) = non_null(wrapper).ok_or("NonNull wrapper identity missing")?;
+        let ty::RawPtr(pointee, _) = pointer.kind() else {
+            return Ok(None);
+        };
+        if *pointee != args.type_at(0) || !self.thin_raw_pointer(pointer) {
+            return Err("NonNull static wrapper needs the same sized pointee type".into());
+        }
+        let storage = if wrapped {
+            let Value::Adt {
+                name,
+                variant: 0,
+                discriminant: 0,
+                fields,
+                ..
+            } = value
+            else {
+                return Err("NonNull address exposure needs its constructed wrapper".into());
+            };
+            if *name != self.tcx.def_path_str(def.did()) || fields.len() != 1 {
+                return Err("NonNull static wrapper shape mismatch".into());
+            }
+            &fields[0].1
+        } else {
+            value
+        };
+        if !matches!(storage, Value::StaticView { .. }) {
+            return Ok(None);
+        }
+        let view = self.static_view(storage, state)?;
+        if view.kind != ViewKind::Raw || view.ty != *pointee {
+            return Err("NonNull static wrapper needs a provenance-backed raw address".into());
+        }
+        let layout = self.static_layout(wrapper)?;
+        let raw = self.static_layout(pointer)?;
+        if layout.size != raw.size
+            || layout.align.abi != raw.align.abi
+            || layout.fields.count() != 1
+            || layout.fields.offset(0).bytes() != 0
+        {
+            return Err("NonNull wrapper does not preserve the compiler pointer layout".into());
+        }
+        if wrapped {
+            Ok(Some(storage.clone()))
+        } else {
+            self.constructed(wrapper, 0, vec![storage.clone()])
+                .map(Some)
+        }
+    }
+
+    pub(super) fn static_stored_address(
+        &self,
+        ty: Ty<'tcx>,
+        value: &Value,
+        state: &State,
+    ) -> Result<(), String> {
+        let view = self.static_view(value, state)?;
+        let compatible = match ty.kind() {
+            ty::Ref(_, pointee, mutability) => {
+                !mutability.is_mut()
+                    && view.kind == ViewKind::Shared
+                    && *pointee == view.ty
+                    && view.certified == view.ty
+            }
+            ty::RawPtr(pointee, _) => view.kind == ViewKind::Raw && *pointee == view.ty,
+            _ => false,
+        };
+        if compatible {
+            Ok(())
+        } else {
+            Err("static store address does not retain its certified type and provenance".into())
+        }
+    }
+
+    pub(super) fn write_static_place(
+        &self,
+        state: &mut State,
+        place: Place<'tcx>,
+        value: &Value,
+    ) -> Result<bool, String> {
+        let mut base = self.local(state, place.local.as_usize())?;
+        for length in 0..=place.projection.len() {
+            if matches!(base, Value::StaticView { .. }) {
+                for projection in &place.projection[length..] {
+                    base = self.static_view_projection(&base, *projection, state)?;
+                }
+                let view = self.static_view(&base, state)?;
+                if view.kind != ViewKind::Place {
+                    return Ok(false);
+                }
+                if !view.writable
+                    || (view.ty != view.certified && !self.uninit_static_address(view)?)
+                {
+                    return Err("static store needs a certified UnsafeCell payload place".into());
+                }
+                self.static_store_value(view.ty, value, state, 0, &mut 0)?;
+                self.retain_static_store_references(value, state)?;
+                // Shared payload reads stay opaque; this store supplies no value/history facts.
+                return Ok(true);
+            }
+            if length == place.projection.len() {
+                break;
+            }
+            let prefix = Place {
+                local: place.local,
+                projection: self.tcx.mk_place_elems(&place.projection[..length + 1]),
+            };
+            let Ok(next) = self.place(state, prefix) else {
+                return Ok(false);
+            };
+            base = next;
+        }
+        Ok(false)
     }
 
     fn certify_atomic_overlay(&self, source: Ty<'tcx>, target: Ty<'tcx>) -> Result<(), String> {
@@ -380,6 +523,33 @@ impl<'tcx> Engine<'tcx> {
         Ok(self.static_view(value, state)?.kind == ViewKind::Place)
     }
 
+    fn is_static_unsafe_cell(&self, ty: Ty<'tcx>) -> bool {
+        matches!(ty.kind(), ty::Adt(def, _) if
+            self.tcx.lang_items().get(LangItem::UnsafeCell) == Some(def.did()))
+    }
+
+    fn uninit_static_address(&self, view: StaticView<'tcx>) -> Result<bool, String> {
+        let ty::Adt(def, args) = view.certified.kind() else {
+            return Ok(false);
+        };
+        if self.tcx.lang_items().get(LangItem::MaybeUninit) != Some(def.did()) {
+            return Ok(false);
+        }
+        let payload = args.type_at(0);
+        let compatible = payload == view.ty
+            || (self.is_static_unsafe_cell(payload)
+                && matches!(payload.kind(), ty::Adt(_, args) if args.type_at(0) == view.ty));
+        if !compatible {
+            return Ok(false);
+        }
+        let wrapper = self.static_layout(view.certified)?;
+        let target = self.static_layout(view.ty)?;
+        if wrapper.size != target.size || wrapper.align.abi != target.align.abi {
+            return Err("uninitialized static address changes its payload layout".into());
+        }
+        Ok(true)
+    }
+
     pub(super) fn static_uninit_pointer(
         &self,
         receiver: Ty<'tcx>,
@@ -422,13 +592,20 @@ impl<'tcx> Engine<'tcx> {
         let mut view = self.static_view(value, state)?;
         match projection {
             ProjectionElem::Deref if view.kind != ViewKind::Place => {
-                if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original) {
-                    self.certify_atomic_overlay(view.certified, view.ty)?;
+                if !self.uninit_static_address(view)? {
+                    if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original)
+                    {
+                        self.certify_atomic_overlay(view.certified, view.ty)?;
+                    }
+                    view.certified = view.ty;
                 }
-                view.certified = view.ty;
                 view.kind = ViewKind::Place;
             }
             ProjectionElem::Field(field, target) if view.kind == ViewKind::Place => {
+                let uninit = self.uninit_static_address(view)?;
+                if uninit && !self.is_static_unsafe_cell(view.ty) {
+                    return Err("uninitialized static fields do not have certified payloads".into());
+                }
                 let layout = self.static_layout(view.ty)?;
                 if field.as_usize() >= layout.fields.count() {
                     return Err("static view field is outside its layout".into());
@@ -452,7 +629,9 @@ impl<'tcx> Engine<'tcx> {
                     .checked_add(layout.fields.offset(field.as_usize()).bytes())
                     .ok_or("static view offset overflow")?;
                 view.ty = target;
-                view.certified = target;
+                if !uninit {
+                    view.certified = target;
+                }
             }
             ProjectionElem::Index(index) if view.kind == ViewKind::Place => {
                 let Value::StaticSlice { elements, .. } =
@@ -495,13 +674,21 @@ impl<'tcx> Engine<'tcx> {
         if mutable || view.kind != ViewKind::Place {
             return Err("static view borrowing requires a shared typed place".into());
         }
-        if let Some(atomic) = self.atomic_shape(view.ty) {
-            return Ok(atomic);
+        if self.uninit_static_address(view)? {
+            if !self.is_static_unsafe_cell(view.ty) {
+                return Err("uninitialized static payload borrowing remains unsupported".into());
+            }
+        } else {
+            if let Some(atomic) = self.atomic_shape(view.ty) {
+                return Ok(atomic);
+            }
+            if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original) {
+                return Err(
+                    "static reinterpretation does not restore a certified storage type".into(),
+                );
+            }
+            view.certified = view.ty;
         }
-        if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original) {
-            return Err("static reinterpretation does not restore a certified storage type".into());
-        }
-        view.certified = view.ty;
         view.kind = ViewKind::Shared;
         if matches!(view.ty.kind(), ty::Array(..)) {
             return self.static_array_elements(&self.intern_static_view(view)?, state);
@@ -596,7 +783,7 @@ impl<'tcx> Engine<'tcx> {
         }
         if let ty::Adt(def, args) = source_pointee.kind()
             && self.tcx.lang_items().get(LangItem::UnsafeCell) == Some(def.did())
-            && view.certified == *source_pointee
+            && (view.certified == *source_pointee || self.uninit_static_address(view)?)
             && args.type_at(0) == *target_pointee
         {
             let wrapper = self.static_layout(*source_pointee)?;
@@ -610,7 +797,10 @@ impl<'tcx> Engine<'tcx> {
                     "UnsafeCell pointer cast does not preserve its transparent layout".into(),
                 );
             }
-            view.certified = *target_pointee;
+            if view.certified == *source_pointee {
+                view.certified = *target_pointee;
+            }
+            view.writable = true;
         }
         view.ty = *target_pointee;
         self.intern_static_view(view)
@@ -656,8 +846,12 @@ impl<'tcx> Engine<'tcx> {
         if layout.fields.count() != 1 || layout.fields.offset(0).bytes() != 0 {
             return Err("UnsafeCell does not have its transparent storage layout".into());
         }
+        let uninit = self.uninit_static_address(view)?;
         view.ty = args.type_at(0);
-        view.certified = view.ty;
+        if !uninit {
+            view.certified = view.ty;
+        }
+        view.writable = true;
         view.kind = ViewKind::Raw;
         self.intern_static_view(view).map(Some)
     }

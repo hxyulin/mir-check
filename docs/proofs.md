@@ -638,8 +638,8 @@ of arbitrary writes through an overlay.
 Compiler-identified MaybeUninit::as_ptr can expose the payload address of a certified shared static
 container. Compiler layouts must preserve size and alignment. The pointer retains the container's
 initialization barrier: producing an address does not certify an initialized payload or authorize
-an atomic overlay/read. General union member reads and MaybeUninit initialization/writes remain
-UNKNOWN. This is an address model, not an assume_init model.
+an atomic overlay/read. General union member reads and payload reads remain UNKNOWN. Supported
+whole typed stores can use the address without establishing initialization/read facts.
 
 Borrowing a local variable containing a shared static reference uses tracked reference-slot
 storage. Borrowing the actual static place retains the opaque-view restrictions, including rejected
@@ -649,7 +649,8 @@ function items and closures. Their actual bodies still execute; unknown dynamic 
 UNKNOWN.
 
 Mutable initializer bytes are never interpreted as current runtime state. General payload loads,
-owned copies and writes remain UNKNOWN, including reads of MaybeUninit storage. Supported integer
+owned copies and arbitrary writes remain UNKNOWN, including reads of MaybeUninit storage.
+Supported integer
 atomic fields retain the existing conservative arbitrary-per-access behavior. Views do not prove
 initialization protocols, alias exclusivity, data-race freedom or general Rust validity of mutable
 bytes. Arbitrary pointer arithmetic, general fat pointers, unions and induction over this storage
@@ -670,7 +671,8 @@ aligned and to fit the allocation without wrapping. Projected offsets preserve t
 addresses and disjointness between different statics are not assumed. Casting an exposed integer
 back to a pointer does not restore the view. There is no arbitrary-address dereference operation.
 
-One root memory slot tracks whether unknown effects have invalidated the static views. A trusted
+Two root memory slots retain static-view invalidation state and stored-reference escape evidence.
+A trusted
 summary with omitted modifies invalidates it, while an explicit frame preserving storage retains
 it. At most 512 distinct view descriptors are interned per root; exhaustion remains UNKNOWN.
 Compiler integration tests check host/ARM debug and optimized builds, rejected representations,
@@ -694,8 +696,8 @@ are checked as for a direct call. Knowing a target does not certify its body as 
 Arbitrary root pointer inputs, noncapturing closure-to-pointer coercions, signature-changing
 coercions, compiler reification shims (including track_caller) and numeric pointer casts remain
 UNKNOWN. A known target with unavailable MIR also remains UNKNOWN unless an explicit trusted
-boundary applies. Opaque static payload writes remain unsupported, and induction still rejects
-function-pointer state.
+boundary applies. Arbitrary opaque static payload writes remain unsupported, and induction still
+rejects function-pointer state.
 
 The independent no_std fixture checks host and ARM debug/optimized builds. Positive cases include
 generic instances, branch-selected targets, local Option/tuple storage, returned pointers,
@@ -704,3 +706,49 @@ actual target or violate its bounds, and checked sidecar contracts enforce actua
 returns. UNKNOWN cases cover unsupported coercions/inputs and missing dependency MIR. Changing
 the reified target breaks a dependent proof and fails native replay; the positive cases replay
 for all 256 byte inputs.
+
+## Typed static stores
+
+Ordinary execution accepts a typed store to a certified static place derived from compiler-known
+UnsafeCell get/raw_get or its transparent raw-pointer conversion. The destination must fit the
+allocation, preserve required alignment and retain its certified type. Read-only static places,
+unrelated reinterpretations and integer-derived destinations remain UNKNOWN. Whole payload stores
+and initialized struct/tuple field stores check the moved value against compiler types. Supported
+shapes include integers, floats, bool, tuples, structs/enums, bounded arrays, known function
+pointers
+and tracked references/addresses. Other interior-mutable values and general unions remain UNKNOWN.
+A moved value can have a destructor; any MIR drop that actually executes still needs its ordinary
+model. The store itself does not execute a destructor or read the old payload.
+
+`MaybeUninit<T>` payload addresses and the transparent `MaybeUninit<UnsafeCell<T>>` address chain
+can reach a whole typed store. Address-only borrowing is restricted to the UnsafeCell wrapper. The
+container's initialization barrier survives dereference, wrapper borrowing, get and raw casts.
+Neither producing an address nor writing a value permits an uninitialized atomic read or supplies
+a shared-read fact. General field access into uninitialized aggregates, payload references and
+assume_init operations remain UNKNOWN.
+
+Fresh constructed coroutines retain compiler identity, capture types and uninitialized saved-state
+slots. The store checks the live captures and the exact saved-state shape. Constructor bodies and
+reached calls execute normally. Deferred panic/drop/poll behavior is not proved by construction or
+storage. Resumed coroutine stores and reading/polling futures through this opaque storage remain
+UNKNOWN. This distinction is exercised by a fixture whose stored future has a deferred panic path.
+
+Tracked references stored in these payloads are retained as escape evidence in root memory.
+Existing return checks reject references to a returning frame or dead storage. Unknown trusted
+memory effects preserve this evidence while invalidating the referenced storage as usual. The
+record is not a payload snapshot and cannot supply read facts. Overwrites conservatively retain
+old references; valid code can therefore remain UNKNOWN. A store has depth 16 and 512-value limits,
+and a root retains at most 512 reference entries. These checks do not establish alias exclusivity,
+initialization protocols, synchronization or absence of undefined behavior.
+
+Thin compiler-identified NonNull wrapping/unwrapping preserves a provenance-backed static raw
+address. The pointee must match, and compiler size, alignment and the single field at offset zero
+must preserve pointer representation. Unknown/numeric handles and fat pointers remain unsupported.
+Address comparisons retain the existing non-null, alignment and offset facts without decoding
+payloads or inventing absolute addresses.
+
+Independent no_std fixtures check host/ARM debug and optimized builds. They include positive typed
+stores and address round trips, refuted constructor/index/assertion failures, UNKNOWN read-only and
+numeric destinations, uninitialized atomic reads, shared payload reads and escaping references.
+Unknown trusted effects cannot erase escape evidence. A constructor-guard mutation refutes the
+dependent store and fails native replay; valid sequential stores replay for all byte inputs.

@@ -24,8 +24,9 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Fixed-array equality | Primitive numeric equality and actual custom/nested comparisons; ordered short-circuit effects | At most 128 elements per array; general slice equality and inlined pointer-based comparisons remain gaps |
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | Disjoint mutable root references, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
-| Interior mutation | Scalar Cell aliases/calls, integer atomic load/store/add/sub/swap and fences with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer-based access and other operations remain gaps |
-| Shared references | Read-only snapshots of supported values, including nested slice fields | Pointer identity, alias reasoning and writes through shared/interior mutable storage are not modeled |
+| Typed static stores | Certified UnsafeCell payload places accept supported typed moves, known callbacks and fresh constructed futures; stored references retain escape evidence | Shared reads remain opaque; no last-write, initialization-protocol or exclusivity facts; arbitrary writes, general unions, resumed futures and static future polling remain UNKNOWN |
+| Interior mutation | Scalar Cell aliases/calls, integer atomic load/store/add/sub/swap and fences with ordering checks | Atomics allow arbitrary per-access state; RefCell, pointer atomics and other operations remain gaps |
+| Shared references | Read-only snapshots of supported values, including nested slice fields | Snapshot writes and general aliases remain unsupported; certified static stores have a separate model |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
 Eager root input construction has at most 16 recursive levels and 512 values across all arguments.
@@ -72,7 +73,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Unsupported call shapes remain UNKNOWN |
-| Known function pointers | Function-item coercions retain concrete instance/signature; selected targets, returns, local aggregates and Fn/FnMut/FnOnce adapters execute actual MIR with checked contracts/effects | At most 512 targets per root; unknown inputs, closure coercions, reification shims, numeric/signature-changing casts, missing bodies, opaque static writes and induction remain UNKNOWN |
+| Known function pointers | Function-item coercions retain concrete instance/signature; selected targets, returns, local aggregates and Fn/FnMut/FnOnce adapters execute actual MIR with checked contracts/effects | At most 512 targets per root; unknown inputs, closure coercions, reification shims, numeric/signature-changing casts, missing bodies, arbitrary opaque static writes and induction remain UNKNOWN |
 | Array map | Actual callback bodies in order, retaining capture state and reference-valued elements | At most 16 elements; callback destructors remain UNKNOWN |
 | Array from_fn | Actual callbacks in ascending index order, retaining capture state and effects | At most 128 owned elements and 256 values; drops and identity-bearing results remain UNKNOWN |
 | Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; owned Cell/atomic identities, user destructors, clone and views remain UNKNOWN |
@@ -508,7 +509,16 @@ include positive, refuted and unknown cases, mutations and native replay.
 
 Certified shared static MaybeUninit containers support as_ptr with size/alignment checks. The raw
 payload address keeps the container's initialization barrier; it does not authorize reading T.
-General union reads and MaybeUninit initialization/writes remain unsupported. Tracked local static
+General union/payload reads remain unsupported. Certified UnsafeCell places support typed stores
+and whole payload initialization moves while keeping read facts opaque. Tracked local static
 reference slots support shared captures and mutable slot replacement. Actual mutable static
 payload borrows remain UNKNOWN. Concrete zero-argument closure/function-item calls now accept the
 empty Rust-call tuple's unit representation, with actual callback MIR execution.
+
+Typed static store fixtures cover owned values, known callbacks, fresh constructed futures,
+MaybeUninit/UnsafeCell address chains and provenance-backed thin NonNull round trips. Writes do not
+supply shared-read or atomic-history facts. Stored references retain conservative frame-escape
+evidence, including through unknown trusted memory effects. Each store has depth 16 and 512-value
+limits; a root retains at most 512 reference entries. Resumed future stores, payload polling,
+general unions, arbitrary destinations and unsupported shapes remain UNKNOWN. Host/ARM debug and
+optimized tests include negative/unknown cases, a constructor-guard mutation and native replay.

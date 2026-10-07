@@ -36,6 +36,7 @@ mod owned_iterators;
 mod pointer_handles;
 mod slice_equality;
 mod static_views;
+mod static_writes;
 
 #[derive(Clone)]
 struct State {
@@ -58,6 +59,7 @@ struct Engine<'tcx> {
     float_encodings: BTreeMap<u32, Term>,
     static_views: std::cell::RefCell<Vec<static_views::StaticView<'tcx>>>,
     static_epoch: Option<usize>,
+    static_roots: Option<usize>,
     function_pointers: Vec<(ty::Instance<'tcx>, Ty<'tcx>)>,
     static_addresses: std::collections::HashMap<DefId, Term>,
     steps: usize,
@@ -93,6 +95,7 @@ pub fn verify(
         float_encodings: BTreeMap::new(),
         static_views: std::cell::RefCell::new(Vec::new()),
         static_epoch: None,
+        static_roots: None,
         function_pointers: Vec::new(),
         static_addresses: std::collections::HashMap::new(),
         steps: 0,
@@ -245,11 +248,13 @@ impl<'tcx> Engine<'tcx> {
                 "entry preconditions are inconsistent; refusing a vacuous proof".to_owned(),
             );
         }
-        if memory.len() >= MAX_INPUT_VALUES {
+        if memory.len() + 2 > MAX_INPUT_VALUES {
             return Err("memory allocation budget reached before reserving static state".into());
         }
         self.static_epoch = Some(memory.len());
         memory.push(Some(Value::Unit));
+        self.static_roots = Some(memory.len());
+        memory.push(Some(Value::Elements(Vec::new())));
         if self.induction && self.needs_induction(instance) {
             return self.inductive_root(instance, arguments, conditions, memory);
         }
@@ -1641,6 +1646,15 @@ impl<'tcx> Engine<'tcx> {
                         "symbolic static address; compiler alignment and allocation bounds",
                     );
                     return self.expose_static_address(source, *target, &value, state);
+                }
+                if let Some(value) =
+                    self.static_non_null_transmute(source, *target, &value, state)?
+                {
+                    self.record_model(
+                        id,
+                        "NonNull thin static pointer; allocation provenance retained",
+                    );
+                    return Ok(value);
                 }
                 if let Some(value) = self.pointer_handle_transmute(source, *target, &value)? {
                     self.record_model(id, "thin pointer representation; no memory access");
