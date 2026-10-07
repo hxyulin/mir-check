@@ -23,6 +23,7 @@ mod constants;
 mod coroutines;
 mod external;
 mod floating_intrinsics;
+mod function_pointers;
 mod induction;
 mod inputs;
 mod integer_intrinsics;
@@ -57,6 +58,7 @@ struct Engine<'tcx> {
     float_encodings: BTreeMap<u32, Term>,
     static_views: std::cell::RefCell<Vec<static_views::StaticView<'tcx>>>,
     static_epoch: Option<usize>,
+    function_pointers: Vec<(ty::Instance<'tcx>, Ty<'tcx>)>,
     static_addresses: std::collections::HashMap<DefId, Term>,
     steps: usize,
     input_depth: usize,
@@ -91,6 +93,7 @@ pub fn verify(
         float_encodings: BTreeMap::new(),
         static_views: std::cell::RefCell::new(Vec::new()),
         static_epoch: None,
+        function_pointers: Vec::new(),
         static_addresses: std::collections::HashMap::new(),
         steps: 0,
         input_depth: 0,
@@ -310,6 +313,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::FunctionPointer { .. }
             | Value::Function => {
                 return Err("argument binding is unsupported".to_owned());
             }
@@ -885,11 +889,18 @@ impl<'tcx> Engine<'tcx> {
                     target,
                     ..
                 } => {
-                    let ty::FnDef(callee, generic_args) =
-                        *func.ty(&body.local_decls, self.tcx).kind()
-                    else {
-                        return Err("unresolved indirect call".to_owned());
+                    let callable_ty = func.ty(&body.local_decls, self.tcx);
+                    let instance = match *callable_ty.kind() {
+                        ty::FnDef(callee, generic_args) => {
+                            self.resolve_function_item(callee, generic_args.skip_binder())?
+                        }
+                        ty::FnPtr(..) => {
+                            let value = self.operand(id, body, &state, func)?;
+                            self.known_function_pointer(&value, callable_ty)?
+                        }
+                        _ => return Err("unresolved indirect call".to_owned()),
                     };
+                    let callee = instance.def_id();
                     if super::identity::is_panic_call(self.tcx, callee)
                         || self.is_core_panic_helper(callee)
                     {
@@ -907,23 +918,13 @@ impl<'tcx> Engine<'tcx> {
                         .iter()
                         .map(|arg| self.operand(id, body, &state, &arg.node))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let instance = ty::Instance::try_resolve(
-                        self.tcx,
-                        ty::TypingEnv::fully_monomorphized(),
-                        callee,
-                        generic_args.skip_binder(),
-                    )
-                    .map_err(|_| "call instance resolution failed".to_owned())?
-                    .ok_or_else(|| {
-                        format!("unresolved call to {}", self.tcx.def_path_str(callee))
-                    })?;
                     let fn_trait = [LangItem::Fn, LangItem::FnMut, LangItem::FnOnce]
                         .iter()
                         .any(|item| {
                             self.tcx.lang_items().get(*item) == Some(self.tcx.parent(callee))
                         });
                     let instance = if fn_trait
-                        && let ty::FnDef(id, args) = generic_args.skip_binder().type_at(0).kind()
+                        && let ty::FnDef(id, args) = instance.args.type_at(0).kind()
                     {
                         let [Value::Function, parameters] = values.as_slice() else {
                             return Err(
@@ -940,6 +941,20 @@ impl<'tcx> Engine<'tcx> {
                             }
                         };
                         self.resolve_function_item(*id, args.skip_binder())?
+                    } else if fn_trait && let ty::FnPtr(..) = instance.args.type_at(0).kind() {
+                        let [receiver, parameters] = values.as_slice() else {
+                            return Err("function-pointer adapter arguments are missing".into());
+                        };
+                        let receiver =
+                            self.snapshot(receiver, &state.memory, &state.conditions, 0)?;
+                        let pointer =
+                            self.known_function_pointer(&receiver, instance.args.type_at(0))?;
+                        values = match parameters {
+                            Value::Tuple(parameters) => parameters.clone(),
+                            Value::Unit => Vec::new(),
+                            _ => return Err("function-pointer arguments are not a tuple".into()),
+                        };
+                        pointer
                     } else {
                         instance
                     };
@@ -1665,7 +1680,14 @@ impl<'tcx> Engine<'tcx> {
                     signed,
                 )
             }
-            Rvalue::Cast(CastKind::PointerCoercion(..), operand, target) => {
+            Rvalue::Cast(CastKind::PointerCoercion(kind, _), operand, target) => {
+                if matches!(target.kind(), ty::FnPtr(..)) {
+                    return self.reify_function_pointer(
+                        *kind,
+                        operand.ty(&body.local_decls, self.tcx),
+                        *target,
+                    );
+                }
                 let ty::Ref(_, element, mutability) = target.kind() else {
                     return Err("unsupported pointer coercion".to_owned());
                 };

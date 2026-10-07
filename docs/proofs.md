@@ -395,8 +395,8 @@ does not need decoding. Constant shape limits are eight levels and 256 values, w
 trusted translation boundary; it does not execute arbitrary runtime calls in rustc's interpreter.
 
 Coverage remains limited by enum/struct slices, general aliasing, interior-mutable root
-combinations, unresolved generic inputs, float remainder, trait objects, function pointers and
-general iterator machinery, pointer-based drop glue and several MIR operations/constants,
+combinations, unresolved generic inputs, float remainder, trait objects, unknown function pointers
+and general iterator machinery, pointer-based drop glue and several MIR operations/constants,
 including some constant shapes. Ordinary synchronous destructors execute through rustc's concrete
 DropGlue MIR. Their normal-return effects and ordered field drops are checked; unwinding remains
 unsupported.
@@ -676,3 +676,31 @@ it. At most 512 distinct view descriptors are interned per root; exhaustion rema
 Compiler integration tests check host/ARM debug and optimized builds, rejected representations,
 uninitialized reads, raw writes, false address claims, effect invalidation and failing mutations.
 Valid scoped reinterpretations and address mutations also replay natively.
+
+## Known function pointers
+
+Ordinary execution supports a compiler function-item-to-pointer coercion when the concrete
+instance resolves and the source and target have the same normalized signature, including ABI
+and safety. Lifetime names are erased and anonymized for signature comparison. A root-local
+registry stores at most 512 distinct instance/signature pairs. The symbolic value retains its
+registry identity instead of an invented numeric address.
+
+Copies, branches, modeled local aggregates and returns preserve that identity. Each path calls
+its selected target. Direct pointer calls and generic Fn/FnMut/FnOnce adapters resolve the known
+instance, unwrap Rust-call argument tuples and use the ordinary call pipeline. Actual callee MIR,
+preconditions, postconditions, panic obligations, available dependency bodies and memory effects
+are checked as for a direct call. Knowing a target does not certify its body as panic-free.
+
+Arbitrary root pointer inputs, noncapturing closure-to-pointer coercions, signature-changing
+coercions, compiler reification shims (including track_caller) and numeric pointer casts remain
+UNKNOWN. A known target with unavailable MIR also remains UNKNOWN unless an explicit trusted
+boundary applies. Opaque static payload writes remain unsupported, and induction still rejects
+function-pointer state.
+
+The independent no_std fixture checks host and ARM debug/optimized builds. Positive cases include
+generic instances, branch-selected targets, local Option/tuple storage, returned pointers,
+zero-argument calls and writes through mutable arguments. Negative cases reach a panic in the
+actual target or violate its bounds, and checked sidecar contracts enforce actual arguments and
+returns. UNKNOWN cases cover unsupported coercions/inputs and missing dependency MIR. Changing
+the reified target breaks a dependent proof and fails native replay; the positive cases replay
+for all 256 byte inputs.

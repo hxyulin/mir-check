@@ -829,6 +829,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::FormatArguments
             | Value::RawPointer { .. }
             | Value::Uninitialized
+            | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit => Ok(()),
         }

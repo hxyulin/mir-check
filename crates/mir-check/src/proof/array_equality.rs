@@ -187,6 +187,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit => {
                 Err("array equality requires matching fixed modeled storage".to_owned())

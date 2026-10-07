@@ -64,6 +64,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::StaticSlice { .. }
                 | Value::StaticView { .. }
                 | Value::Uninitialized
+                | Value::FunctionPointer { .. }
                 | Value::Function
                 | Value::Unit => Err("unsupported inductive write field".into()),
             },
@@ -93,6 +94,7 @@ impl<'tcx> Engine<'tcx> {
                 | Value::StaticSlice { .. }
                 | Value::StaticView { .. }
                 | Value::Uninitialized
+                | Value::FunctionPointer { .. }
                 | Value::Function
                 | Value::Unit => Err("unsupported inductive write variant".into()),
             },
@@ -175,6 +177,7 @@ fn scalar_update(
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit,
             _,

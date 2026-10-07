@@ -198,6 +198,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit => {
                 return Err("slice membership storage is not modeled".to_owned());

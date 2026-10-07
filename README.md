@@ -190,7 +190,7 @@ containing a shared byte slice.
 | Arithmetic | Exact integer operations, min/max, saturation, bit counts and rearrangement; IEEE f32/f64 arithmetic, comparisons and saturating casts |
 | Interior mutation | Scalar Cell aliases/calls and conservative integer atomic counters with checked orderings |
 | Mutable storage | Disjoint mutable root inputs, projected writes, reborrows, tracked aggregate references and call effects |
-| Calls | Concrete generics, static traits, available dependency MIR, function items, tracked mutable captures and noncapturing evaluated closure constants |
+| Calls | Concrete generics, static traits, available dependency MIR, function items, known function pointers, tracked mutable captures and noncapturing evaluated closure constants |
 | Control flow | Feasible branches, symbolic enum tags/payloads, Option/Result propagation completely unrolled finite loops and opt-in scalar/byte-array induction |
 | Library models | Byte ranges/copies/conversions, endian decoding, fixed-array map/from_fn, float abs/min/max/clamp and static formatting arguments |
 | Iteration | Shared/mutable slices and owned arrays; checked predicates, ordered folds and supported Zip/Flatten bodies |
@@ -224,8 +224,9 @@ and clamp. Arithmetic has exact numeric IEEE semantics; NaN output bits conserva
 payloads and signs, including signaling encodings. A bit-level counterexample involving an
 arithmetic NaN therefore may not replay on the target.
 
-Enum/struct slices, unresolved generic inputs, float remainder, dynamic dispatch, function pointers,
-pointer-based drop glue, some constant shapes and broader iterator machinery remain gaps. Concrete
+Enum/struct slices, unresolved generic inputs, float remainder, dynamic dispatch, unknown function
+pointers, pointer-based drop glue, some constant shapes and broader iterator machinery remain gaps.
+Concrete
 synchronous destructors execute through rustc's drop glue, preserving effects and field order.
 Experimental induction still rejects drop-bearing values. Limits and
 unsupported
@@ -360,3 +361,9 @@ Certified static MaybeUninit::as_ptr addresses stay opaque until initialization 
 Local slots can retain and replace static references; concrete zero-argument closure/function-item
 callbacks execute their actual MIR. General payload reads/writes and unknown dynamic calls remain
 UNKNOWN.
+
+Known function-item coercions retain their resolved target and signature through tracked local
+storage and returns. Direct pointer calls and Fn/FnMut/FnOnce adapters execute that target's actual
+MIR and check its contracts. Unknown targets, closure-to-pointer coercions, compiler reification
+shims, pointer address casts, missing bodies and induction over pointer values remain UNKNOWN. See
+[known function pointers](docs/proofs.md#known-function-pointers).

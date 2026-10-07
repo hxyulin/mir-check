@@ -88,6 +88,9 @@ pub enum Value {
     MetadataPointer(Box<Value>),
     StaticText,
     FormatArguments,
+    FunctionPointer {
+        id: usize,
+    },
     Function,
     Unit,
 }
@@ -135,6 +138,7 @@ impl Value {
             | Self::StaticSlice { .. }
             | Self::StaticView { .. }
             | Self::Uninitialized
+            | Self::FunctionPointer { .. }
             | Self::Function => None,
         }
     }
@@ -180,6 +184,7 @@ impl Value {
             | Self::StaticSlice { .. }
             | Self::StaticView { .. }
             | Self::Uninitialized
+            | Self::FunctionPointer { .. }
             | Self::Function => None,
         }
     }
@@ -210,6 +215,7 @@ impl Value {
             | Self::StaticSlice { .. }
             | Self::StaticView { .. }
             | Self::Uninitialized
+            | Self::FunctionPointer { .. }
             | Self::Function
             | Self::Unit => false,
         }

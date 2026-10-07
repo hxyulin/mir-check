@@ -64,7 +64,8 @@ concrete local and available dependency calls. Z3 runs as a subprocess. Every re
 condition must be unsatisfiable; unsupported behavior and exhausted resource limits remain unknown
 and cause verification failure. Finite loops are unrolled until every feasible path completes;
 unfinished paths never become a passing result. Concrete generics, static trait implementations,
-function items and supported mutable closures resolve to instantiated MIR bodies. Available
+function items, known function pointers and supported mutable closures resolve to instantiated MIR
+bodies. Available
 dependency MIR is interpreted; unavailable bodies and unsupported shims remain unknown. Explicit
 core models cover slice lengths/ranges, lossless integer conversion, integer endian
 encoding/decoding, shared byte-slice-to-array conversion, fixed-array map, owned byte-array copies,
@@ -571,3 +572,13 @@ values can be captured and replaced in tracked local slots while mutable static 
 remain rejected. Concrete zero-argument closures and function items support Rust-call's empty-tuple
 unit representation and execute their actual MIR. Host/ARM fixtures test these boundaries and
 retain rejected reads, native scoped replay and layout mutations.
+
+Function-item-to-function-pointer coercions preserve a resolved compiler instance and its exact
+normalized signature in a root-local registry of at most 512 targets. Branches, local aggregates,
+returns and Fn/FnMut/FnOnce adapters retain the selected target. Calls execute actual MIR and check
+preconditions/postconditions and memory effects as usual. Missing dependency MIR, arbitrary root
+function pointers, closure-to-pointer coercions, compiler reification shims, signature-changing
+and numeric casts remain
+UNKNOWN. Pointer values are not supported by induction or general opaque static writes. Independent
+host/ARM debug and optimized fixtures cover target selection, generic instances, adapter calls,
+mutable effects, panic detection, contracts, missing bodies, target mutations and native replay.
