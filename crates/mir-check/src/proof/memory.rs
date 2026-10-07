@@ -4,6 +4,36 @@ use symbolic::MemoryProjection;
 const MAX_ALLOCATIONS: usize = 512;
 
 impl<'tcx> Engine<'tcx> {
+    pub(super) fn byte_subslice(
+        &self,
+        value: Value,
+        from: u64,
+        to: u64,
+        from_end: bool,
+        conditions: &[Term],
+    ) -> Result<Value, String> {
+        let Value::Bytes { length, .. } = &value else {
+            return Err("byte subslice requires modeled byte storage".to_owned());
+        };
+        let bits = u32::from(self.tcx.sess.target.pointer_width);
+        let offset = symbolic::integer(&self.terms, u128::from(from), bits, false);
+        let to = symbolic::integer(&self.terms, u128::from(to), bits, false);
+        let end = if from_end {
+            symbolic::binary(&self.terms, "sub", (**length).clone(), to)?
+        } else {
+            to
+        };
+        let length = symbolic::binary(&self.terms, "sub", end, offset.clone())?;
+        self.memory_projection(
+            value,
+            &symbolic::MemoryProjection::Slice {
+                offset: Box::new(offset),
+                length: Box::new(length),
+            },
+            conditions,
+        )
+    }
+
     pub(super) fn local(&self, state: &State, local: usize) -> Result<Value, String> {
         let value = if let Some(allocation) = state.addresses[local] {
             state.memory.get(allocation).and_then(Option::as_ref)

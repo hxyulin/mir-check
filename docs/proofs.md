@@ -222,6 +222,11 @@ and cannot replace callee execution or inject a safety assumption. Return and ed
 incompatible layouts. Local scalar arrays are limited to 16 elements; root shape and relation limits
 also apply. Arbitrary non-byte slices, offset slice views and general iterator adapters remain
 UNKNOWN. Formatting and compiler-inlined raw-pointer internals still require supported models.
+Ordinary execution has a bounded slice membership model selected by exact compiler identities and
+instantiated scalar types. It uses numeric equality, including floating-point NaN and signed-zero
+semantics, and never replaces a custom PartialEq body. Symbolic byte lengths must prove a bound of
+128 elements before finite membership encoding; exceeding the bound is UNKNOWN, never truncation.
+This library model does not extend the separate induction call translator.
 
 The Horn printer sets pp.max_indent to zero. One mixed-end fixture's complete model shrank from
 570,463 to 131,593 bytes by removing indentation, fitting the existing 256 KiB response cap. This

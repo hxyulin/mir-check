@@ -78,6 +78,19 @@ applicable bounds/length conditions and are recorded per root. They are trusted 
 not proofs of the modeled library bodies. Dynamic formatting, arbitrary pointer operations and some
 constant shapes remain unsupported.
 
+Primitive slice membership identifies core's inherent slice method or its exact SliceContains
+trait implementation and checks the instantiated signature and primitive element type. The model
+computes membership over fixed scalar elements or byte storage with a proven length at most 128.
+Shared byte-pattern Subslice projections use checked region bounds and shifted array storage.
+Byte array selects are guarded by the actual length, including empty and shifted views; longer or
+unbounded byte slices remain UNKNOWN. Floating equality preserves NaN non-reflexivity and equality
+of signed zeros. Fixed custom element membership calls resolved PartialEq MIR in slice order,
+preserving comparison panics, interior effects and short-circuiting. Host/ARM tests include
+positive, negative, unknown and source-mutated cases, plus native replay. Inlining that erases the
+supported call boundary remains a limitation, including inlined custom comparisons that expose
+unsupported interior-storage or panic-formatting internals. Mutable Subslice addresses remain
+unsupported.
+
 ## Contracts and root selection
 
 `requires` predicates constrain selected root inputs and must be proved at every reachable call.

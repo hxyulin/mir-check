@@ -97,6 +97,11 @@ impl<'tcx> Engine<'tcx> {
         if Some(callee.krate) != core {
             return Ok(None);
         }
+        if let Some(results) =
+            self.slice_membership(instance, values, raw_values, state, stack, site)?
+        {
+            return Ok(Some(results));
+        }
         let signature = self
             .tcx
             .try_normalize_erasing_regions(

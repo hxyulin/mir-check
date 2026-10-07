@@ -31,6 +31,7 @@ mod integer_intrinsics;
 mod interior;
 mod iterators;
 mod library;
+mod membership;
 mod memory;
 mod owned_iterators;
 
@@ -1200,6 +1201,9 @@ impl<'tcx> Engine<'tcx> {
                 (ProjectionElem::Index(index), Value::Elements(elements)) => {
                     let index = self.local(state, index.as_usize())?;
                     self.fixed_element(&elements, &index, &state.conditions)?
+                }
+                (ProjectionElem::Subslice { from, to, from_end }, value @ Value::Bytes { .. }) => {
+                    self.byte_subslice(value, from, to, from_end, &state.conditions)?
                 }
                 (
                     ProjectionElem::ConstantIndex {

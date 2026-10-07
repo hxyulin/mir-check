@@ -69,7 +69,10 @@ dependency MIR is interpreted; unavailable bodies and unsupported shims remain u
 core models cover slice lengths/ranges, lossless integer conversion, integer endian
 encoding/decoding, shared byte-slice-to-array conversion, fixed-array map, owned byte-array copies,
 exact integer population counts, floating-point absolute value/min/max/clamp and static formatting
-arguments. Array map executes actual callable bodies in order. Reports list interpreted bodies and
+arguments. Primitive slice membership, including shared byte-pattern views, uses exact numeric
+equality over at most 128 elements; symbolic byte lengths must be proved within that bound.
+Custom equality executes actual MIR.
+Array map executes actual callable bodies in order. Reports list interpreted bodies and
 trusted models separately. MIR assume becomes a checked validity obligation. Typed allocations
 support disjoint mutable root inputs, projected writes, reborrows and call state propagation.
 Multiple mutable root pointees must have no interior mutation or reference fields. Scalar Cell
