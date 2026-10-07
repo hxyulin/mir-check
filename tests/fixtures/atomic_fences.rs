@@ -196,6 +196,35 @@ pub fn signed_cas() {
     }
 }
 
+pub fn fresh_counter_claim() {
+    let counter = core::sync::atomic::AtomicU16::new(0);
+    counter
+        .compare_exchange(0, 37, Ordering::Relaxed, Ordering::Relaxed)
+        .unwrap();
+}
+
+pub fn occupied_counter_claim() {
+    let counter = core::sync::atomic::AtomicU16::new(1);
+    counter
+        .compare_exchange(0, 37, Ordering::Relaxed, Ordering::Relaxed)
+        .unwrap();
+}
+
+#[cfg(test)]
+#[test]
+fn a_fresh_local_counter_can_always_be_claimed() {
+    for _ in 0..4096 {
+        fresh_counter_claim();
+    }
+}
+
+#[cfg(test)]
+#[test]
+#[should_panic]
+fn claiming_an_occupied_counter_panics() {
+    occupied_counter_claim();
+}
+
 pub fn pointer_cas_is_unknown() {
     let word = core::sync::atomic::AtomicPtr::<()>::new(core::ptr::null_mut());
     let _ = word.compare_exchange(

@@ -1218,141 +1218,154 @@ impl<'tcx> Engine<'tcx> {
     fn place(&self, state: &State, place: Place<'tcx>) -> Result<Value, String> {
         let mut value = self.local(state, place.local.as_usize())?;
         for projection in place.projection {
-            if matches!(value, Value::StaticSlice { .. }) {
-                self.validate_tracked_value(&value, state)?;
-            }
-            if matches!(value, Value::StaticView { .. }) {
-                value = self.static_view_projection(&value, projection, state)?;
-                continue;
-            }
-            value = match (projection, value.materialize()?) {
-                (
-                    ProjectionElem::Deref,
-                    Value::DebugReference {
-                        source,
-                        place: false,
-                    },
-                ) => Value::DebugReference {
-                    source,
-                    place: true,
-                },
-                (ProjectionElem::Deref, value @ Value::Reference { .. }) => {
-                    self.reference_value(&value, &state.memory, &state.conditions)?
-                }
-                (
-                    ProjectionElem::Deref,
-                    value @ (Value::Bytes { .. }
-                    | Value::Adt { .. }
-                    | Value::Enum { .. }
-                    | Value::Elements(_)
-                    | Value::StaticSlice { .. }
-                    | Value::Tuple(_)
-                    | Value::Unit
-                    | Value::Int { .. }
-                    | Value::Float { .. }
-                    | Value::Bool(_)
-                    | Value::StaticText
-                    | Value::Cell { .. }
-                    | Value::Atomic { .. }
-                    | Value::SliceIterator { .. }),
-                ) => value,
-                (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
-                    .get(field.as_usize())
-                    .cloned()
-                    .ok_or("tuple field missing")?,
-                (ProjectionElem::Field(field, _), Value::Adt { fields, .. }) => fields
-                    .get(field.as_usize())
-                    .map(|(_, value)| value.clone())
-                    .ok_or("ADT field missing")?,
-                (ProjectionElem::Downcast(_, expected), value @ Value::Adt { .. }) => {
-                    let Value::Adt { variant, .. } = &value else {
-                        unreachable!()
-                    };
-                    if *variant != expected.as_usize() {
-                        return Err("enum downcast does not match the modeled variant".to_owned());
-                    }
-                    value
-                }
-                (
-                    ProjectionElem::Downcast(_, expected),
-                    Value::Enum {
-                        discriminant,
-                        variants,
-                        ..
-                    },
-                ) => {
-                    let value = variants
-                        .get(expected.as_usize())
-                        .ok_or("enum variant missing")?;
-                    let Value::Adt {
-                        discriminant: tag, ..
-                    } = value
-                    else {
-                        return Err("enum payload is not an ADT".to_owned());
-                    };
-                    let (_, bits, signed) = discriminant.integer()?;
-                    let equal = symbolic::binary(
-                        &self.terms,
-                        "eq",
-                        *discriminant,
-                        symbolic::integer(&self.terms, *tag, bits, signed),
-                    )?
-                    .boolean()?;
-                    let mut wrong = state.conditions.clone();
-                    wrong.push(symbolic::not(&equal));
-                    if self.feasible(&wrong)? {
-                        return Err("enum downcast lacks a proven variant check".to_owned());
-                    }
-                    value.clone()
-                }
-                (ProjectionElem::Index(index), Value::Bytes { data, length }) => {
-                    let index = self.local(state, index.as_usize())?;
-                    let (expression, bits, signed) = index.integer()?;
-                    let (length_expression, length_bits, _) = length.integer()?;
-                    if signed || bits != length_bits {
-                        return Err("byte index type mismatch".to_owned());
-                    }
-                    let outside = self
-                        .terms
-                        .apply(Op::BvUnsignedGe, &[expression.clone(), length_expression])?;
-                    if self.feasible(&[state.conditions.clone(), vec![outside]].concat())? {
-                        return Err("byte read lacks a proven bounds check".to_owned());
-                    }
-                    Value::Int {
-                        expression: self
-                            .terms
-                            .apply(Op::Select, &[data.clone(), expression.clone()])?,
-                        bits: 8,
-                        signed: false,
-                    }
-                }
-                (ProjectionElem::Index(index), Value::Elements(elements)) => {
-                    let index = self.local(state, index.as_usize())?;
-                    self.fixed_element(&elements, &index, &state.conditions)?
-                }
-                (ProjectionElem::Index(index), Value::StaticSlice { elements, .. }) => {
-                    let index = self.local(state, index.as_usize())?;
-                    let selected = self.fixed_element(&elements, &index, &state.conditions)?;
-                    self.static_view_projection(&selected, ProjectionElem::Deref, state)?
-                }
-                (ProjectionElem::Subslice { from, to, from_end }, value @ Value::Bytes { .. }) => {
-                    self.byte_subslice(value, from, to, from_end, &state.conditions)?
-                }
-                (
-                    ProjectionElem::ConstantIndex {
-                        offset,
-                        min_length,
-                        from_end,
-                    },
-                    value @ (Value::Bytes { .. } | Value::Elements(_) | Value::StaticSlice { .. }),
-                ) => self.constant_element(state, value, offset, min_length, from_end)?,
-                _ => return Err(format!("unsupported place projection {projection:?}")),
-            };
+            value = self.place_projection(state, value, projection)?;
         }
+        self.finish_place(state, value)
+    }
+
+    fn finish_place(&self, state: &State, value: Value) -> Result<Value, String> {
         if matches!(value, Value::StaticSlice { .. }) {
             self.validate_tracked_value(&value, state)?;
         }
         value.materialize()
+    }
+
+    fn place_projection(
+        &self,
+        state: &State,
+        value: Value,
+        projection: rustc_middle::mir::PlaceElem<'tcx>,
+    ) -> Result<Value, String> {
+        if matches!(value, Value::StaticSlice { .. }) {
+            self.validate_tracked_value(&value, state)?;
+        }
+        if matches!(value, Value::StaticView { .. }) {
+            return self.static_view_projection(&value, projection, state);
+        }
+        let value = match (projection, value.materialize()?) {
+            (
+                ProjectionElem::Deref,
+                Value::DebugReference {
+                    source,
+                    place: false,
+                },
+            ) => Value::DebugReference {
+                source,
+                place: true,
+            },
+            (ProjectionElem::Deref, value @ Value::Reference { .. }) => {
+                self.reference_value(&value, &state.memory, &state.conditions)?
+            }
+            (
+                ProjectionElem::Deref,
+                value @ (Value::Bytes { .. }
+                | Value::Adt { .. }
+                | Value::Enum { .. }
+                | Value::Elements(_)
+                | Value::StaticSlice { .. }
+                | Value::Tuple(_)
+                | Value::Unit
+                | Value::Int { .. }
+                | Value::Float { .. }
+                | Value::Bool(_)
+                | Value::StaticText
+                | Value::Cell { .. }
+                | Value::Atomic { .. }
+                | Value::SliceIterator { .. }),
+            ) => value,
+            (ProjectionElem::Field(field, _), Value::Tuple(fields)) => fields
+                .get(field.as_usize())
+                .cloned()
+                .ok_or("tuple field missing")?,
+            (ProjectionElem::Field(field, _), Value::Adt { fields, .. }) => fields
+                .get(field.as_usize())
+                .map(|(_, value)| value.clone())
+                .ok_or("ADT field missing")?,
+            (ProjectionElem::Downcast(_, expected), value @ Value::Adt { .. }) => {
+                let Value::Adt { variant, .. } = &value else {
+                    unreachable!()
+                };
+                if *variant != expected.as_usize() {
+                    return Err("enum downcast does not match the modeled variant".to_owned());
+                }
+                value
+            }
+            (
+                ProjectionElem::Downcast(_, expected),
+                Value::Enum {
+                    discriminant,
+                    variants,
+                    ..
+                },
+            ) => {
+                let value = variants
+                    .get(expected.as_usize())
+                    .ok_or("enum variant missing")?;
+                let Value::Adt {
+                    discriminant: tag, ..
+                } = value
+                else {
+                    return Err("enum payload is not an ADT".to_owned());
+                };
+                let (_, bits, signed) = discriminant.integer()?;
+                let equal = symbolic::binary(
+                    &self.terms,
+                    "eq",
+                    *discriminant,
+                    symbolic::integer(&self.terms, *tag, bits, signed),
+                )?
+                .boolean()?;
+                let mut wrong = state.conditions.clone();
+                wrong.push(symbolic::not(&equal));
+                if self.feasible(&wrong)? {
+                    return Err("enum downcast lacks a proven variant check".to_owned());
+                }
+                value.clone()
+            }
+            (ProjectionElem::Index(index), Value::Bytes { data, length }) => {
+                let index = self.local(state, index.as_usize())?;
+                let (expression, bits, signed) = index.integer()?;
+                let (length_expression, length_bits, _) = length.integer()?;
+                if signed || bits != length_bits {
+                    return Err("byte index type mismatch".to_owned());
+                }
+                let outside = self
+                    .terms
+                    .apply(Op::BvUnsignedGe, &[expression.clone(), length_expression])?;
+                if self.feasible(&[state.conditions.clone(), vec![outside]].concat())? {
+                    return Err("byte read lacks a proven bounds check".to_owned());
+                }
+                Value::Int {
+                    expression: self
+                        .terms
+                        .apply(Op::Select, &[data.clone(), expression.clone()])?,
+                    bits: 8,
+                    signed: false,
+                }
+            }
+            (ProjectionElem::Index(index), Value::Elements(elements)) => {
+                let index = self.local(state, index.as_usize())?;
+                self.fixed_element(&elements, &index, &state.conditions)?
+            }
+            (ProjectionElem::Index(index), Value::StaticSlice { elements, .. }) => {
+                let index = self.local(state, index.as_usize())?;
+                let selected = self.fixed_element(&elements, &index, &state.conditions)?;
+                self.static_view_projection(&selected, ProjectionElem::Deref, state)?
+            }
+            (ProjectionElem::Subslice { from, to, from_end }, value @ Value::Bytes { .. }) => {
+                self.byte_subslice(value, from, to, from_end, &state.conditions)?
+            }
+            (
+                ProjectionElem::ConstantIndex {
+                    offset,
+                    min_length,
+                    from_end,
+                },
+                value @ (Value::Bytes { .. } | Value::Elements(_) | Value::StaticSlice { .. }),
+            ) => self.constant_element(state, value, offset, min_length, from_end)?,
+            _ => return Err(format!("unsupported place projection {projection:?}")),
+        };
+        Ok(value)
     }
 
     fn operand(

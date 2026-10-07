@@ -193,6 +193,11 @@ data-race freedom or whole-function atomicity.
 Reports record these models; atomic history assertions can refute under the conservative
 abstraction. RefCell guards, general UnsafeCell operations and raw pointers remain unsupported.
 
+Even a fresh local atomic loses its constructor value in the arbitrary-access model. A first
+strong CAS from zero can therefore refute despite passing native replay. The atomic-fence fixture
+checks that limitation alongside a genuinely occupied counter and an initializer mutation that
+panics. A solver assignment alone is not evidence that the analyzed program reaches the failure.
+
 --contracts FILE attaches checked clauses to unchanged code through a schema-1 JSON sidecar.
 Exact crate-qualified selectors and positional aliases are validated; stale configuration fails.
 Explicit trusted summaries require no_panic=true and a reason, check caller bounds, generate fresh
@@ -399,6 +404,8 @@ Cargo modes share this policy. A counterexample retains its full query and model
 
 Ordinary calls omit unused contract name maps and duplicate precondition setup. Actual predicates
 and explicit argument aliases retain validation, while callee snapshots still check storage.
+Ordinary place reads and static-write discovery share one projection evaluator. Static-write
+discovery traverses the path once, preserving its existing storage and escape checks.
 Compiler-identified scalar static-value hints use independent Boolean choices per call, following
 the intrinsic's formal contract. Both branches are explored. Pointer hints and unsupported
 transmute layouts remain UNKNOWN, with diagnostics naming their source and destination types.

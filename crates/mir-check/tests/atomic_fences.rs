@@ -187,11 +187,32 @@ fn cas_preserves_result_relations_ordering_checks_and_spurious_failures() {
         ("bad_cas_success_claim", ProofStatus::Refuted),
         ("unchecked_cas_ordering", ProofStatus::Refuted),
         ("cas_history_remains_arbitrary", ProofStatus::Refuted),
+        ("fresh_counter_claim", ProofStatus::Refuted),
+        ("occupied_counter_claim", ProofStatus::Refuted),
         ("pointer_cas_is_unknown", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         for optimized in [false, true] {
-            verify(&fixture(), &entries, target, optimized);
+            let report = verify(&fixture(), &entries, target, optimized);
+            let failures = ["fresh_counter_claim", "occupied_counter_claim"].map(|name| {
+                report
+                    .functions
+                    .iter()
+                    .find(|function| function.name == name)
+                    .unwrap()
+                    .proof
+                    .as_ref()
+                    .unwrap()
+                    .obligations
+                    .iter()
+                    .find(|obligation| obligation.status == ProofStatus::Refuted)
+                    .unwrap()
+            });
+            assert_eq!(failures[0].query, failures[1].query);
+            assert!(failures.iter().all(|failure| {
+                failure.kind == mir_check::ObligationKind::PanicSafety
+                    && failure.detail == "panic entry point is reachable"
+            }));
         }
     }
     assert!(native_tests(&fixture(), &Directory::new()));
@@ -211,5 +232,18 @@ fn cas_preserves_result_relations_ordering_checks_and_spurious_failures() {
             false,
         );
     }
+    assert!(!native_tests(&path, &directory));
+
+    let path = directory.0.join("occupied.rs");
+    let original = "let counter = core::sync::atomic::AtomicU16::new(0);";
+    assert!(source.contains(original));
+    std::fs::write(
+        &path,
+        source.replace(
+            original,
+            "let counter = core::sync::atomic::AtomicU16::new(1);",
+        ),
+    )
+    .unwrap();
     assert!(!native_tests(&path, &directory));
 }

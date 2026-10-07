@@ -394,11 +394,10 @@ impl<'tcx> Engine<'tcx> {
             if length == place.projection.len() {
                 break;
             }
-            let prefix = Place {
-                local: place.local,
-                projection: self.tcx.mk_place_elems(&place.projection[..length + 1]),
-            };
-            let Ok(next) = self.place(state, prefix) else {
+            let next = self
+                .place_projection(state, base, place.projection[length])
+                .and_then(|value| self.finish_place(state, value));
+            let Ok(next) = next else {
                 return Ok(false);
             };
             base = next;

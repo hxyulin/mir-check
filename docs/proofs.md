@@ -313,6 +313,12 @@ instantiated and normalized MIR bodies through Rc, keyed by the full compiler In
 not cache contracts, state or proof outcomes. Branch growth and complex solver queries can
 therefore remain expensive.
 
+Ordinary reads and static-write discovery share the same typed place-projection evaluator.
+Static-write discovery carries each projected value forward once rather than evaluating all
+successively longer prefixes from the local again. The destination write still checks allocation,
+mutability, initialization and escape conditions; this changes traversal cost without assuming a
+memory effect or function summary.
+
 Structural simplification folds supported closed Boolean and bit-vector terms after type and
 arity validation. Integer operations wrap at their declared width; signed comparisons and
 sign/zero extensions preserve that width's semantics. Closed arithmetic wider than 128 bits and
@@ -488,6 +494,14 @@ execution. Assertions about such relationships may refute in this abstraction; t
 are not automatically reachable executions. Load/store ordering restrictions are panic obligations,
 including symbolic Ordering arguments. Unsupported operations and targets retain normal unknown
 boundaries. The models and their interference policy appear in reports.
+
+The same abstraction applies to a freshly constructed local atomic, even when its reference never
+escapes. It can therefore refute a first strong compare_exchange from zero that always succeeds in
+native execution. The independent fresh-counter fixture demonstrates this false positive alongside
+an occupied counter whose unwrap genuinely panics. Both produce the same failing query because the
+current model discards constructor values. Native replay passes the fresh case and rejects a
+mutation of its initializer from zero to one. This is a precision limitation, not a confirmed Rust
+failure; preserving initialization requires storage identity and a justified interference policy.
 
 Compiler-identified fence/compiler_fence wrappers establish a panic obligation excluding Relaxed,
 including when the Ordering is symbolic. The wrapper's available MIR still executes on valid

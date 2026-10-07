@@ -28,6 +28,55 @@ decoding formulas. GitHub Actions runs the proof suite on Linux and macOS, inclu
 When changing fixtures, also run their formatting, Clippy, host tests and ARM release builds.
 See the [repository conventions](https://github.com/hxyulin/mir-check/blob/main/AGENTS.md).
 
+## Analyzer design priorities
+
+The typed MIR adapter, interned SMT terms and persistent Z3 text interface already provide the
+intended foundations. Keep unsupported behavior explicit while replacing narrowly scoped models
+with common semantics where the current representations lose necessary facts.
+
+- Unify typed storage locations and projections across tracked references, static views and
+  provenance-backed pointers. Keep numeric pointer handles separate: a matching address or layout
+  must not create allocation provenance. A location needs allocation identity, compiler type and
+  layout, offset, access capability, initialization state and effect invalidation. Build supported
+  typed operations rather than a general byte-level pointer interpreter.
+- Share immutable aggregate shapes and values across branch states, using copies of changed paths
+  for writes. Current Value and State clones copy owned field vectors and names recursively even
+  though SMT leaves are already shared. Preserve distinct allocation identity for owned copies,
+  independent contract entry snapshots and path-local mutation; shared host representation must
+  not introduce Rust aliases. Compiler type identities should describe shapes instead of repeated
+  display names.
+- Give atomic operations storage identity before adding precise history. Preserve constructor
+  values and writes only where exclusivity or an explicit environment model justifies it. Shared
+  or escaped storage keeps conservative interference. Fence calls alone cannot establish
+  exclusivity. Overlapping atomic views need a common footprint model, not independent histories.
+- Share compiler-identified call descriptions and operation semantics between ordinary execution
+  and induction. The backends still need different control-flow encodings. Keep configured
+  contracts ahead of library models and preserve UNKNOWN for unsupported operations or shims.
+- Separate reference validation from contract snapshot construction before avoiding unnecessary
+  copies. Resolve a concrete call once, cache its derived description and check contracts at every
+  actual call. Existing rustc queries already cache compiler metadata; measure additional caches
+  rather than duplicating them indiscriminately.
+- Cache derived term dependencies and query assembly separately from solver decisions. Current
+  exact-query lookup happens after rendering, while symbol and floating-point dependency walks
+  revisit immutable DAGs. A structural query key must include the analysis context, all relevant
+  latent encodings and configured limits. Keep full query validation and report scripts, including
+  when a cached decision avoids contacting Z3.
+- Track the abstraction choices that contribute to a failing path and validate counterexamples
+  independently. Begin replay with supported scalar and owned-array roots. Shared atomic state,
+  hardware, escaped references and arithmetic NaN payloads need their own validation rules; an
+  unconfirmed model must not be presented as an observed Rust failure.
+
+Typed initialization tracking should precede general MaybeUninit payload reads and retained static
+future polling. Stores must establish facts for the correct location, and unknown effects must
+invalidate them while retaining reference-escape evidence. Type invariants likewise need complete
+construction and mutation hooks before being advertised as verified type-wide guarantees.
+
+Verified callee summaries remain a separate policy decision. They require a proved contract,
+complete frame/effect information and invalidation tied to the compiler, target, build options,
+dependencies and configuration. Current contracts continue to execute callee bodies. Z3 remains
+the solver, and arbitrary raw-pointer memory, whole weak-memory verification and a new solver
+implementation remain outside this design.
+
 ## Work on the docs
 
 The site uses VitePress with local search and light/dark themes. Guides live directly under
