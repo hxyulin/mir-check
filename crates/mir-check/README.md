@@ -546,3 +546,11 @@ a uniquely selected element; ambiguous composite indices and mutable opaque stor
 Slice iterator `find_map` executes concrete callback MIR, retains captured side effects and stops
 at the first modeled Some result. Unsupported callback shapes and destructors remain UNKNOWN.
 Empty slice descriptors retain effect invalidation. These views do not load array payloads.
+
+Opaque static views can reinterpret a dense group of Boolean/integer atomic fields as one
+same-size integer atomic. Compiler layouts must cover the region without padding, and the target
+must fit the allocation at an aligned offset. Arrays and nested structs are supported within the
+shape limits; MaybeUninit, unions, pointers, ordinary payload fields and destructors remain UNKNOWN.
+Reads use the existing arbitrary-per-access model without byte-order or initializer assumptions.
+Shared atomic reborrows preserve their marker across temporary lifetimes. This does not prove
+synchronization protocols or the validity of overlapping accesses and arbitrary overlay writes.

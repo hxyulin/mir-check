@@ -419,7 +419,10 @@ impl<'tcx> Engine<'tcx> {
         if !mutable
             && matches!(
                 value,
-                Value::Bytes { .. } | Value::StaticText | Value::StaticSlice { .. }
+                Value::Bytes { .. }
+                    | Value::StaticText
+                    | Value::StaticSlice { .. }
+                    | Value::Atomic { .. }
             )
         {
             self.validate_tracked_value(&value, state)?;

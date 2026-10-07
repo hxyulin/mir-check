@@ -263,6 +263,95 @@ impl<'tcx> Engine<'tcx> {
         Ok(value)
     }
 
+    fn certify_atomic_overlay(&self, source: Ty<'tcx>, target: Ty<'tcx>) -> Result<(), String> {
+        if self.atomic_shape(target).is_none() {
+            return Err("static reinterpretation does not restore a certified storage type".into());
+        }
+        let source_layout = self.static_layout(source)?;
+        let target_layout = self.static_layout(target)?;
+        if source_layout.size != target_layout.size
+            || !self.dense_atomic_storage(source, 0, &mut 0)?
+        {
+            return Err(
+                "atomic overlay needs equal-size initialized atomic storage without padding".into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn dense_atomic_storage(
+        &self,
+        ty: Ty<'tcx>,
+        depth: usize,
+        values: &mut usize,
+    ) -> Result<bool, String> {
+        if depth >= 8 || *values >= 256 {
+            return Err("atomic overlay storage exceeds depth or value budget".into());
+        }
+        *values += 1;
+        let layout = self.static_layout(ty)?;
+        if ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized()) {
+            return Ok(false);
+        }
+        if layout.size.bytes() == 0 {
+            return Ok(true);
+        }
+        match ty.kind() {
+            ty::Adt(def, args)
+                if self
+                    .tcx
+                    .get_diagnostic_item(rustc_span::Symbol::intern("Atomic"))
+                    == Some(def.did()) =>
+            {
+                let element = args.type_at(0);
+                Ok((element.is_bool() || self.integer_type(element).is_some())
+                    && layout.size == self.static_layout(element)?.size)
+            }
+            ty::Adt(def, args) if def.is_struct() => {
+                let mut ranges = Vec::new();
+                for (index, field) in def.non_enum_variant().fields.iter_enumerated() {
+                    let field_ty = self
+                        .tcx
+                        .try_normalize_erasing_regions(
+                            ty::TypingEnv::fully_monomorphized(),
+                            field.ty(self.tcx, args),
+                        )
+                        .map_err(|error| {
+                            format!("atomic overlay field normalization failed: {error:?}")
+                        })?;
+                    if !self.dense_atomic_storage(field_ty, depth + 1, values)? {
+                        return Ok(false);
+                    }
+                    let size = self.static_layout(field_ty)?.size.bytes();
+                    if size != 0 {
+                        ranges.push((layout.fields.offset(index.as_usize()).bytes(), size));
+                    }
+                }
+                ranges.sort_unstable();
+                let mut end = 0;
+                for (offset, size) in ranges {
+                    if offset != end {
+                        return Ok(false);
+                    }
+                    end = end
+                        .checked_add(size)
+                        .ok_or("atomic overlay field offset overflow")?;
+                }
+                Ok(end == layout.size.bytes())
+            }
+            ty::Array(element, _) => {
+                let rustc_abi::FieldsShape::Array { stride, count } = layout.fields else {
+                    return Ok(false);
+                };
+                Ok(count != 0
+                    && count <= 128
+                    && stride == self.static_layout(*element)?.size
+                    && self.dense_atomic_storage(*element, depth + 1, values)?)
+            }
+            _ => Ok(false),
+        }
+    }
+
     pub(super) fn static_view_projection(
         &self,
         value: &Value,
@@ -273,9 +362,7 @@ impl<'tcx> Engine<'tcx> {
         match projection {
             ProjectionElem::Deref if view.kind != ViewKind::Place => {
                 if view.ty != view.certified && !(view.offset == 0 && view.ty == view.original) {
-                    return Err(
-                        "static reinterpretation does not restore a certified storage type".into(),
-                    );
+                    self.certify_atomic_overlay(view.certified, view.ty)?;
                 }
                 view.certified = view.ty;
                 view.kind = ViewKind::Place;

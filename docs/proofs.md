@@ -611,6 +611,18 @@ its payload address without loading it. A shared reference can restore the origi
 allocation offset zero or retain the certified projected type. An unrelated same-size type does
 not acquire a model. Each view must fit its allocation and satisfy its required alignment.
 
+A cast to a compiler-identified integer atomic can also certify a dense atomic storage region of
+the same size. Recursive compiler field offsets and array strides must cover every byte without
+internal or tail padding. Leaves must be Boolean or integer atomics; MaybeUninit, unions, pointers,
+ordinary payload fields and destructors are rejected. The projected allocation offset must satisfy
+the target atomic's alignment and footprint checks. The shape check has depth eight and 256-value
+limits, with at most 128 elements in an array. This permits combining adjacent typed atomic fields
+into an opaque integer atomic view without decoding their bytes. Reads retain arbitrary per-access
+values; byte order, initializer values and cross-access relationships are not assumed. Shared
+atomic reborrows preserve the existing atomic marker without creating temporary snapshot storage.
+The adapter does not verify synchronization protocols, overlapping access safety or Rust validity
+of arbitrary writes through an overlay.
+
 Mutable initializer bytes are never interpreted as current runtime state. General payload loads,
 owned copies and writes remain UNKNOWN, including reads of MaybeUninit storage. Supported integer
 atomic fields retain the existing conservative arbitrary-per-access behavior. Views do not prove

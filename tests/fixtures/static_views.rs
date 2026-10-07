@@ -322,3 +322,189 @@ pub fn empty_static_iterator_is_invalidated() {
     boundary();
     assert!(cursor.next().is_none());
 }
+
+#[repr(C, align(4))]
+struct Lanes {
+    low: core::sync::atomic::AtomicU16,
+    high: core::sync::atomic::AtomicU16,
+}
+
+#[repr(C)]
+struct Sample {
+    prefix: AtomicU32,
+    lanes: Lanes,
+    unused: MaybeUninit<[u8; 8]>,
+}
+
+static SAMPLE: SyncUnsafeCell<Sample> = SyncUnsafeCell::new(Sample {
+    prefix: AtomicU32::new(0),
+    lanes: Lanes {
+        low: core::sync::atomic::AtomicU16::new(9),
+        high: core::sync::atomic::AtomicU16::new(23),
+    },
+    unused: MaybeUninit::uninit(),
+});
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_sample(pointer: *mut Sample) -> &'static Sample {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_word(pointer: *const AtomicU32) -> &'static AtomicU32 {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+fn sample() -> &'static Sample {
+    share_sample(SAMPLE.get())
+}
+
+pub fn atomic_overlay_load() -> u32 {
+    share_word((&raw const sample().lanes).cast()).load(Ordering::Relaxed)
+}
+
+pub fn atomic_overlay_at_nonzero_offset() {
+    let base = SAMPLE.get() as usize;
+    let pointer = (&raw const sample().lanes).cast::<AtomicU32>();
+    assert!(pointer as usize == base + 4);
+    let value = share_word(pointer).load(Ordering::Acquire);
+    if value < 10 {
+        assert!(value + 1 <= 10);
+    }
+}
+
+pub fn atomic_overlay_wrong_bound() {
+    let value = atomic_overlay_load();
+    assert!(value < 10);
+}
+
+pub fn atomic_overlay_is_not_an_initializer_snapshot() {
+    assert!(atomic_overlay_load() == 0);
+}
+
+#[repr(C, align(4))]
+struct Padded {
+    first: core::sync::atomic::AtomicU8,
+    second: core::sync::atomic::AtomicU16,
+}
+
+#[repr(C)]
+struct Rejected {
+    padded: Padded,
+    uninitialized: MaybeUninit<AtomicU32>,
+    plain: SyncUnsafeCell<u32>,
+    tail_padding: core::sync::atomic::AtomicU8,
+}
+static REJECTED: SyncUnsafeCell<Rejected> = SyncUnsafeCell::new(Rejected {
+    padded: Padded {
+        first: core::sync::atomic::AtomicU8::new(0),
+        second: core::sync::atomic::AtomicU16::new(0),
+    },
+    uninitialized: MaybeUninit::uninit(),
+    plain: SyncUnsafeCell::new(0),
+    tail_padding: core::sync::atomic::AtomicU8::new(0),
+});
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_rejected(pointer: *mut Rejected) -> &'static Rejected {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn atomic_overlay_padding_is_unknown() {
+    let record = share_rejected(REJECTED.get());
+    let _ = share_word((&raw const record.padded).cast());
+}
+
+pub fn atomic_overlay_uninitialized_is_unknown() {
+    let record = share_rejected(REJECTED.get());
+    let _ = share_word((&raw const record.uninitialized).cast());
+}
+
+pub fn atomic_overlay_plain_storage_is_unknown() {
+    let record = share_rejected(REJECTED.get());
+    let _ = share_word((&raw const record.plain).cast());
+}
+
+pub fn atomic_overlay_cannot_extend_a_field() {
+    let record = share_rejected(REJECTED.get());
+    let _ = share_word((&raw const record.tail_padding).cast());
+}
+
+#[repr(C, align(2))]
+struct Flags {
+    bits: [core::sync::atomic::AtomicBool; 2],
+}
+#[repr(C)]
+struct FlagSample {
+    flags: Flags,
+    unused: MaybeUninit<[u8; 2]>,
+}
+static FLAGS: SyncUnsafeCell<FlagSample> = SyncUnsafeCell::new(FlagSample {
+    flags: Flags {
+        bits: [const { core::sync::atomic::AtomicBool::new(false) }; 2],
+    },
+    unused: MaybeUninit::uninit(),
+});
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_flags(pointer: *mut FlagSample) -> &'static FlagSample {
+    mir! { { RET = &*pointer; Return() } }
+}
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_halfword(
+    pointer: *const core::sync::atomic::AtomicU16,
+) -> &'static core::sync::atomic::AtomicU16 {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn atomic_bool_array_overlay() -> u16 {
+    let flags = share_flags(FLAGS.get());
+    share_halfword((&raw const flags.flags).cast()).load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+#[test]
+fn dense_atomic_overlays_replay_only_without_concurrent_accesses() {
+    let _ = atomic_overlay_load();
+    atomic_overlay_at_nonzero_offset();
+    let _ = atomic_overlay_reborrow();
+    let _ = atomic_bool_array_overlay();
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn shared_word_reborrow(pointer: *const AtomicU32) -> &'static AtomicU32 {
+    mir! {
+        let word: &'static AtomicU32;
+        {
+            word = &*pointer;
+            RET = &*word;
+            StorageDead(word);
+            Return()
+        }
+    }
+}
+
+pub fn atomic_overlay_reborrow() -> u32 {
+    shared_word_reborrow((&raw const sample().lanes).cast()).load(Ordering::Relaxed)
+}
+
+#[repr(C, align(4))]
+struct MisalignedSample {
+    prefix: core::sync::atomic::AtomicU16,
+    bytes: [core::sync::atomic::AtomicU8; 4],
+    unused: MaybeUninit<[u8; 2]>,
+}
+static MISALIGNED_SAMPLE: SyncUnsafeCell<MisalignedSample> =
+    SyncUnsafeCell::new(MisalignedSample {
+        prefix: core::sync::atomic::AtomicU16::new(0),
+        bytes: [const { core::sync::atomic::AtomicU8::new(0) }; 4],
+        unused: MaybeUninit::uninit(),
+    });
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_misaligned(pointer: *mut MisalignedSample) -> &'static MisalignedSample {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn atomic_overlay_misaligned_field_is_unknown() {
+    let record = share_misaligned(MISALIGNED_SAMPLE.get());
+    let _ = share_word((&raw const record.bytes).cast());
+}

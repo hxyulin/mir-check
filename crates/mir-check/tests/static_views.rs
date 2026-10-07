@@ -365,3 +365,69 @@ fn incorrect_static_slice_offsets_and_short_circuit_claims_fail() {
         assert!(!native_tests(&path, &directory));
     }
 }
+
+#[test]
+fn atomic_overlays_require_dense_initialized_storage_and_preserve_arbitrary_values() {
+    let entries = [
+        ("atomic_overlay_load", ProofStatus::Proved),
+        ("atomic_overlay_reborrow", ProofStatus::Proved),
+        ("atomic_overlay_at_nonzero_offset", ProofStatus::Proved),
+        ("atomic_bool_array_overlay", ProofStatus::Proved),
+        ("atomic_overlay_wrong_bound", ProofStatus::Refuted),
+        (
+            "atomic_overlay_is_not_an_initializer_snapshot",
+            ProofStatus::Refuted,
+        ),
+        ("atomic_overlay_padding_is_unknown", ProofStatus::Unknown),
+        (
+            "atomic_overlay_misaligned_field_is_unknown",
+            ProofStatus::Unknown,
+        ),
+        (
+            "atomic_overlay_uninitialized_is_unknown",
+            ProofStatus::Unknown,
+        ),
+        (
+            "atomic_overlay_plain_storage_is_unknown",
+            ProofStatus::Unknown,
+        ),
+        ("atomic_overlay_cannot_extend_a_field", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized, None);
+        }
+    }
+}
+
+#[test]
+fn changing_atomic_storage_layout_or_an_overlay_offset_never_proves() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    for (original, mutation, root, status, replay) in [
+        (
+            "#[repr(C, align(4))]\nstruct Lanes",
+            "#[repr(C, align(8))]\nstruct Lanes",
+            "atomic_overlay_load",
+            ProofStatus::Unknown,
+            false,
+        ),
+        (
+            "assert!(pointer as usize == base + 4);",
+            "assert!(pointer as usize == base + 5);",
+            "atomic_overlay_at_nonzero_offset",
+            ProofStatus::Refuted,
+            true,
+        ),
+    ] {
+        assert!(source.contains(original));
+        let directory = Directory::new();
+        let path = directory.0.join("mutant.rs");
+        std::fs::write(&path, source.replace(original, mutation)).unwrap();
+        for target in [None, Some("thumbv7em-none-eabihf")] {
+            verify(&path, &[(root, status)], target, false, None);
+        }
+        if replay {
+            assert!(!native_tests(&path, &directory));
+        }
+    }
+}

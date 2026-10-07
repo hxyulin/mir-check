@@ -817,7 +817,10 @@ impl<'tcx> Engine<'tcx> {
                     } else {
                         self.local(&state, 0)?
                     };
-                    self.validate_frame_escape(&value, &state, incoming_allocations)?;
+                    self.validate_frame_escape(&value, &state, incoming_allocations)
+                        .map_err(|error| {
+                            format!("return from {}: {error}", self.tcx.def_path_str(id))
+                        })?;
                     let mut post_bindings = bindings.clone();
                     let uses_post_state = contracts
                         .iter()

@@ -488,3 +488,11 @@ accesses still allow arbitrary per-access values. Host/ARM debug and optimized t
 orderings, symbolic guarded and invalid orderings, native panic replay, mutations and unsupported
 payloads. Invalid direct intrinsic orderings remain UNKNOWN. This does not establish whole-function
 atomicity, publication safety or full weak-memory correctness.
+
+Dense Boolean/integer atomic fields in certified static storage can form a same-size integer
+atomic view. Compiler offsets and strides must cover every byte, and the allocation must satisfy
+the wider atomic's alignment at the projected offset. Padding, uninitialized storage, pointers,
+ordinary payload fields and destructors remain UNKNOWN. Shared atomic reborrows retain their opaque
+marker. Host/ARM debug and optimized tests cover nonzero offsets, Boolean arrays, arbitrary values,
+rejected regions, native scoped replay and layout/offset mutations. This adds no synchronization or
+atomic-history facts and does not verify overlapping concurrent accesses.

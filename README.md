@@ -342,7 +342,8 @@ The ordinary interpreter can also recover a compiler-known typed static layout t
 UnsafeCell byte carrier while keeping its payload opaque. It checks allocation provenance, original
 initializer types, size, alignment and field offsets. Shared fixed arrays support bounded slice
 views and ordered element references; iterator `find_map` executes callbacks with short circuiting.
-General mutable payloads remain opaque. See
+Dense groups of atomic fields can also form same-size integer atomic views after compiler layout
+and alignment checks. General mutable payloads remain opaque. See
 [static storage views](docs/proofs.md#opaque-static-storage-views) for the supported boundaries.
 
 Atomic fence coverage checks compiler-identified fence/compiler_fence wrappers and their intrinsic
