@@ -20,6 +20,9 @@ impl<'tcx> Engine<'tcx> {
         roots: &mut Vec<Value>,
     ) -> Result<(), String> {
         match value {
+            Value::TrackedPointer { reference, .. } => {
+                Self::collect_static_store_references(reference, roots)?;
+            }
             Value::Reference { .. } => {
                 if roots.len() >= 512 {
                     return Err("static store exceeds the 512-reference escape budget".into());
@@ -144,11 +147,13 @@ impl<'tcx> Engine<'tcx> {
         }
         match (ty.kind(), &value) {
             (ty::Bool, Value::Bool(_)) => Ok(()),
-            (ty::RawPtr(_, _), Value::RawPointer { bits, .. })
-                if self.thin_raw_pointer(ty)
-                    && *bits == u32::from(self.tcx.sess.target.pointer_width) =>
+            (
+                ty::RawPtr(_, _),
+                Value::RawPointer { bits, .. } | Value::TrackedPointer { bits, .. },
+            ) if self.thin_raw_pointer(ty)
+                && *bits == u32::from(self.tcx.sess.target.pointer_width) =>
             {
-                Ok(())
+                self.validate_tracked_value(&value, state)
             }
             (ty::Ref(_, _, mutability), Value::Reference { mutable, .. })
                 if !mutability.is_mut() || *mutable =>
@@ -238,5 +243,31 @@ impl<'tcx> Engine<'tcx> {
             }
             _ => Err(format!("unsupported owned static store shape {ty}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_tracked_addresses_retain_their_underlying_reference() {
+        let reference = Value::Reference {
+            allocation: 3,
+            projection: Vec::new(),
+            mutable: false,
+        };
+        let pointer = Value::TrackedPointer {
+            reference: Box::new(reference),
+            address: Context::default().bit_vector(1, 64).unwrap(),
+            bits: 64,
+        };
+        let value = Value::Tuple(vec![pointer]);
+        let mut roots = Vec::new();
+        Engine::collect_static_store_references(&value, &mut roots).unwrap();
+        assert!(matches!(
+            roots.as_slice(),
+            [Value::Reference { allocation: 3, .. }],
+        ));
     }
 }

@@ -40,7 +40,7 @@ impl<'tcx> Engine<'tcx> {
         {
             return Ok(None);
         }
-        let Value::RawPointer { bits, .. } = value else {
+        let (Value::RawPointer { bits, .. } | Value::TrackedPointer { bits, .. }) = value else {
             return Err("pointer atomic construction needs an integer-derived handle".into());
         };
         if *bits != width {
@@ -118,7 +118,9 @@ impl<'tcx> Engine<'tcx> {
                 })
             }
             CastKind::PointerExposeProvenance if self.thin_raw_pointer(source) => {
-                let Value::RawPointer { address, bits } = value else {
+                let (Value::RawPointer { address, bits }
+                | Value::TrackedPointer { address, bits, .. }) = value
+                else {
                     return Err("pointer address exposure needs an integer-derived handle".into());
                 };
                 if bits != width {
@@ -141,7 +143,11 @@ impl<'tcx> Engine<'tcx> {
             CastKind::PtrToPtr
                 if self.thin_raw_pointer(source) && self.thin_raw_pointer(target) =>
             {
-                if !matches!(value, Value::RawPointer { bits, .. } if bits == width) {
+                if !matches!(
+                    value,
+                    Value::RawPointer { bits, .. } | Value::TrackedPointer { bits, .. }
+                        if bits == width
+                ) {
                     return Err("pointer cast needs an integer-derived thin handle".into());
                 }
                 Ok(value)

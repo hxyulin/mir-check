@@ -258,6 +258,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized

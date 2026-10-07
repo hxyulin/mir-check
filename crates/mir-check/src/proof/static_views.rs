@@ -229,14 +229,19 @@ impl<'tcx> Engine<'tcx> {
         let Value::StaticView { id, epoch } = value else {
             return Err("expected a static storage view".into());
         };
-        if !matches!(state.memory.get(*epoch), Some(Some(Value::Unit))) {
-            return Err("static storage view invalidated by unknown memory effects".into());
-        }
-        self.static_views
+        let view = self
+            .static_views
             .borrow()
             .get(*id)
             .copied()
-            .ok_or("static view identity unavailable".into())
+            .ok_or("static view identity unavailable")?;
+        super::storage_locations::StorageLocation::static_view(
+            view.static_id,
+            *epoch,
+            view.writable,
+        )
+        .validate(&state.memory)?;
+        Ok(view)
     }
 
     pub(super) fn static_view_operand(&self, value: Value, state: &State) -> Result<Value, String> {

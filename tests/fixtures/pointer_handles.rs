@@ -95,7 +95,7 @@ pub fn atomic_memory_is_unknown(cookie: usize) -> bool {
     Handle::new(cookie).head.load(Ordering::Relaxed).is_null()
 }
 
-pub fn references_to_raw_pointers_are_unknown(value: u8) -> usize {
+pub fn local_reference_addresses(value: u8) -> usize {
     &value as *const u8 as usize
 }
 

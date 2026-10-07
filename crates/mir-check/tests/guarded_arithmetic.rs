@@ -126,7 +126,12 @@ fn guarded_core_arithmetic_proves_validity_and_preserves_panic_and_memory_bounda
                 }));
                 assert!(proof.obligations.iter().any(|obligation| {
                     obligation.status == ProofStatus::Unknown
-                        && obligation.detail.contains("unsupported rvalue &raw const")
+                        && (obligation
+                            .detail
+                            .contains("raw subobject addresses need tracked typed layout offsets")
+                            || obligation
+                                .detail
+                                .contains("tracked raw addresses require a sized pointee"))
                 }));
             }
         }

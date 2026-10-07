@@ -41,6 +41,8 @@ mod slice_equality;
 mod static_views;
 mod static_writes;
 mod storage_layout;
+mod storage_locations;
+mod tracked_pointers;
 
 #[derive(Clone)]
 struct State {
@@ -67,6 +69,7 @@ struct Engine<'tcx> {
     static_roots: Option<usize>,
     function_pointers: Vec<(ty::Instance<'tcx>, Ty<'tcx>)>,
     static_addresses: std::collections::HashMap<DefId, Term>,
+    tracked_addresses: Vec<(tracked_pointers::AddressLocation, Term)>,
     steps: usize,
     call_chain: Vec<DefId>,
     failed_call_chain: Option<Vec<DefId>>,
@@ -108,6 +111,7 @@ pub fn verify(
         static_roots: None,
         function_pointers: Vec::new(),
         static_addresses: std::collections::HashMap::new(),
+        tracked_addresses: Vec::new(),
         steps: 0,
         call_chain: Vec::new(),
         failed_call_chain: None,
@@ -337,6 +341,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
+            | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
@@ -1513,10 +1518,21 @@ impl<'tcx> Engine<'tcx> {
             Rvalue::Ref(_, BorrowKind::Shared, place) => self.borrow(state, *place, false),
             Rvalue::Ref(_, BorrowKind::Mut { .. }, place) => self.borrow(state, *place, true),
             Rvalue::RawPtr(
-                rustc_middle::mir::RawPtrKind::Const | rustc_middle::mir::RawPtrKind::Mut,
+                kind @ (rustc_middle::mir::RawPtrKind::Const | rustc_middle::mir::RawPtrKind::Mut),
                 place,
-            ) if matches!(self.place(state, *place)?, Value::StaticView { .. }) => {
-                self.raw_static_view(&self.place(state, *place)?, state)
+            ) => {
+                let value = self.place(state, *place)?;
+                if matches!(value, Value::StaticView { .. }) {
+                    self.raw_static_view(&value, state)
+                } else {
+                    let mutable = *kind == rustc_middle::mir::RawPtrKind::Mut;
+                    let value = self.raw_tracked_pointer(body, state, *place, mutable)?;
+                    self.record_model(
+                        id,
+                        "tracked raw address; liveness retained; no memory access",
+                    );
+                    Ok(value)
+                }
             }
             Rvalue::RawPtr(rustc_middle::mir::RawPtrKind::FakeForPtrMetadata, place) => {
                 let value = self.place(state, *place)?;
@@ -1709,6 +1725,17 @@ impl<'tcx> Engine<'tcx> {
                         id,
                         "compiler-backed static storage view; payload remains opaque",
                     );
+                    return Ok(value);
+                }
+                if matches!(value, Value::TrackedPointer { .. }) {
+                    self.validate_tracked_value(&value, state)?;
+                    let value = self.pointer_handle_cast(*kind, source, *target, value)?;
+                    self.record_model(id, "tracked raw address cast; no raw memory access");
+                    return Ok(value);
+                }
+                if *kind == CastKind::PtrToPtr && matches!(source.kind(), ty::Ref(..)) {
+                    let value = self.reference_raw_pointer(source, *target, value, state)?;
+                    self.record_model(id, "tracked reference address; no raw memory access");
                     return Ok(value);
                 }
                 let value = self.pointer_handle_cast(*kind, source, *target, value)?;

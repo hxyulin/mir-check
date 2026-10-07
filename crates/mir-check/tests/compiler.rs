@@ -1520,6 +1520,15 @@ pub fn dynamic(value: u8) { panic!("value: {value}"); }
                     .iter()
                     .any(|model| model.contains("static formatting arguments"))
             );
+        } else if entry == "dynamic" {
+            assert!(
+                proof
+                    .models
+                    .iter()
+                    .all(|model| model.contains("tracked raw address")
+                        || model.contains("tracked reference address"))
+            );
+            assert!(proof.trusted_calls.is_empty());
         } else {
             assert!(proof.models.is_empty());
         }

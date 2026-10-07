@@ -1,3 +1,4 @@
+use super::storage_locations::{StorageLocation, validate_static_epoch};
 use super::*;
 use symbolic::MemoryProjection;
 
@@ -69,11 +70,8 @@ impl<'tcx> Engine<'tcx> {
         }
         match value {
             Value::StaticSlice { epoch, .. } | Value::StaticView { epoch, .. } => {
-                if matches!(memory.get(*epoch), Some(Some(Value::Unit))) {
-                    Ok(value.clone())
-                } else {
-                    Err("static storage view invalidated by unknown memory effects".into())
-                }
+                validate_static_epoch(memory, *epoch)?;
+                Ok(value.clone())
             }
             Value::LocalAtomic {
                 allocation,
@@ -95,6 +93,10 @@ impl<'tcx> Engine<'tcx> {
             },
             Value::DebugReference { source, .. } => {
                 self.snapshot(source, memory, conditions, depth + 1)?;
+                Ok(value.clone())
+            }
+            Value::TrackedPointer { reference, .. } => {
+                self.snapshot(reference, memory, conditions, depth + 1)?;
                 Ok(value.clone())
             }
             Value::Reference { .. } => {
@@ -159,16 +161,13 @@ impl<'tcx> Engine<'tcx> {
         let Value::Reference {
             allocation,
             projection,
-            ..
+            mutable,
         } = reference
         else {
             return Err("expected an allocation reference".to_owned());
         };
-        let mut value = memory
-            .get(*allocation)
-            .and_then(Option::as_ref)
-            .cloned()
-            .ok_or("reference points to dead or uninitialized storage")?;
+        let location = StorageLocation::tracked(*allocation, *mutable);
+        let mut value = location.read(memory)?.clone();
         let mut projections = projection.iter().peekable();
         while let Some(element) = projections.next() {
             if let MemoryProjection::Chunks { width, count } = element
@@ -510,15 +509,18 @@ impl<'tcx> Engine<'tcx> {
             return Ok(());
         }
         let (allocation, path, writable) = self.memory_path(state, place)?;
-        if !writable {
+        if allocation.is_none() && !writable {
             return Err("write through a shared snapshot is unsupported".to_owned());
         }
         let mut storage = if let Some(allocation) = allocation {
-            state.memory[allocation].clone()
+            let location = StorageLocation::tracked(allocation, writable);
+            location.require_write(&state.memory)?;
+            location.read(&state.memory)?.clone()
         } else {
-            state.locals[local].clone()
-        }
-        .ok_or("write into uninitialized aggregate storage")?;
+            state.locals[local]
+                .clone()
+                .ok_or("write into uninitialized aggregate storage")?
+        };
         self.write_projection(&mut storage, &path, value, &state.conditions)?;
         if let Some(allocation) = allocation {
             state.memory[allocation] = Some(storage);
@@ -812,11 +814,7 @@ impl<'tcx> Engine<'tcx> {
                         "reference to frame-owned storage cannot escape its frame".to_owned()
                     );
                 }
-                let stored = state
-                    .memory
-                    .get(*allocation)
-                    .and_then(Option::as_ref)
-                    .ok_or("reference points to dead or uninitialized storage")?;
+                let stored = StorageLocation::tracked(*allocation, false).read(&state.memory)?;
                 if !visited.contains(allocation) {
                     visited.push(*allocation);
                     Self::validate_reference_graph(stored, state, incoming, visited)?;
@@ -841,27 +839,22 @@ impl<'tcx> Engine<'tcx> {
                 }
                 Ok(())
             }
+            Value::TrackedPointer { reference, .. } => {
+                Self::validate_reference_graph(reference, state, incoming, visited)
+            }
             Value::SliceIterator { source, .. }
             | Value::MetadataPointer(source)
             | Value::DebugReference { source, .. } => {
                 Self::validate_reference_graph(source, state, incoming, visited)
             }
             Value::StaticSlice { epoch, elements } => {
-                if !matches!(state.memory.get(*epoch), Some(Some(Value::Unit))) {
-                    return Err("static slice invalidated by unknown memory effects".into());
-                }
+                validate_static_epoch(&state.memory, *epoch)?;
                 for element in elements {
                     Self::validate_reference_graph(element, state, incoming, visited)?;
                 }
                 Ok(())
             }
-            Value::StaticView { epoch, .. } => {
-                if matches!(state.memory.get(*epoch), Some(Some(Value::Unit))) {
-                    Ok(())
-                } else {
-                    Err("static storage view invalidated by unknown memory effects".into())
-                }
-            }
+            Value::StaticView { epoch, .. } => validate_static_epoch(&state.memory, *epoch),
             Value::Input(_)
             | Value::Bool(_)
             | Value::Int { .. }
@@ -893,7 +886,7 @@ impl<'tcx> Engine<'tcx> {
             Value::DebugReference { place: true, .. } => {
                 Err("opaque Debug data cannot escape as an owned value".into())
             }
-            Value::DebugReference { place: false, .. } => {
+            Value::DebugReference { place: false, .. } | Value::TrackedPointer { .. } => {
                 Self::validate_reference_graph(&value, state, Some(incoming), &mut Vec::new())?;
                 Ok(value)
             }
@@ -1034,6 +1027,23 @@ mod tests {
         let error =
             Engine::validate_reference_graph(&atomic, &state, None, &mut Vec::new()).unwrap_err();
         assert!(error.contains("dead or uninitialized"));
+    }
+
+    #[test]
+    fn tracked_pointer_addresses_keep_dead_and_frame_owned_reference_evidence() {
+        let context = Context::default();
+        let pointer = Value::TrackedPointer {
+            reference: Box::new(reference(0, false)),
+            address: context.bit_vector(1, 64).unwrap(),
+            bits: 64,
+        };
+        let dead = state(vec![None]);
+        assert!(Engine::validate_reference_graph(&pointer, &dead, None, &mut Vec::new()).is_err());
+        let live = state(vec![Some(Value::Unit)]);
+        Engine::validate_reference_graph(&pointer, &live, None, &mut Vec::new()).unwrap();
+        let error = Engine::validate_reference_graph(&pointer, &live, Some(0), &mut Vec::new())
+            .unwrap_err();
+        assert!(error.contains("frame-owned"));
     }
 
     #[test]

@@ -37,6 +37,11 @@ pub enum Value {
         address: Term,
         bits: u32,
     },
+    TrackedPointer {
+        reference: Box<Value>,
+        address: Term,
+        bits: u32,
+    },
     Input(input::InputValue),
     Bool(Term),
     Int {
@@ -140,6 +145,7 @@ impl Value {
             Self::Cell { .. }
             | Self::Atomic { .. }
             | Self::LocalAtomic { .. }
+            | Self::TrackedPointer { .. }
             | Self::Reference { .. }
             | Self::SliceIterator { .. }
             | Self::MetadataPointer(_)
@@ -189,6 +195,7 @@ impl Value {
             Self::Cell { .. }
             | Self::Atomic { .. }
             | Self::LocalAtomic { .. }
+            | Self::TrackedPointer { .. }
             | Self::SliceIterator { .. }
             | Self::MetadataPointer(_)
             | Self::StaticText
@@ -233,6 +240,7 @@ impl Value {
             | Self::Function
             | Self::Unit => false,
             Self::DebugReference { source, .. } => source.contains_mutable(),
+            Self::TrackedPointer { reference, .. } => reference.contains_mutable(),
         }
     }
 
@@ -248,6 +256,7 @@ impl Value {
             Self::SliceIterator { source, .. }
             | Self::MetadataPointer(source)
             | Self::DebugReference { source, .. } => source.contains_local_atomic(),
+            Self::TrackedPointer { reference, .. } => reference.contains_local_atomic(),
             Self::Input(_)
             | Self::Bool(_)
             | Self::Int { .. }
@@ -355,21 +364,17 @@ pub fn binary(
     left: Value,
     right: Value,
 ) -> Result<Value, String> {
-    if let (
-        Value::RawPointer {
-            address: left,
-            bits,
-        },
-        Value::RawPointer {
-            address: right,
-            bits: right_bits,
-        },
-    ) = (&left, &right)
-    {
+    let pointer = |value: &Value| match value {
+        Value::RawPointer { address, bits } | Value::TrackedPointer { address, bits, .. } => {
+            Some((address.clone(), *bits))
+        }
+        _ => None,
+    };
+    if let (Some((left, bits)), Some((right, right_bits))) = (pointer(&left), pointer(&right)) {
         if bits != right_bits || !matches!(operation, "eq" | "ne") {
             return Err("unsupported raw pointer operation".into());
         }
-        let equal = context.apply(Op::Equal, &[left.clone(), right.clone()])?;
+        let equal = context.apply(Op::Equal, &[left, right])?;
         return Ok(Value::Bool(if operation == "ne" {
             not(&equal)
         } else {

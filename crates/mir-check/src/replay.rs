@@ -77,6 +77,9 @@ pub struct ReplayResult {
     pub panic_message: Option<String>,
     pub matches_obligation: bool,
     pub panic_strategy: String,
+    /// Query abstractions not set by the generated caller's concrete root inputs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncontrolled_abstractions: Vec<String>,
 }
 
 impl ReplayResult {
@@ -89,6 +92,7 @@ impl ReplayResult {
             panic_message: None,
             matches_obligation: false,
             panic_strategy: String::new(),
+            uncontrolled_abstractions: Vec::new(),
         }
     }
 }
@@ -137,6 +141,7 @@ pub fn replay_report(report: &mut Report) {
         };
         let mut result = result;
         result.panic_strategy = report.panic_strategy.clone();
+        result.uncontrolled_abstractions = obligation.abstraction_reasons.clone();
         if let Some(source) = &result.panic_source {
             result.matches_obligation = source.line == obligation.source.line
                 && same_file(&source.file, &obligation.source.file);

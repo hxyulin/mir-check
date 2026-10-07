@@ -243,6 +243,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::Atomic { .. }
             | Value::Reference { .. }
             | Value::RawPointer { .. }
+            | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::StaticText

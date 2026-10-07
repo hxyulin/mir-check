@@ -60,6 +60,20 @@ pub fn occupied_atomic_claim() {
         .unwrap();
 }
 
+pub fn weak_exchange_is_not_guaranteed_to_succeed() {
+    let state = AtomicU16::new(0);
+    assert!(
+        state
+            .compare_exchange_weak(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    );
+}
+
+pub fn arithmetic_nan_encoding_is_not_guaranteed() {
+    let sample = f32::from_bits(0x7fc5_0001);
+    assert!((sample * 2.0).to_bits() == 0x7fc5_0001);
+}
+
 pub struct PanickingReturn;
 
 impl Drop for PanickingReturn {

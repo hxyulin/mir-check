@@ -96,7 +96,12 @@ trusted models separately. MIR assume becomes a checked validity obligation. Typ
 support disjoint mutable root inputs, projected writes, reborrows and call state propagation.
 Multiple mutable root pointees must have no interior mutation or reference fields. Scalar Cell
 roots mixed with mutable roots remain unsupported. Tracked references in aggregates and captures
-preserve writes to their allocations. General aliasing remains unsupported. Structs, symbolic input
+preserve writes to their allocations. Tracked allocation loads and projected writes share checked
+identity, liveness and access capabilities with static views. Static validity epochs do not merge
+static definitions and do not supply readable shared payloads. Provenance-backed local addresses
+retain reference-escape evidence; their referents must remain live, and frame-owned addresses cannot
+escape. Compiler type and projection certificates keep their existing rules during this migration.
+General aliasing remains unsupported. Structs, symbolic input
 enums and constructed variants preserve tags, fields and return facts. Small integer/bool/float
 arrays support symbolic bounded indices and pattern projections; other elements require uniquely
 determined indices. Struct inputs do not acquire implicit invariants.
@@ -650,3 +655,17 @@ formatter counters, reference escape, induction rejection, guard mutations and n
 Failure reports identify supported abstraction symbols that occur in the obligation query, including
 conservative atomic reads, weak compare-exchange choices and arithmetic NaN encodings. These labels
 explain modeling choices; they do not establish which choice caused a real panic.
+Native replay records these relevant choices as `uncontrolled_abstractions`, because the generated
+caller supplies root inputs without imposing an interfering atomic history, weak compare-exchange
+outcome or arithmetic NaN encoding. This limitation remains visible for a confirmed native panic.
+A normal return does not prove an abstract counterexample impossible: shared atomic cases need
+initialization and interference checked against the selected root's execution environment. Static
+startup precision still requires that environment to be verified rather than inferred from a static
+initializer.
+
+Tracked raw addresses can be formed from initialized whole locals and tracked reference reborrows.
+Thin casts preserve the address and reference evidence; integer exposure preserves only the numeric
+address. Repeated addresses of the same tracked place agree. Addresses are symbolic and constrained
+to be nonzero and correctly aligned; relative offsets and distinct-allocation address comparisons
+remain conservative. Raw dereferences, pointer arithmetic, untracked reference snapshots and
+frame-owned pointer escape remain UNKNOWN.

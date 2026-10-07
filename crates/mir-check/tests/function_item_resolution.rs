@@ -199,10 +199,16 @@ fn rebuilding_core_exposes_actual_validation_mir_without_assuming_pointer_operat
         );
         assert!(proof.trusted_calls.is_empty());
         assert!(
-            proof
-                .obligations
-                .iter()
-                .any(|obligation| { obligation.detail.contains("unsupported rvalue &raw const") })
+            proof.obligations.iter().any(|obligation| {
+                obligation
+                    .detail
+                    .contains("tracked raw addresses require a sized pointee")
+                    || obligation
+                        .detail
+                        .contains("raw subobject addresses need tracked typed layout offsets")
+            }),
+            "{:?}",
+            proof.obligations
         );
         assert!(!proof.obligations.iter().any(|obligation| {
             obligation

@@ -362,6 +362,16 @@ and replay tool failures. A panic at a different site confirms a root execution 
 not confirm that particular obligation. A successful execution tests one input and does not prove
 the function safe or change REFUTED to PROVED.
 
+The generated caller supplies concrete root inputs, not every choice in the symbolic query.
+JSON and JSONL replay results retain `uncontrolled_abstractions` for relevant modeled choices,
+including arbitrary shared atomic reads, weak compare-exchange failure and arithmetic NaN bits.
+The CLI identifies this limitation even when native execution panics at the reported location:
+that observes a real panic, without establishing that the complete solver assignment occurred.
+A normal return with these choices requires checking their reachability in the root's environment.
+For shared atomics, check initialization, earlier calls and possible interference. Replaying a fresh
+process observes source static initialization; it does not test every runtime atomic history.
+Static startup precision remains deferred until a verified execution environment exists.
+
 Replay currently supports accessible nongeneric free functions on the analyzed native host target,
 with Boolean, integer and unit inputs and supported fixed scalar arrays of at most 128 elements.
 References, symbolic byte-array encodings, floating-point inputs and trusted call boundaries are

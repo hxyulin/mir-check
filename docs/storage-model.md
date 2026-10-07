@@ -32,6 +32,31 @@ an unrelated equal-layout type, an uninitialized member and a member at a nonzer
 the initialized prefix away from offset zero makes the proof UNKNOWN. Native replay checks only
 the valid address relationship; it does not execute intentionally invalid reinterpretations.
 
+## Checked access adapters
+
+Tracked allocation references and static views now share a checked `StorageLocation` access layer.
+Its identity distinguishes a tracked allocation slot from a static compiler definition. The static
+validity epoch is evidence for that allocation's availability, not the allocation's identity: two
+statics sharing one epoch remain distinct. Capability checks distinguish shared from writable
+access independently of whether the allocation is live.
+
+Tracked reads and projected writes use this layer before following their existing typed projection
+paths. Static views use it before their existing compiler type and footprint certificates. Snapshot
+and reference-graph checks share the same static epoch validation. A live static location supplies
+an address relationship, never a retained readable payload. Writing shared static storage still
+retains reference-escape evidence without gaining payload values or atomic history.
+
+Provenance-backed local addresses retain their underlying tracked reference through snapshots and
+reference graphs. A dead referent or a frame-owned address escaping its frame remains UNKNOWN. A
+stored address keeps that reference as escape evidence. Numeric address equality cannot create an
+allocation identity or authorize a write.
+
+This stage leaves compiler types and byte footprints in static view descriptors and symbolic paths
+in tracked reference descriptors. It does not attach invented compiler types to existing tracked
+values, migrate initialization states, or replace every symbolic storage variant. The next stage
+can add typed subobject initialization to this common access layer once construction and mutation
+transitions preserve it.
+
 ## Common location representation
 
 The next stage should replace parallel static and tracked-reference descriptors with a typed
@@ -105,3 +130,17 @@ count alone cannot establish that an initialization or interference rule is soun
 Native replay can independently check supported owned inputs. It cannot validate an arbitrary
 shared atomic history by executing one ordinary call. Counterexamples whose outcomes depend on
 interference need that limitation recorded rather than being presented as observed failures.
+
+## Tracked raw addresses
+
+An address-only tracked pointer retains a reference to its allocation alongside a symbolic thin
+address. This is distinct from an integer-derived pointer handle. Whole initialized locals and
+tracked reference reborrows can supply these pointers; value snapshots cannot establish provenance.
+Same-place reborrows share an address term, ignoring const/mutable pointer spelling. Supported thin
+casts retain the reference, while integer exposure supplies only address bits.
+
+Creating a pointer does not authorize a load or store through it. Raw dereferences and arithmetic
+remain UNKNOWN. Direct projected raw addresses need compiler layout offsets and remain unsupported;
+this avoids assuming that a packed field is aligned merely because its type has alignment.
+Snapshots retain pointer identity rather than copying its pointee as an owned value. Liveness and
+frame-escape checks traverse the retained reference, including pointers nested in stored aggregates.

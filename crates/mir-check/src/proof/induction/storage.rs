@@ -130,6 +130,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticText
             | Value::FormatArguments
             | Value::RawPointer { .. }
+            | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
@@ -375,6 +376,7 @@ impl<'tcx> Engine<'tcx> {
                         | Value::FormatArguments
                         | Value::Input(_)
                         | Value::RawPointer { .. }
+                        | Value::TrackedPointer { .. }
                         | Value::StaticSlice { .. }
                         | Value::StaticView { .. }
                         | Value::Uninitialized
@@ -581,6 +583,7 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
@@ -638,6 +641,7 @@ pub(super) fn static_projection(value: Value, part: &MemoryProjection) -> Result
             | Value::FormatArguments
             | Value::Input(_)
             | Value::RawPointer { .. }
+            | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized

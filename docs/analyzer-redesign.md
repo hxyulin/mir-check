@@ -15,7 +15,7 @@ The current stages establish reusable parts without claiming the whole redesign 
 
 | Area | Implemented foundation | Remaining implementation |
 | --- | --- | --- |
-| Typed locations | Static allocation footprints, layout-certified initialized prefixes and a shared place projection walker | One location namespace for tracked references, statics and provenance-backed pointers; typed initialization and retained payloads |
+| Typed locations | Static footprints, initialized-prefix certificates, checked location access and tracked raw addresses | Common typed projections/footprints, subobject initialization and retained static payloads |
 | Atomic state | Exact history for supported fresh local integer atomics and conservative interference boundaries | Static startup environments, overlapping precise views and supported shared interference |
 | Aggregate sharing | Interned SMT leaves and compiler-keyed lazy input shapes | Shared owned aggregate values, branch snapshots and compiler-keyed aggregate shapes |
 | Call metadata | Root-local normalized signature cache shared by ordinary and induction models | Common compiler-identified operation descriptions and backend-independent transition semantics |
@@ -158,6 +158,13 @@ site confirms a failing root execution but does not confirm the original obligat
 Report the concrete inputs, panic message and location, whether the location matches the obligation,
 and validation status separately from PROVED/REFUTED/UNKNOWN. Store structured evidence in JSON and
 JSONL. Do not silently execute analyzed hardware-facing code as part of an ordinary scan.
+
+Replay results also retain the obligation's relevant modeled choices as `uncontrolled_abstractions`.
+Concrete root inputs do not impose an interfering shared atomic history, a weak compare-exchange
+outcome or an arithmetic NaN encoding. Report this limitation for both observed native panics and
+normal returns. The list describes choices present in the query, not a causal explanation or an
+inference that the root is safe. Ordinary reports point to execution-environment validation even
+when the target cannot be replayed on the host.
 
 Additional input shapes should follow typed replay recipes: tuples, owned structs, enums and owned
 byte buffers before borrowed inputs. Preserve compiler layout and valid enum variants. A controlled

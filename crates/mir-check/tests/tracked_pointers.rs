@@ -13,7 +13,7 @@ impl Directory {
     fn new() -> Self {
         let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "mir-check-pointer-handles-{}-{id}",
+            "mir-check-tracked-pointers-{}-{id}",
             std::process::id()
         ));
         std::fs::create_dir_all(&path).unwrap();
@@ -28,7 +28,7 @@ impl Drop for Directory {
 }
 
 fn fixture() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/pointer_handles.rs")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/tracked_pointers.rs")
 }
 
 fn verify(path: &Path, entries: &[(&str, ProofStatus)], target: Option<&str>, optimized: bool) {
@@ -81,25 +81,24 @@ fn verify(path: &Path, entries: &[(&str, ProofStatus)], target: Option<&str>, op
 }
 
 #[test]
-fn thin_pointer_handles_preserve_addresses_without_enabling_memory_access_on_host_and_arm() {
+fn raw_addresses_retain_provenance_without_enabling_reads_on_host_and_arm() {
     let entries = [
-        ("address_roundtrip", ProofStatus::Proved),
-        ("narrow_address", ProofStatus::Proved),
-        ("signed_address", ProofStatus::Proved),
-        ("recast", ProofStatus::Proved),
-        ("pointer_guards", ProofStatus::Proved),
-        ("null_constants", ProofStatus::Proved),
-        ("constructor_storage", ProofStatus::Proved),
-        ("repeated_handles", ProofStatus::Proved),
-        ("wrong_roundtrip", ProofStatus::Refuted),
-        ("wrong_comparison", ProofStatus::Refuted),
-        ("a_constructor_panic_is_checked", ProofStatus::Refuted),
-        ("arbitrary_pointer_inputs_are_unknown", ProofStatus::Unknown),
-        ("pointer_arithmetic_is_unknown", ProofStatus::Unknown),
-        ("atomic_memory_is_unknown", ProofStatus::Unknown),
-        ("local_reference_addresses", ProofStatus::Proved),
-        ("allocation_provenance_is_unknown", ProofStatus::Unknown),
-        ("pointer_metadata_is_unknown", ProofStatus::Unknown),
+        ("raw_reborrows_retain_identity", ProofStatus::Proved),
+        ("mutable_reborrows_retain_identity", ProofStatus::Proved),
+        (
+            "address_creation_does_not_hide_a_bounds_failure",
+            ProofStatus::Refuted,
+        ),
+        (
+            "pointer_roundtrip_does_not_authorize_a_read",
+            ProofStatus::Unknown,
+        ),
+        ("pointer_offsets_remain_unknown", ProofStatus::Unknown),
+        (
+            "snapshots_cannot_supply_allocation_identity",
+            ProofStatus::Unknown,
+        ),
+        ("a_frame_pointer_cannot_escape", ProofStatus::Unknown),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         for optimized in [false, true] {
@@ -107,7 +106,6 @@ fn thin_pointer_handles_preserve_addresses_without_enabling_memory_access_on_hos
         }
     }
 }
-
 fn native_tests(path: &Path, directory: &Directory) -> bool {
     let executable = directory.0.join("native");
     let compiler = Path::new(env!("MIR_CHECK_SYSROOT")).join("bin/rustc");
@@ -123,40 +121,25 @@ fn native_tests(path: &Path, directory: &Directory) -> bool {
 }
 
 #[test]
-fn broken_address_claims_refute_and_panic_natively() {
+fn changing_a_claimed_address_relationship_fails_static_and_native_checks() {
+    assert!(native_tests(&fixture(), &Directory::new()));
+    let directory = Directory::new();
+    let mutant = directory.0.join("mutant.rs");
     let source = std::fs::read_to_string(fixture()).unwrap();
-    for (original, mutation, name) in [
-        (
-            "assert!(pointer as usize == address);",
-            "assert!(pointer as usize != address);",
-            "address_roundtrip",
-        ),
-        (
-            "assert!(handle.cookie as usize == cookie);",
-            "assert!(handle.cookie as usize != cookie);",
-            "constructor_storage",
-        ),
-        (
-            "assert!(left == right);",
-            "assert!(left != right);",
-            "pointer_guards",
-        ),
-    ] {
-        assert!(source.contains(original));
-        let directory = Directory::new();
-        let path = directory.0.join("mutant.rs");
-        std::fs::write(&path, source.replace(original, mutation)).unwrap();
-        for target in [None, Some("thumbv7em-none-eabihf")] {
-            verify(&path, &[(name, ProofStatus::Refuted)], target, false);
-        }
-        assert!(
-            !native_tests(&path, &directory),
-            "the mutation must panic natively"
+    let original = "assert!(first == second);";
+    assert!(source.contains(original));
+    std::fs::write(
+        &mutant,
+        source.replacen(original, "assert!(first != second);", 1),
+    )
+    .unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        verify(
+            &mutant,
+            &[("raw_reborrows_retain_identity", ProofStatus::Refuted)],
+            target,
+            false,
         );
     }
-}
-
-#[test]
-fn address_operations_replay_natively() {
-    assert!(native_tests(&fixture(), &Directory::new()));
+    assert!(!native_tests(&mutant, &directory));
 }

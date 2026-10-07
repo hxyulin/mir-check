@@ -176,6 +176,12 @@ fn render_replay(output: &mut String, function: &Function, obligation: &Obligati
             output,
             "    evidence: symbolic counterexample; runtime {outcome} unconfirmed"
         );
+        if !obligation.abstraction_reasons.is_empty() {
+            output.push_str(
+                "    next: Validate these query choices against the root's execution \
+                 environment; native replay supplies inputs but cannot force abstract choices.\n",
+            );
+        }
         return;
     };
     let (label, color) = match replay.status {
@@ -204,6 +210,17 @@ fn render_replay(output: &mut String, function: &Function, obligation: &Obligati
     }
     if !replay.detail.is_empty() {
         let _ = writeln!(output, "    replay: {}", short_detail(&replay.detail));
+    }
+    if !replay.uncontrolled_abstractions.is_empty() {
+        output.push_str(
+            "    replay scope: root inputs only; query abstraction choices were not forced\n",
+        );
+        if replay.status == ReplayStatus::NotReproduced {
+            output.push_str(
+                "    next: Validate these choices against the root's execution environment. \
+                 A normal return does not validate every shared-state history.\n",
+            );
+        }
     }
     let _ = writeln!(
         output,

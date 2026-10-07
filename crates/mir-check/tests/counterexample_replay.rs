@@ -98,9 +98,61 @@ fn check(report: &Report, entry: &str, expected: Option<ReplayStatus>) {
     assert!(["abort", "unwind"].contains(&report.panic_strategy.as_str()));
     if let Some(result) = &obligation.replay {
         assert_eq!(result.panic_strategy, report.panic_strategy);
+        assert_eq!(
+            result.uncontrolled_abstractions,
+            obligation.abstraction_reasons
+        );
         if result.status == ReplayStatus::ConfirmedPanic {
             assert!(result.panic_source.is_some());
         }
+    }
+}
+
+#[test]
+fn replay_does_not_claim_to_control_spurious_failures_or_arithmetic_nan_choices() {
+    for (entry, reason) in [
+        (
+            "weak_exchange_is_not_guaranteed_to_succeed",
+            "weak compare-exchange permits spurious failure",
+        ),
+        (
+            "arithmetic_nan_encoding_is_not_guaranteed",
+            "arithmetic NaNs allow every payload and sign",
+        ),
+    ] {
+        let report = verify(&fixture(), entry, true, None);
+        let proof = report
+            .functions
+            .iter()
+            .find(|function| function.name == entry)
+            .unwrap()
+            .proof
+            .as_ref()
+            .unwrap();
+        assert_eq!(proof.status, ProofStatus::Refuted);
+        let obligation = proof
+            .obligations
+            .iter()
+            .find(|obligation| obligation.status == ProofStatus::Refuted)
+            .unwrap();
+        let replay = obligation.replay.as_ref().unwrap();
+        assert!(matches!(
+            replay.status,
+            ReplayStatus::ConfirmedPanic | ReplayStatus::NotReproduced
+        ));
+        assert_eq!(
+            replay.uncontrolled_abstractions,
+            obligation.abstraction_reasons
+        );
+        assert!(
+            replay
+                .uncontrolled_abstractions
+                .iter()
+                .any(|choice| choice.contains(reason))
+        );
+        let display = mir_check::cli::render_report(&report, false, false);
+        assert!(display.contains("query abstraction choices were not forced"));
+        assert!(!mir_check::cli::accepted(&report, true));
     }
 }
 
@@ -198,6 +250,13 @@ fn atomic_abstraction_failure_is_not_reproduced_and_mutation_confirms_a_panic() 
             .iter()
             .any(|reason| { reason.contains("shared atomic reads allow arbitrary old values") })
     );
+    assert_eq!(
+        failure.replay.as_ref().unwrap().uncontrolled_abstractions,
+        failure.abstraction_reasons
+    );
+    let display = mir_check::cli::render_report(&report, false, false);
+    assert!(display.contains("root inputs only; query abstraction choices were not forced"));
+    assert!(display.contains("A normal return does not validate every shared-state history"));
     let directory = Directory::new();
     let mutant = directory.0.join("mutant.rs");
     let source = std::fs::read_to_string(fixture()).unwrap();

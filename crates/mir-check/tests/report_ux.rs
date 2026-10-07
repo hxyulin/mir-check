@@ -185,12 +185,14 @@ fn native_evidence_distinguishes_matching_panics_and_unconfirmed_inputs() {
                 matches_obligation,
                 panic_strategy: "unwind (native replay only)".to_owned(),
                 panic_message: Some("index out of bounds".to_owned()),
+                uncontrolled_abstractions: Vec::new(),
             });
             for verbose in [false, true] {
                 let display = cli::render_report(&report, verbose, false);
                 assert!(display.contains(label), "{display}");
                 assert!(display.contains("replay inputs: index = 8u8"));
                 assert!(display.contains("replay panic strategy: unwind (native replay only)"));
+                assert!(!display.contains("query abstraction choices were not forced"));
                 if status == ReplayStatus::ConfirmedPanic {
                     assert!(display.contains("native panic at buffer.rs:18:7"));
                     assert!(display.contains("native panic message: index out of bounds"));
@@ -301,4 +303,58 @@ fn failure_reports_explain_query_abstractions_without_claiming_runtime_confirmat
         display.contains("abstraction in query: shared atomic reads allow arbitrary old values")
     );
     assert!(display.contains("runtime panic unconfirmed"));
+    assert!(display.contains("Validate these query choices against the root's execution"));
+}
+
+#[test]
+fn native_replay_records_uncontrolled_choices_even_when_it_confirms_a_panic() {
+    use mir_check::replay::{ReplayResult, ReplayStatus};
+
+    let choices = vec![
+        "shared atomic reads allow arbitrary old values".to_owned(),
+        "weak compare-exchange permits spurious failure".to_owned(),
+        "arithmetic NaN encodings are conservative".to_owned(),
+    ];
+    for status in [ReplayStatus::ConfirmedPanic, ReplayStatus::NotReproduced] {
+        let mut report = report(ProofStatus::Refuted, "atomic claim failed");
+        let obligation = &mut report.functions[0].proof.as_mut().unwrap().obligations[0];
+        obligation.abstraction_reasons = choices.clone();
+        obligation.replay = Some(ReplayResult {
+            status,
+            detail: "native execution used its own environment".to_owned(),
+            inputs: Default::default(),
+            panic_source: None,
+            panic_message: None,
+            matches_obligation: false,
+            panic_strategy: "abort".to_owned(),
+            uncontrolled_abstractions: choices.clone(),
+        });
+        for verbose in [false, true] {
+            let display = cli::render_report(&report, verbose, false);
+            assert!(display.contains("query abstraction choices were not forced"));
+            assert_eq!(
+                display.contains("A normal return does not validate every shared-state history"),
+                status == ReplayStatus::NotReproduced
+            );
+            assert!(!display.contains("false positive proved"));
+            assert!(!cli::accepted(&report, true));
+        }
+        let serialized = serde_json::to_value(&report).unwrap();
+        let evidence = &serialized["functions"][0]["proof"]["obligations"][0]["replay"];
+        assert_eq!(evidence["uncontrolled_abstractions"], json!(choices));
+        let mut legacy = serialized;
+        legacy["functions"][0]["proof"]["obligations"][0]["replay"]
+            .as_object_mut()
+            .unwrap()
+            .remove("uncontrolled_abstractions");
+        let legacy: Report = serde_json::from_value(legacy).unwrap();
+        assert!(
+            legacy.functions[0].proof.as_ref().unwrap().obligations[0]
+                .replay
+                .as_ref()
+                .unwrap()
+                .uncontrolled_abstractions
+                .is_empty()
+        );
+    }
 }
