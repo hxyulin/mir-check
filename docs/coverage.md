@@ -428,3 +428,11 @@ Host/ARM tests cover low-budget UNKNOWN results, completed bounded work at large
 late failures and a mutated deep callee. Horn queries carry the selected timeout and byte cap;
 a stalled persistent session is killed under its configured deadline. Input and model shape
 limits remain independent. See [analysis budgets](usage.md#analysis-budgets).
+
+Ordinary slice equality and array/slice comparisons now model the exact core PartialEq boundary.
+Length mismatches return without comparing elements. Equal-length paths need a proven bound of
+128; primitive comparisons guard each byte select by the real length, and fixed custom elements
+execute ordered resolved `ne` calls. Empty comparisons, unequal unbounded lengths, numeric edge
+cases, prefix views and custom effects have host/ARM debug and optimized tests. Mutations refute
+and panic during native replay. Arbitrary unbounded equality, general range indexing and induction
+comparison translation remain gaps. Increasing execution budgets does not remove model shape caps.

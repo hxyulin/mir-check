@@ -78,7 +78,7 @@ Nested arrays and custom element types execute ordered, checked comparison bodie
 references and short-circuit effects. The pinned core implementation uses element `ne`, including
 user overrides;
 the model preserves that behavior. Compiler crate/trait identities and instantiated signatures
-select the boundary. General slice equality and inlined pointer-based comparisons remain gaps.
+select the boundary. Unbounded slice equality and inlined pointer-based comparisons remain gaps.
 Array map executes actual callable bodies in order. Reports list interpreted bodies and
 trusted models separately. MIR assume becomes a checked validity obligation. Typed allocations
 support disjoint mutable root inputs, projected writes, reborrows and call state propagation.
@@ -474,3 +474,11 @@ call and time limits; step limits apply to ordinary execution. Reports record an
 while older reports retain an unknown historical configuration. Rechecking uses fresh options.
 Input, allocation and library-model shape caps remain implementation bounds. Exhausted or
 unsupported analysis remains UNKNOWN. See [analysis budgets](../../docs/usage.md#analysis-budgets).
+
+Ordinary slice equality and array/slice comparisons use the same numeric element semantics and
+checked custom `ne` calls as fixed arrays. Length mismatches return before any element calls;
+empty comparisons invoke no element body. Equal-length paths must establish a length at most
+128. Comparisons ignore byte storage outside the selected prefix. Host/ARM debug and optimized
+fixtures check numeric guards, prefix views, custom effects and receiver order, reachable and
+skipped panics, and mutations with native replay. Arbitrary unbounded equality and general range
+indexing still return UNKNOWN. These models are not part of the induction translator.

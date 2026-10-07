@@ -31,6 +31,7 @@ mod library;
 mod membership;
 mod memory;
 mod owned_iterators;
+mod slice_equality;
 
 #[derive(Clone)]
 struct State {

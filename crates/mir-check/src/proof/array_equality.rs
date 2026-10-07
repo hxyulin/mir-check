@@ -118,7 +118,7 @@ impl<'tcx> Engine<'tcx> {
                 memory: state.memory.clone(),
             }]));
         }
-        self.custom_array_equality(
+        self.custom_sequence_equality(
             instance,
             (*left_element, *right_element, count as usize, negate),
             raw_values,
@@ -190,7 +190,7 @@ impl<'tcx> Engine<'tcx> {
         }
     }
 
-    fn custom_array_equality(
+    pub(super) fn custom_sequence_equality(
         &mut self,
         instance: ty::Instance<'tcx>,
         shape: (Ty<'tcx>, Ty<'tcx>, usize, bool),
@@ -201,7 +201,7 @@ impl<'tcx> Engine<'tcx> {
     ) -> Result<Vec<Return>, String> {
         let (left_element, right_element, count, negate) = shape;
         let [left, right] = sources else {
-            return Err("custom array equality requires two tracked arguments".to_owned());
+            return Err("custom sequence equality requires two tracked arguments".to_owned());
         };
         // Pinned core's generic slice comparator invokes ne, including user overrides.
         let method = self
@@ -227,7 +227,7 @@ impl<'tcx> Engine<'tcx> {
         let mut returns = Vec::new();
         self.record_model(
             instance.def_id(),
-            "fixed custom array equality; ordered checked ne calls and short-circuit effects",
+            "fixed custom sequence equality; ordered checked ne calls and short-circuit effects",
         );
         while let Some((left, right, conditions, memory)) = pending.pop() {
             for left in

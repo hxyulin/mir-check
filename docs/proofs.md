@@ -360,8 +360,12 @@ Custom and nested elements execute their actual resolved inequality body in inde
 at the first mismatch and retaining effects, panics and call obligations. This follows the pinned
 [core slice comparator][core-array-eq], which uses `ne` rather than assuming it complements `eq`.
 Zero-length comparisons invoke no element body. Model selection checks the core crate, compiler
-trait identity, shared-reference signature and fixed lengths. General slice equality, oversized
-arrays and unavailable or unsupported element bodies remain incomplete. Native tests check custom
+trait identity, shared-reference signature and fixed lengths. Slice equality and array/slice
+comparisons first split on length equality, preserving the no-call length mismatch case. On equal
+length paths, the model requires a proven bound of 128 and guards byte selects by the actual length;
+contents outside a selected prefix do not affect equality. Fixed custom storage uses the same
+ordered, checked inequality calls as arrays. Unbounded equality, oversized arrays and unavailable
+or unsupported element bodies remain incomplete. Native tests check custom
 overrides, numeric edge cases and failing mutations; this model is trusted translation code.
 Compiler identities and
 instantiated types select models. Dependencies and dynamic formatters are not assumed safe.
