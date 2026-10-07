@@ -75,6 +75,10 @@ impl<'tcx> Engine<'tcx> {
                     Err("static storage view invalidated by unknown memory effects".into())
                 }
             }
+            Value::DebugReference { source, .. } => {
+                self.snapshot(source, memory, conditions, depth + 1)?;
+                Ok(value.clone())
+            }
             Value::Reference { .. } => {
                 let value = self.reference_value(value, memory, conditions)?;
                 self.snapshot(&value, memory, conditions, depth + 1)
@@ -413,6 +417,20 @@ impl<'tcx> Engine<'tcx> {
         mutable: bool,
     ) -> Result<Value, String> {
         let value = self.place(state, place)?;
+        if let Value::DebugReference {
+            source,
+            place: true,
+        } = value
+        {
+            if mutable {
+                return Err("mutable opaque Debug borrowing remains unsupported".into());
+            }
+            self.validate_tracked_value(&source, state)?;
+            return Ok(Value::DebugReference {
+                source,
+                place: false,
+            });
+        }
         if matches!(value, Value::StaticView { .. }) && self.static_place_view(&value, state)? {
             return self.borrow_static_view(&value, mutable, state);
         }
@@ -803,7 +821,9 @@ impl<'tcx> Engine<'tcx> {
                 }
                 Ok(())
             }
-            Value::SliceIterator { source, .. } | Value::MetadataPointer(source) => {
+            Value::SliceIterator { source, .. }
+            | Value::MetadataPointer(source)
+            | Value::DebugReference { source, .. } => {
                 Self::validate_reference_graph(source, state, incoming, visited)
             }
             Value::StaticSlice { epoch, elements } => {
@@ -850,6 +870,13 @@ impl<'tcx> Engine<'tcx> {
                 Ok(value)
             }
             Value::StaticView { .. } => self.static_view_operand(value, state),
+            Value::DebugReference { place: true, .. } => {
+                Err("opaque Debug data cannot escape as an owned value".into())
+            }
+            Value::DebugReference { place: false, .. } => {
+                Self::validate_reference_graph(&value, state, Some(incoming), &mut Vec::new())?;
+                Ok(value)
+            }
             Value::SliceIterator {
                 source,
                 front,

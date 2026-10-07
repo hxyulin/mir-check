@@ -50,6 +50,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
+            | Value::DebugReference { .. }
             | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Uninitialized

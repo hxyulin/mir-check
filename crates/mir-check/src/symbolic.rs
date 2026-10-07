@@ -86,6 +86,10 @@ pub enum Value {
     Tuple(Vec<Value>),
     Elements(Vec<Value>),
     MetadataPointer(Box<Value>),
+    DebugReference {
+        source: Box<Value>,
+        place: bool,
+    },
     StaticText,
     FormatArguments,
     FunctionPointer {
@@ -138,6 +142,7 @@ impl Value {
             | Self::StaticSlice { .. }
             | Self::StaticView { .. }
             | Self::Uninitialized
+            | Self::DebugReference { .. }
             | Self::FunctionPointer { .. }
             | Self::Function => None,
         }
@@ -184,6 +189,7 @@ impl Value {
             | Self::StaticSlice { .. }
             | Self::StaticView { .. }
             | Self::Uninitialized
+            | Self::DebugReference { .. }
             | Self::FunctionPointer { .. }
             | Self::Function => None,
         }
@@ -218,6 +224,7 @@ impl Value {
             | Self::FunctionPointer { .. }
             | Self::Function
             | Self::Unit => false,
+            Self::DebugReference { source, .. } => source.contains_mutable(),
         }
     }
 

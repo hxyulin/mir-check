@@ -147,6 +147,7 @@ fn normalize(
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::DebugReference { .. }
             | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit,

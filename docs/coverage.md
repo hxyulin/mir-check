@@ -70,7 +70,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | --- | --- | --- |
 | Branches | Path-sensitive states; discard a branch only after an exact constant UNSAT decision or an unsat solver response | Ordinary mode does not merge states; induction forms per-block relations |
 | Loops | Complete finite unrolling; opt-in Spacer induction over cyclic root MIR with integer/Boolean/tuple and fixed byte-array state | Induction includes available concrete callee MIR and checked contracts; typed stable references are supported; integer ranges, tagged enums and typed custom iterators are supported; byte-slice/scalar-array iterators and indexed references are supported; slice views, arbitrary non-byte slices, changing allocations, recursion and coroutines remain gaps; incomplete or undecided proofs are UNKNOWN |
-| Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, trait objects and unsupported shims are UNKNOWN |
+| Generics and static traits | Substitute/normalize concrete arguments and resolve implementations | Unresolved generic roots, dynamic dispatch and unsupported shims are UNKNOWN |
 | Dependencies | Cargo retains ordinary direct/transitive bodies at MIR level zero and executes concrete instances | Prebuilt sysroot/foreign bodies can remain missing; retained unsupported behavior is UNKNOWN |
 | Closures and function items | Tracked captures, owned FnMut state and supported generic Fn/FnMut/FnOnce calls | Unsupported call shapes remain UNKNOWN |
 | Known function pointers | Function-item coercions retain concrete instance/signature; selected targets, returns, local aggregates and Fn/FnMut/FnOnce adapters execute actual MIR with checked contracts/effects | At most 512 targets per root; unknown inputs, closure coercions, reification shims, numeric/signature-changing casts, missing bodies, arbitrary opaque static writes and induction remain UNKNOWN |
@@ -79,6 +79,7 @@ have at most 128 elements. Exhaustion is UNKNOWN.
 | Owned array iteration | Compiler ArrayIntoIter, ordered cursors, count/last, predicates and fold/rfold callbacks | At most 128 owned elements and 256 values; owned Cell/atomic identities, user destructors, clone and views remain UNKNOWN |
 | Iterator fold/sum | Actual fold/rfold callbacks preserve accumulator, capture state and effects; sum uses ordinary MIR | Unfinished folds, callback drops and unsupported element/call shapes remain UNKNOWN |
 | Evaluated closure constants | Typed noncapturing, zero-field, zero-sized closure values | Captured constants, including zero-sized captures, remain UNKNOWN |
+| Error formatting setup | Shared concrete core Debug coercions retain opaque reference identity; Result unwrap/expect variants execute branch MIR and recognize the pinned failure helper as a panic boundary | Calling formatters, mutable/other trait coercions, unknown trait-object inputs, vtable/address operations and induction remain UNKNOWN |
 | Integer operations | Arithmetic, overflow flags, min/max, saturating add/subtract, zero counts, byte/bit reversal, comparisons, casts, bit operations and shifts | Optional overflow checks depend on build settings; unsafe nonzero count intrinsics remain unsupported |
 | Float operations | Numeric IEEE operations, exact input/from_bits encodings, moves, negation, abs, clamp and to_bits | Arithmetic NaN encodings allow every payload/sign, including signaling NaNs; counterexamples may not replay |
 | Drop | Concrete synchronous rustc drop glue executes user destructors and ordered aggregate field drops | Pointer-based array/slice glue, unsupported coroutine drops, unwinding and induction drops remain UNKNOWN |
@@ -522,3 +523,11 @@ evidence, including through unknown trusted memory effects. Each store has depth
 limits; a root retains at most 512 reference entries. Resumed future stores, payload polling,
 general unions, arbitrary destinations and unsupported shapes remain UNKNOWN. Host/ARM debug and
 optimized tests include negative/unknown cases, a constructor-guard mutation and native replay.
+
+Error-formatting fixtures cover guarded Result unwrap/expect and error-return counterparts, feasible
+panic paths, shared Debug reborrows/aggregates/returns and a formatter counter that stays unchanged
+when only a reference is constructed. General formatting stays UNKNOWN. Same-named user traits and
+helpers cannot acquire core models; reference erasure retains dead/frame escape checks. Tests cover
+host/ARM debug and optimized builds, constructor-guard mutations, native replay and induction
+rejection. A panic-helper counterexample remains a translated obligation rather than an automatic
+replay-confirmed failure; arbitrary atomic states can make otherwise unobserved error paths feasible.

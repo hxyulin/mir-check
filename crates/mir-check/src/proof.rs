@@ -21,6 +21,7 @@ mod array_equality;
 mod builtins;
 mod constants;
 mod coroutines;
+mod error_formatting;
 mod external;
 mod floating_intrinsics;
 mod function_pointers;
@@ -318,6 +319,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::DebugReference { .. }
             | Value::FunctionPointer { .. }
             | Value::Function => {
                 return Err("argument binding is unsupported".to_owned());
@@ -1224,6 +1226,16 @@ impl<'tcx> Engine<'tcx> {
                 continue;
             }
             value = match (projection, value.materialize()?) {
+                (
+                    ProjectionElem::Deref,
+                    Value::DebugReference {
+                        source,
+                        place: false,
+                    },
+                ) => Value::DebugReference {
+                    source,
+                    place: true,
+                },
                 (ProjectionElem::Deref, value @ Value::Reference { .. }) => {
                     self.reference_value(&value, &state.memory, &state.conditions)?
                 }
@@ -1352,7 +1364,11 @@ impl<'tcx> Engine<'tcx> {
     ) -> Result<Value, String> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => {
-                self.static_view_operand(self.place(state, *place)?, state)
+                let value = self.place(state, *place)?;
+                if matches!(value, Value::DebugReference { place: true, .. }) {
+                    return Err("opaque Debug payload reads remain unsupported".into());
+                }
+                self.static_view_operand(value, state)
             }
             Operand::RuntimeChecks(checks) => {
                 Ok(Value::Bool(self.terms.boolean(checks.value(self.tcx.sess))))
@@ -1695,6 +1711,18 @@ impl<'tcx> Engine<'tcx> {
                 )
             }
             Rvalue::Cast(CastKind::PointerCoercion(kind, _), operand, target) => {
+                if self.is_shared_debug_reference(*target) {
+                    let value = self.operand(id, body, state, operand)?;
+                    let value = self.debug_reference_coercion(
+                        *kind,
+                        operand.ty(&body.local_decls, self.tcx),
+                        *target,
+                        value,
+                        state,
+                    )?;
+                    self.record_model(id, "opaque shared Debug reference; no formatter execution");
+                    return Ok(value);
+                }
                 if matches!(target.kind(), ty::FnPtr(..)) {
                     return self.reify_function_pointer(
                         *kind,

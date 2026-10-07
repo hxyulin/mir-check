@@ -373,3 +373,9 @@ freshly constructed futures. MaybeUninit/UnsafeCell address chains retain their 
 barrier, and a store supplies no shared-read or atomic-history facts. Stored tracked references
 remain subject to frame escape checks. Thin NonNull wrappers preserve known static provenance.
 See [typed static stores](docs/proofs.md#typed-static-stores).
+
+Result unwrap/expect failure paths can now reach a checked panic obligation through their error
+formatting setup. Concrete shared references can coerce to opaque core Debug references, retaining
+storage identity through reborrows, local aggregates and returns. Creating the reference does not
+execute a formatter. Dynamic formatter calls, general trait-object inputs and vtable operations
+remain UNKNOWN. See [error formatting boundaries](docs/proofs.md#error-formatting-boundaries).

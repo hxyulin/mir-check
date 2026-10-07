@@ -606,3 +606,17 @@ pointee, size, alignment and field-offset checks. Numeric handles, unknown point
 pointers do not gain this model. Independent host/ARM debug and optimized fixtures cover stores,
 callback values, constructed futures, uninitialized-address chains, rejected shared reads,
 read-only/numeric destinations, reference escape, unknown effects, mutations and native replay.
+
+Shared concrete-reference coercions to compiler-identified core Debug trait objects retain an opaque
+reference and its original storage identity. Reborrows, local aggregate storage, argument passing
+and caller-storage returns are supported without invoking Debug::fmt. Opaque payload reads,
+mutable/other trait coercions, vtable/address operations and induction over these references remain
+UNKNOWN. Dead/frame-owned references still fail escape checks; erasure cannot remove their identity.
+
+The pinned core Result unwrap_failed helper is a panic boundary after checking its compiler module,
+name, never return type and shared str/Debug signature. It covers unwrap/expect and their reversed
+variants through actual Result MIR branches. No user formatter or arbitrary external function is
+assumed panic-free. Guarded success/error returns preserve their actual payloads, while feasible
+failure-helper calls generate panic obligations. Same-named user traits/helpers do not match.
+Independent host/ARM debug and optimized fixtures test positive, refuted and UNKNOWN cases,
+formatter counters, reference escape, induction rejection, guard mutations and native replay.

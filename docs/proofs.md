@@ -752,3 +752,39 @@ stores and address round trips, refuted constructor/index/assertion failures, UN
 numeric destinations, uninitialized atomic reads, shared payload reads and escaping references.
 Unknown trusted effects cannot erase escape evidence. A constructor-guard mutation refutes the
 dependent store and fails native replay; valid sequential stores replay for all byte inputs.
+
+## Error formatting boundaries
+
+Ordinary execution can unsize a shared reference to a sized concrete value into a
+compiler-identified core Debug trait object. The symbolic reference retains its source storage
+identity, with separate reference/place states for dereference and shared reborrow. Exact
+same-type Debug reborrows preserve identity after lifetime erasure. Local tuples/enums, argument
+passing and returns can retain these references. Constructing or passing the reference does not
+execute a formatter or assume its body is panic-free. Return and snapshot checks retain the
+original reference graph, so erasure cannot hide a dead allocation or a reference into a returning
+frame.
+
+Opaque Debug payload reads, arbitrary metadata/vtable/address operations, mutable Debug references,
+other trait coercions, trait-object root inputs and dynamic formatting calls remain UNKNOWN.
+Induction also rejects this reference state. The model does not produce concrete vtable layouts,
+formatter results or byte/slice length facts from a trait object.
+
+Result unwrap, expect, unwrap_err and expect_err execute their actual typed branch MIR. A feasible
+failure path reaches the pinned core unwrap_failed helper. The checker recognizes that boundary
+using the Result language-item module identity, exact helper name, never return type and shared
+str/Debug argument signature. The helper enters the panic runtime; building its lazy formatting
+arguments does not first call a user formatter. Reaching the boundary creates a false panic-safety
+obligation on the current path. This model adds no user-trusted assumption and does not apply to
+same-named user functions or traits. Guarded paths retain their real return payloads.
+
+A SAT failure remains a counterexample to the current translation and root domain. In particular,
+the arbitrary-per-access atomic abstraction can admit a resource-claim failure which reaches an
+unwrap panic. That does not automatically establish a replayable startup failure. Default analysis
+stops the root after its first counterexample; --all-failures continues other paths and can expose
+additional UNKNOWN blockers even when the root status is already REFUTED.
+
+Independent no_std fixtures run on host and ARM in debug and optimized builds. They check positive
+and negative Result paths, shared reborrows/aggregates/returns, unchanged formatter counters,
+rejected dynamic operations, similarly named traits/helpers, reference escape and induction
+rejection. Widening a guard refutes the dependent proof and fails native replay. Positive cases
+replay for every byte input.

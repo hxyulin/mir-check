@@ -132,6 +132,7 @@ impl<'tcx> Engine<'tcx> {
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::DebugReference { .. }
             | Value::FunctionPointer { .. }
             | Value::Function) => {
                 return Err(format!("unsupported inductive storage {other:?}"));
@@ -375,6 +376,7 @@ impl<'tcx> Engine<'tcx> {
                         | Value::StaticSlice { .. }
                         | Value::StaticView { .. }
                         | Value::Uninitialized
+                        | Value::DebugReference { .. }
                         | Value::FunctionPointer { .. }
                         | Value::Function
                         | Value::Unit => {
@@ -579,6 +581,7 @@ pub(super) fn same_shape(expected: Option<&Value>, actual: Option<&Value>) -> Re
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::DebugReference { .. }
             | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit,
@@ -634,6 +637,7 @@ pub(super) fn static_projection(value: Value, part: &MemoryProjection) -> Result
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
             | Value::Uninitialized
+            | Value::DebugReference { .. }
             | Value::FunctionPointer { .. }
             | Value::Function
             | Value::Unit,

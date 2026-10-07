@@ -3,6 +3,9 @@ use rustc_span::Symbol;
 
 impl<'tcx> Engine<'tcx> {
     pub(super) fn is_core_panic_helper(&self, callee: DefId) -> bool {
+        if self.is_result_panic_helper(callee) {
+            return true;
+        }
         let Some(option) = self.tcx.lang_items().get(LangItem::Option) else {
             return false;
         };
