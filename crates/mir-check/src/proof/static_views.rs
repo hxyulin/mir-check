@@ -791,10 +791,10 @@ impl<'tcx> Engine<'tcx> {
         if let ty::Adt(def, args) = source_pointee.kind()
             && self.tcx.lang_items().get(LangItem::UnsafeCell) == Some(def.did())
             && (view.certified == *source_pointee || self.uninit_static_address(view)?)
-            && args.type_at(0) == *target_pointee
+            && self.initialized_storage_prefix(args.type_at(0), *target_pointee)?
         {
             let wrapper = self.static_layout(*source_pointee)?;
-            let payload = self.static_layout(*target_pointee)?;
+            let payload = self.static_layout(args.type_at(0))?;
             if wrapper.fields.count() != 1
                 || wrapper.fields.offset(0).bytes() != 0
                 || wrapper.size != payload.size
@@ -962,5 +962,37 @@ impl Engine<'_> {
             offset: view.offset,
             bytes: layout.size.bytes(),
         })
+    }
+}
+
+impl<'tcx> Engine<'tcx> {
+    pub(super) fn store_through_static_raw(
+        &self,
+        destination: &Value,
+        ty: Ty<'tcx>,
+        value: &Value,
+        state: &mut State,
+    ) -> Result<(), String> {
+        if !matches!(destination, Value::StaticView { .. }) {
+            return Err(
+                "atomic store destination needs certified static allocation provenance".into(),
+            );
+        }
+        let view = self.static_view(destination, state)?;
+        if view.kind != ViewKind::Raw
+            || !view.writable
+            || view.ty != ty
+            || !self.certified_static_type(view)?
+        {
+            return Err(format!(
+                "atomic store needs writable certified raw destination: \
+                kind={:?}, writable={}, pointee={}, certified={}, expected={}",
+                view.kind, view.writable, view.ty, view.certified, ty
+            ));
+        }
+        self.static_store_value(ty, value, state, 0, &mut 0)?;
+        self.retain_static_store_references(value, state)?;
+        state.memory.invalidate_startup();
+        Ok(())
     }
 }

@@ -122,6 +122,12 @@ impl<'tcx> Engine<'tcx> {
         }
         let signature = self.call_signature(instance)?;
         self.check_fence_ordering(instance, signature, values, state, (caller, span))?;
+        self.check_pointer_store_ordering(instance, signature, values, state, (caller, span))?;
+        if let Some(value) =
+            self.atomic_store_intrinsic(instance, signature, values, state, span)?
+        {
+            return Ok(Some(value));
+        }
         if let Some(value) = self.atomic_fence_intrinsic(instance, signature, values, span)? {
             return Ok(Some(value));
         }

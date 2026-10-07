@@ -683,3 +683,15 @@ Startup proofs report `entry_assumptions` and use PROVED_WITH_ASSUMPTIONS, requi
 existing conservative shared atomic state. Cargo forwards the mode, and saved reports retain its
 assumptions. The runtime initialization environment is an explicit premise, not a verified reset
 handler or a global guarantee about concurrent actors.
+
+Compiler-identified nonvolatile `atomic_store` intrinsics support primitive integers and thin
+pointer values at writable certified static destinations. The actual core wrapper MIR executes;
+pointer-store ordering checks report invalid acquire orderings before formatting its panic path.
+Stores retain tracked pointer reference evidence and invalidate precise startup histories. A
+pointer to frame-owned storage cannot escape through a static atomic. Integer-derived destinations,
+uncertified type changes, pointer loads and volatile atomic operations remain UNKNOWN.
+
+`UnsafeCell` casts can reach an actual initialized subobject at offset zero inside its payload,
+including compiler alignment wrappers. The wrapper must preserve its payload layout, and each
+subobject follows compiler fields and alignment checks. Equal sizes, padding, unions and
+uninitialized members do not establish a certificate or write capability.

@@ -825,3 +825,12 @@ static atomics use checked initializer values and branch-local updates. Overlapp
 static stores and trusted boundaries invalidate precise history, including future first accesses.
 Default arbitrary roots still allow arbitrary shared atomic state. The mode does not verify reset
 or runtime initialization and does not yet encode startup histories into cyclic induction.
+
+### Primitive atomic intrinsic stores
+
+The nonvolatile atomic-store intrinsic can write primitive integer and thin-pointer values into
+certified writable static storage. Its compiler signature, concrete ordering and volatile option
+are validated. Actual pointer-store wrapper MIR still executes after an early ordering obligation;
+invalid acquire stores are REFUTED even when the error-formatting path is unsupported. Writes retain
+reference evidence and end precise startup history. Pointer loads, integer-derived destinations,
+uncertified type changes and volatile atomic operations stay UNKNOWN.

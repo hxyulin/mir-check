@@ -44,6 +44,68 @@ impl<'tcx> Engine<'tcx> {
         Ok(())
     }
 
+    pub(super) fn check_pointer_store_ordering(
+        &mut self,
+        instance: ty::Instance<'tcx>,
+        signature: ty::FnSig<'tcx>,
+        values: &[Value],
+        state: &mut State,
+        site: (DefId, Span),
+    ) -> Result<(), String> {
+        let callee = instance.def_id();
+        let parent = self.tcx.parent(callee);
+        let atomic = self.tcx.get_diagnostic_item(Symbol::intern("Atomic"));
+        if atomic.is_none_or(|atomic| callee.krate != atomic.krate)
+            || self.tcx.item_name(callee) != Symbol::intern("store")
+            || !matches!(self.tcx.def_kind(parent), DefKind::Impl { of_trait: false })
+        {
+            return Ok(());
+        }
+        let receiver = self
+            .tcx
+            .try_normalize_erasing_regions(
+                ty::TypingEnv::fully_monomorphized(),
+                self.tcx
+                    .type_of(parent)
+                    .instantiate(self.tcx, instance.args),
+            )
+            .map_err(|error| format!("atomic store receiver normalization failed: {error:?}"))?;
+        let ty::Adt(def, args) = receiver.kind() else {
+            return Ok(());
+        };
+        if atomic != Some(def.did()) || !self.thin_raw_pointer(args.type_at(0)) {
+            return Ok(());
+        }
+        let ([reference, value_ty, ordering_ty], [_, _, ordering]) = (signature.inputs(), values)
+        else {
+            return Err("pointer atomic store wrapper signature mismatch".into());
+        };
+        if !signature.output().is_unit()
+            || *value_ty != args.type_at(0)
+            || !matches!(reference.kind(), ty::Ref(_, element, mutability)
+                if *element == receiver && !mutability.is_mut())
+        {
+            return Err(
+                "pointer atomic store wrapper requires its exact primitive signature".into(),
+            );
+        }
+        let safe = self.atomic_order(ordering, *ordering_ty, &["Relaxed", "Release", "SeqCst"])?;
+        self.require(
+            site.0,
+            site.1,
+            &state.conditions,
+            &safe,
+            ObligationKind::PanicSafety,
+            "pointer atomic store requires a valid non-acquire ordering".into(),
+        )?;
+        state.conditions.push(safe);
+        self.record_model(
+            callee,
+            "pointer atomic store ordering checked; actual wrapper MIR executes",
+        );
+        Ok(())
+    }
+
     pub(super) fn atomic_fence_intrinsic(
         &mut self,
         instance: ty::Instance<'tcx>,
@@ -65,57 +127,12 @@ impl<'tcx> Engine<'tcx> {
         {
             return Err("atomic fence intrinsic signature mismatch".into());
         }
-        let parameters = &self.tcx.generics_of(callee).own_params;
-        let [parameter] = parameters.as_slice() else {
-            return Err("atomic fence intrinsic needs one constant ordering".into());
-        };
-        if !matches!(parameter.kind, ty::GenericParamDefKind::Const { .. }) {
-            return Err("atomic fence intrinsic ordering is not a constant parameter".into());
-        }
-        let ordering_ty = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                self.tcx
-                    .type_of(parameter.def_id)
-                    .instantiate(self.tcx, instance.args),
-            )
-            .map_err(|error| format!("fence ordering normalization failed: {error:?}"))?;
-        let ty::Adt(def, _) = ordering_ty.kind() else {
-            return Err("atomic fence intrinsic ordering needs an enum".into());
-        };
-        let order = self.constant(
-            callee,
-            rustc_middle::mir::Const::Ty(ordering_ty, instance.args.const_at(0)),
+        self.validate_atomic_intrinsic_order(
+            instance,
+            0,
+            &["Acquire", "Release", "AcqRel", "SeqCst"],
             span,
         )?;
-        let Value::Adt {
-            variant,
-            discriminant,
-            fields,
-            ..
-        } = order
-        else {
-            return Err("atomic fence intrinsic ordering is not a concrete enum".into());
-        };
-        let Some((index, definition)) = def
-            .variants()
-            .iter_enumerated()
-            .find(|(index, _)| index.as_usize() == variant)
-        else {
-            return Err("atomic fence intrinsic ordering variant is invalid".into());
-        };
-        if !def.is_enum()
-            || !definition.fields.is_empty()
-            || !fields.is_empty()
-            || def.discriminant_for_variant(self.tcx, index).val != discriminant
-            || !matches!(
-                definition.name.as_str(),
-                "Acquire" | "Release" | "AcqRel" | "SeqCst"
-            )
-        {
-            return Err("atomic fence intrinsic requires a supported non-Relaxed ordering".into());
-        }
         self.record_model(
             callee,
             "atomic fence; validated ordering, no synchronization facts in arbitrary-access model",

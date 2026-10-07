@@ -173,3 +173,21 @@ histories in cyclic induction remain UNKNOWN until those entry domains and trans
 Native fixtures check first and repeated claims, initializer mutations, callback updates, branch
 histories and invalidation. Initialization of reset-time runtime machinery remains an explicit
 entry premise.
+
+## Typed intrinsic stores
+
+Nonvolatile atomic stores use the same static type, extent, capability, liveness and reference
+retention checks as ordinary typed stores. The destination must identify a writable certified Rust
+static subobject, with the exact compiler integer or thin-pointer type expected by the intrinsic.
+Supported orderings come from the compiler intrinsic's const parameter and the real core wrapper.
+Pointer stores retain evidence for their referenced allocations, including nested frame escape.
+Stores establish no readable shared payload or synchronization facts and end precise startup
+history.
+
+An UnsafeCell payload may contain an alignment wrapper around its actual scalar. A raw cast can
+reach an initialized offset-zero subobject only through compiler field/layout certificates. The
+UnsafeCell itself must retain its transparent layout. Unrelated same-sized types, union payloads,
+uninitialized members and packed fields cannot acquire certification through that cast.
+
+Numeric raw destinations, unmodeled pointer loads and volatile atomic operations remain UNKNOWN.
+General raw-pointer loads and stores remain outside this model.
