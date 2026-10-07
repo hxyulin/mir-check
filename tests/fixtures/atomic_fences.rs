@@ -138,3 +138,83 @@ pub mod synthetic {
         }
     }
 }
+
+pub fn strong_cas(expected: u32, replacement: u32) {
+    match COUNT.compare_exchange(expected, replacement, Ordering::AcqRel, Ordering::Acquire) {
+        Ok(old) => assert!(old == expected),
+        Err(old) => assert!(old != expected),
+    }
+}
+
+pub fn weak_cas(expected: u32, replacement: u32) {
+    if let Ok(old) =
+        COUNT.compare_exchange_weak(expected, replacement, Ordering::Relaxed, Ordering::SeqCst)
+    {
+        assert!(old == expected);
+    }
+}
+
+pub fn weak_failure_can_match() {
+    if let Err(old) = COUNT.compare_exchange_weak(7, 9, Ordering::Relaxed, Ordering::Relaxed) {
+        assert!(old != 7);
+    }
+}
+
+pub fn bad_cas_success_claim() {
+    if let Ok(old) = COUNT.compare_exchange(7, 9, Ordering::Relaxed, Ordering::Relaxed) {
+        assert!(old == 9);
+    }
+}
+
+pub fn guarded_cas_ordering(success: Ordering, failure: Ordering) {
+    match failure {
+        Ordering::Relaxed | Ordering::Acquire | Ordering::SeqCst => {
+            let _ = COUNT.compare_exchange(7, 9, success, failure);
+        }
+        _ => {}
+    }
+}
+
+pub fn unchecked_cas_ordering(success: Ordering, failure: Ordering) {
+    let _ = COUNT.compare_exchange(7, 9, success, failure);
+}
+
+pub fn cas_history_remains_arbitrary() {
+    if COUNT
+        .compare_exchange(7, 9, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+    {
+        assert!(COUNT.load(Ordering::SeqCst) == 9);
+    }
+}
+
+pub fn signed_cas() {
+    let word = core::sync::atomic::AtomicI16::new(0);
+    match word.compare_exchange(-2, 4, Ordering::Release, Ordering::Acquire) {
+        Ok(old) => assert!(old == -2),
+        Err(old) => assert!(old != -2),
+    }
+}
+
+pub fn pointer_cas_is_unknown() {
+    let word = core::sync::atomic::AtomicPtr::<()>::new(core::ptr::null_mut());
+    let _ = word.compare_exchange(
+        core::ptr::null_mut(),
+        core::ptr::null_mut(),
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn cas_result_relations_replay_for_every_small_initial_value() {
+    for initial in 0..16 {
+        COUNT.store(initial, Ordering::Relaxed);
+        strong_cas(7, 9);
+        COUNT.store(initial, Ordering::Relaxed);
+        weak_cas(7, 9);
+        guarded_cas_ordering(Ordering::Relaxed, Ordering::SeqCst);
+    }
+    signed_cas();
+}

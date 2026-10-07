@@ -505,6 +505,15 @@ does not establish publication safety, data-race freedom or full weak-memory cor
 Rust documentation for [fence](https://doc.rust-lang.org/core/sync/atomic/fn.fence.html) and
 [compiler_fence](https://doc.rust-lang.org/core/sync/atomic/fn.compiler_fence.html).
 
+Integer compare_exchange uses an arbitrary old value for each operation. Its Result discriminant
+is tied to equality with the expected value: strong CAS returns Ok(old) exactly on equality, and
+Err(old) otherwise. Weak CAS also has a fresh spurious-failure choice; a matching old value may
+therefore occur in Err. Success and failure payloads retain this operation's old value. Both input
+values and the result type are checked against the compiler signature. All five success orderings
+and Relaxed/Acquire/SeqCst failure orderings are accepted, as in the pinned core; failure need not
+be weaker than success. Release/AcqRel failure orderings are panic obligations. No subsequent
+access is correlated with the update. Pointer CAS and low-level CAS intrinsics remain UNKNOWN.
+
 An atomic-only wrapper such as validate::Site can be represented without reading its mutable
 initializer as immutable data. Other interior-mutable constant references remain unsupported.
 

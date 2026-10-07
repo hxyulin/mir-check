@@ -350,3 +350,7 @@ Atomic fence coverage checks compiler-identified fence/compiler_fence wrappers a
 boundaries. Relaxed wrapper calls refute; valid fences preserve local storage without adding
 synchronization or atomic-history facts. See
 [cells and atomics](docs/proofs.md#cells-and-atomic-counters) for the abstraction and its limits.
+
+Integer compare_exchange and compare_exchange_weak check ordering arguments and preserve the
+old-value relation within each result. Weak CAS admits spurious failure. Later atomic accesses
+remain independent, with no synchronization or atomic-history facts.

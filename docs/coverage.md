@@ -496,3 +496,9 @@ ordinary payload fields and destructors remain UNKNOWN. Shared atomic reborrows 
 marker. Host/ARM debug and optimized tests cover nonzero offsets, Boolean arrays, arbitrary values,
 rejected regions, native scoped replay and layout/offset mutations. This adds no synchronization or
 atomic-history facts and does not verify overlapping concurrent accesses.
+
+Integer strong and weak compare_exchange model their old value and success/failure relationship,
+with symbolic ordering checks. Weak CAS allows spurious failure. All 15 valid success/failure
+ordering pairs in the pinned core are accepted; Release and AcqRel failure orderings refute. The
+model adds no atomic history or synchronization facts. Pointer CAS remains UNKNOWN. Host/ARM tests
+include positive, refuted and unknown cases, mutations and native replay.

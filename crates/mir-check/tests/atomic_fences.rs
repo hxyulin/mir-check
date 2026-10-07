@@ -175,3 +175,41 @@ fn relaxing_a_guarded_fence_or_changing_local_storage_never_proves() {
         assert!(!native_tests(&path, &directory));
     }
 }
+
+#[test]
+fn cas_preserves_result_relations_ordering_checks_and_spurious_failures() {
+    let entries = [
+        ("strong_cas", ProofStatus::Proved),
+        ("weak_cas", ProofStatus::Proved),
+        ("guarded_cas_ordering", ProofStatus::Proved),
+        ("signed_cas", ProofStatus::Proved),
+        ("weak_failure_can_match", ProofStatus::Refuted),
+        ("bad_cas_success_claim", ProofStatus::Refuted),
+        ("unchecked_cas_ordering", ProofStatus::Refuted),
+        ("cas_history_remains_arbitrary", ProofStatus::Refuted),
+        ("pointer_cas_is_unknown", ProofStatus::Unknown),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized);
+        }
+    }
+    assert!(native_tests(&fixture(), &Directory::new()));
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let directory = Directory::new();
+    let path = directory.0.join("mutant.rs");
+    std::fs::write(
+        &path,
+        source.replace("assert!(old == expected)", "assert!(old != expected)"),
+    )
+    .unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        verify(
+            &path,
+            &[("strong_cas", ProofStatus::Refuted)],
+            target,
+            false,
+        );
+    }
+    assert!(!native_tests(&path, &directory));
+}

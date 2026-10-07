@@ -554,3 +554,11 @@ shape limits; MaybeUninit, unions, pointers, ordinary payload fields and destruc
 Reads use the existing arbitrary-per-access model without byte-order or initializer assumptions.
 Shared atomic reborrows preserve their marker across temporary lifetimes. This does not prove
 synchronization protocols or the validity of overlapping accesses and arbitrary overlay writes.
+
+Integer compare_exchange and compare_exchange_weak support typed success/failure results. Strong
+CAS succeeds exactly when its arbitrary old value equals the expected value. Weak CAS may fail
+spuriously even on a match. Success orderings accept all five Ordering variants; failure accepts
+Relaxed, Acquire or SeqCst, including when stronger than success on the pinned core. Invalid
+orderings refute. Replacement values are type-checked, and later accesses stay arbitrary. Pointer
+CAS remains UNKNOWN. Host/ARM debug and optimized fixtures test signed values, result relations,
+ordering guards, spurious failure, mutations and native replay.

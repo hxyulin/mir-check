@@ -246,7 +246,13 @@ impl<'tcx> Engine<'tcx> {
         }
         if !matches!(
             name.as_str(),
-            "load" | "store" | "fetch_add" | "fetch_sub" | "swap"
+            "load"
+                | "store"
+                | "fetch_add"
+                | "fetch_sub"
+                | "swap"
+                | "compare_exchange"
+                | "compare_exchange_weak"
         ) {
             return Ok(None);
         }
@@ -269,6 +275,11 @@ impl<'tcx> Engine<'tcx> {
             )
             .map_err(|error| format!("atomic signature normalization failed: {error:?}"))?
             .skip_binder();
+        if matches!(name.as_str(), "compare_exchange" | "compare_exchange_weak") {
+            return self
+                .atomic_compare_exchange(instance, signature, values, state, site)
+                .map(Some);
+        }
         let ordering_ty = signature
             .inputs()
             .last()
@@ -304,6 +315,112 @@ impl<'tcx> Engine<'tcx> {
         // No subsequent access is correlated with this operation: another actor may intervene.
         // fetch_add/sub return the old value; modular updates have no arithmetic panic condition.
         Ok(Some(value))
+    }
+
+    fn atomic_compare_exchange(
+        &mut self,
+        instance: ty::Instance<'tcx>,
+        signature: ty::FnSig<'tcx>,
+        values: &[Value],
+        state: &mut State,
+        site: (DefId, Span),
+    ) -> Result<Value, String> {
+        let [_, expected, replacement, success, failure] = values else {
+            return Err("compare_exchange needs receiver, values and two orderings".into());
+        };
+        let [_, expected_ty, replacement_ty, success_ty, failure_ty] = signature.inputs() else {
+            return Err("compare_exchange signature mismatch".into());
+        };
+        let (bits, signed) = self
+            .integer_type(*expected_ty)
+            .ok_or("compare_exchange needs primitive integer values")?;
+        if expected_ty != replacement_ty {
+            return Err("compare_exchange value types differ".into());
+        }
+        for value in [expected, replacement] {
+            let (_, width, sign) = value.integer()?;
+            if (width, sign) != (bits, signed) {
+                return Err("compare_exchange modeled value type mismatch".into());
+            }
+        }
+        let success_safe = self.atomic_order(
+            success,
+            *success_ty,
+            &["Relaxed", "Acquire", "Release", "AcqRel", "SeqCst"],
+        )?;
+        let failure_safe =
+            self.atomic_order(failure, *failure_ty, &["Relaxed", "Acquire", "SeqCst"])?;
+        let safe = self.terms.apply(Op::And, &[success_safe, failure_safe])?;
+        self.require(
+            site.0,
+            site.1,
+            &state.conditions,
+            &safe,
+            ObligationKind::PanicSafety,
+            "compare_exchange requires valid success and non-release failure orderings".into(),
+        )?;
+        state.conditions.push(safe);
+        let result_ty = signature.output();
+        let ty::Adt(def, args) = result_ty.kind() else {
+            return Err("compare_exchange result is not an enum".into());
+        };
+        let Some(ok) = self.tcx.lang_items().get(LangItem::ResultOk) else {
+            return Err("Result::Ok compiler identity unavailable".into());
+        };
+        if self.tcx.parent(ok) != def.did()
+            || args.type_at(0) != *expected_ty
+            || args.type_at(1) != *expected_ty
+            || def.variants().len() != 2
+        {
+            return Err("compare_exchange result type mismatch".into());
+        }
+        let old = Value::Int {
+            expression: self.fresh(Sort::BitVec(bits)),
+            bits,
+            signed,
+        };
+        let equal =
+            symbolic::binary(&self.terms, "eq", old.clone(), expected.clone())?.boolean()?;
+        let weak = self.tcx.item_name(instance.def_id()).as_str() == "compare_exchange_weak";
+        let succeeds = if weak {
+            let no_spurious_failure = self.fresh(Sort::Bool);
+            self.terms.apply(Op::And, &[equal, no_spurious_failure])?
+        } else {
+            equal
+        };
+        let variants = vec![
+            self.constructed(result_ty, 0, vec![old.clone()])?,
+            self.constructed(result_ty, 1, vec![old])?,
+        ];
+        let (tag_bits, tag_signed) = self
+            .integer_type(result_ty.discriminant_ty(self.tcx))
+            .ok_or("compare_exchange result discriminant is not an integer")?;
+        let tags = variants
+            .iter()
+            .map(|value| {
+                let Value::Adt { discriminant, .. } = value else {
+                    unreachable!();
+                };
+                self.terms.bit_vector(*discriminant, tag_bits)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let discriminant = Value::Int {
+            expression: self
+                .terms
+                .apply(Op::Ite, &[succeeds, tags[0].clone(), tags[1].clone()])?,
+            bits: tag_bits,
+            signed: tag_signed,
+        };
+        self.record_model(instance.def_id(), if weak {
+            "integer weak CAS; matching success, possible spurious failure, arbitrary access state"
+        } else {
+            "integer strong CAS; exact old-value comparison, arbitrary access state"
+        });
+        Ok(Value::Enum {
+            discriminant: Box::new(discriminant),
+            variants,
+            is_option: false,
+        })
     }
 
     fn atomic_order(
