@@ -3,6 +3,7 @@
 pub mod cli;
 mod config;
 pub mod limits;
+pub mod project;
 pub mod replay;
 pub mod smt;
 pub use config::{ContractConfig, FunctionContract};

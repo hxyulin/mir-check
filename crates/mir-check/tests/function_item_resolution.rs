@@ -170,9 +170,12 @@ fn rebuilding_core_exposes_actual_validation_mir_without_assuming_pointer_operat
             .output()
             .unwrap();
         assert!(!output.status.success());
-        let runs = std::fs::read_dir(directory.0.join("target/mir-check")).unwrap();
-        let reports = runs
-            .flat_map(|run| std::fs::read_dir(run.unwrap().path().join("reports")).unwrap())
+        let latest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(directory.0.join("target/mir-check/latest.json")).unwrap(),
+        )
+        .unwrap();
+        let reports = std::fs::read_dir(latest["reports"].as_str().unwrap())
+            .unwrap()
             .map(|file| file.unwrap().path())
             .collect::<Vec<_>>();
         assert_eq!(

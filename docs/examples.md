@@ -12,8 +12,7 @@ checks panic freedom, exact 18-byte acceptance, switch bounds and five decoded c
 The analyzer follows the actual closures, core Result/Option bodies and question-mark paths.
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
-  --manifest-path examples/dr16/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
+target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
 ```
 
 Bad byte-index and channel-mask mutations are refuted. Independent decoding formulas cover
@@ -27,7 +26,7 @@ proofs use explicit capacity preconditions. Two payload round-trip harnesses che
 at the actual call and preserve every accepted input byte.
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry Frame::new --entry Frame::data \
+target/debug/mir-check --entry Frame::new --entry Frame::data \
   --manifest-path examples/can-frame/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 ```
 
@@ -46,7 +45,7 @@ read callee's index precondition and returns Some exactly when the header is ena
 index is valid. Fields remain arbitrary symbolic inputs; there is no constructor invariant.
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry guarded_packet_read \
+target/debug/mir-check --entry guarded_packet_read \
   --manifest-path examples/contracts/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 ```
 

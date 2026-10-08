@@ -398,6 +398,33 @@ fn main() -> ExitCode {
             }
         };
     }
+    if std::env::var_os("MIR_CHECK_REPORT_DIR").is_none() {
+        if args.get(1).is_some_and(|arg| arg == "rustc") {
+            args.remove(1);
+        } else {
+            let explicit_project = args
+                .get(1)
+                .is_some_and(|arg| arg == "check" || arg == "inventory");
+            let compiler_arguments = args.iter().any(|arg| {
+                arg == "--from-report"
+                    || arg == "--crate-name"
+                    || arg == "--crate-type"
+                    || arg.starts_with("--crate-name=")
+                    || arg.starts_with("--crate-type=")
+                    || arg.ends_with(".rs")
+                    || arg == "--version"
+            });
+            if explicit_project || !compiler_arguments {
+                return match mir_check::project::run(std::env::args_os().skip(1).collect()) {
+                    Ok(status) => status,
+                    Err(error) => {
+                        eprintln!("mir-check: {error}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+        }
+    }
     let color = match Color::parse(&std::env::var("MIR_CHECK_COLOR").unwrap_or("auto".to_owned())) {
         Ok(color) => color,
         Err(error) => {

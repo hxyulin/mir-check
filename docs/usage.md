@@ -19,46 +19,122 @@ checkout. An installed build retains that lookup; otherwise use Z3 on PATH or `M
 Removing or moving the source checkout can require updating the solver path or reinstalling.
 The binaries also depend on their pinned rustc sysroot being installed.
 
+## Project checks
+
+Run from the Cargo project you want to analyze:
+
+```sh
+mir-check --entry module::function --lib
+mir-check --async-entry task --bin firmware
+mir-check report
+```
+
+`mir-check` and `cargo mir-check` now use the same project implementation. Verification is the
+default; `--verify` remains accepted for existing scripts. `mir-check check` is an explicit spelling
+of the same command. Without selectors, every inventoried local body is checked, including
+generated and generic bodies whose inputs may be unsupported.
+
+Cargo supplies compilation arguments and environment variables, builds current dependencies and
+uses the project's target, features and profile. You do not need to create an inventory, copy a
+rustc invocation or pass `--from-report` for a project check.
+
 ## Select roots
 
-This command checks every inventoried body in the selected Cargo library:
+Find exact inventoried names, then select the bodies you want to check:
 
 ```sh
-cargo mir-check --verify --summary --lib
+mir-check inventory --verbose --lib
+mir-check --entry module::function --lib
+mir-check --entry my_crate::module::function --workspace --lib
 ```
 
-To check the DR16 parser while leaving its derived methods and closure roots unselected, run from
-the mir-check checkout:
+Inventory mode performs no proofs. Entries are exact names, not patterns or suffix matches.
+A Rust crate prefix disambiguates functions in different workspace members. Cargo package hyphens
+normally become underscores. Repeat `--entry NAME`, or use `--entry=NAME`, for multiple roots.
+An unqualified name matches every body with that name in the selected Cargo targets; use `-p`,
+`--lib` or `--bin` to narrow the build. Missing requested entries make the run fail.
+
+Crates without matching roots retain inventories without independently verifying their bodies.
+Selected roots still execute reachable callees and check call bounds. Independently selected
+helpers use their own symbolic input domains; a caller proof does not give them universal proofs.
+
+Checker options may appear alongside Cargo options. `--` passes remaining arguments to Cargo;
+use `mir-check check -- <cargo arguments>` when they resemble compiler arguments. Cargo's
+`--features`, `--workspace`, `-p`, `--profile` and `--target` retain their meaning. Analysis owns
+`--target-dir` so ordinary Cargo artifacts are not used as proof/build cache inputs.
+
+## Project configuration
+
+An optional flat `mir-check.json` stores the settings you otherwise repeat:
+
+```json
+{
+  "schema_version": 1,
+  "entries": ["module::function"],
+  "cargo_args": ["--lib"],
+  "limits": {
+    "max_steps": 65536,
+    "max_call_depth": 64
+  }
+}
+```
+
+Then `mir-check` performs that check. There are no built-in presets or named profiles. Limits keep
+their existing defaults unless explicitly overridden; reaching one still produces UNKNOWN.
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Required; currently `1` |
+| `entries` | Ordinary exact root selectors |
+| `async_entries` | Exact factories checked through construction and polls |
+| `cargo_args` | Default arguments passed to `cargo check` |
+| `limits` | Optional `max_steps`, `max_call_depth`, `max_query_bytes`, `root_timeout_secs`, `solver_timeout_ms` |
+| `contracts` | Sidecar path, relative to the configuration file |
+| `dependency_mir` | Retain dependency MIR; default `true` |
+| `allow_assumptions` | Accept explicitly conditional proofs; default `false` |
+| `all_failures` | Continue refuted roots; default `false` |
+| `induction` | Select experimental supported-loop induction; default `false` |
+| `startup` | Select the explicit fresh-startup domain; default `false` |
+
+Discovery starts at the current directory, or the `--manifest-path` directory, and searches its
+ancestors for the nearest file. `--config FILE` selects one explicitly; `--no-config` ignores
+configuration. Unknown fields, invalid schemas and zero/invalid limits fail before building.
+Native replay cannot be enabled by configuration: it always needs an explicit `--replay`.
+
+Explicit `--entry` or `--async-entry` options replace all configured roots. CLI limits and policy
+flags override configured values. `--no-startup`, `--no-induction`, `--deny-assumptions`,
+`--first-failure` and `--dependency-mir` can clear the corresponding configured choices.
+Configured Cargo arguments precede CLI Cargo arguments and follow Cargo's own combination rules;
+conflicting singleton options are Cargo errors. Inventory ignores configured root selectors and
+startup/induction policies.
+
+The parser example has a minimal configuration selecting `Raw::parse`. From the checker checkout:
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
-  --manifest-path examples/dr16/Cargo.toml --lib --locked
+target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
 ```
 
-Entries are exact inventory names, not patterns or suffix matches. A Rust crate prefix can
-disambiguate functions with the same name in different workspace members:
+## Builds and saved runs
+
+The cache is isolated beneath the Cargo workspace's `target/mir-check`. Dependency builds
+are reused; workspace package artifacts are refreshed before every attempt so unchanged source,
+changed roots, limits and contracts still receive fresh proofs. Dependencies without retained MIR
+use a separate cache. Cargo tracks dependency source, features, target and profile changes normally.
+Concurrent attempts wait on an OS file lock with progress messages.
+
+Every attempt gets a fresh `runs/<id>/reports` directory. `latest.json` points to that attempt and
+records completion and success. It starts incomplete, so interruption cannot expose a previous
+successful scan as the latest result. Failed builds and missing entries stay failed when reopened.
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry mir_check_dr16::Raw::parse \
-  --manifest-path examples/dr16/Cargo.toml --lib --locked
+mir-check report
+mir-check report --verbose
 ```
 
-Use the Rust crate name printed by the inventory; Cargo package hyphens normally become
-underscores. Repeat `--entry NAME`, or use `--entry=NAME`, to select several roots. An unqualified
-name matches all bodies with that name in the selected Cargo targets. A qualified name can still
-match multiple targets sharing a crate name; use Cargo's `-p`, `--lib` or `--bin` to narrow them.
-
-Crates without a matching root keep their inventories and report zero selected roots. Every
-requested name must match at least one inventoried body across the run. A typo, a body behind a
-disabled feature, or a root excluded by Cargo target selection causes a nonzero exit.
-
-Checker options may appear alongside Cargo options. `--` ends checker-option parsing and passes
-the remaining arguments to `cargo check`. Cargo options such as `--features`, `--workspace`, `-p`,
-`--profile` and `--target` retain their usual meaning. `--target-dir` is reserved by mir-check.
-
-Selected roots still execute reachable callees and check their call bounds. Unselected functions
-do not acquire a universal proof just because one caller interpreted them with particular values.
-Metadata is marked verified only for independently selected roots that pass all obligations.
+Run these from the analyzed workspace or a child directory. No Cargo build or solver query runs.
+The default reader checks the whole-run record, including failure outside individual crate proofs.
+For explicit report files, the reader retains per-report acceptance rules and cannot reconstruct a
+missing build outcome. These are stored results, not a new proof of current source.
 
 ## Dependency MIR
 
@@ -73,12 +149,13 @@ The wrapper passes Cargo's arguments unchanged before appending the MIR options.
 and overflow settings. As before, mir-check owns the compiler and wrapper settings for its
 isolated analysis build. Dependency MIR optimization is deliberately fixed at level zero, even
 if a profile or user flag requests another MIR level. Code-generation optimization settings are
-preserved. Fresh target directories prevent reuse of dependencies built without these options.
+preserved. Retained and plain dependency caches are separate. Workspace artifacts are refreshed
+on every run.
 
 For a baseline or an inventory that does not need retained dependency bodies:
 
 ```sh
-cargo mir-check --summary --no-dependency-mir --lib
+mir-check inventory --no-dependency-mir --lib
 ```
 
 Install all three binaries with the Cargo install command above, or build the whole workspace;
@@ -96,8 +173,8 @@ continue to produce checked call/return obligations, not trusted summaries.
 The pinned toolchain includes thumbv7em-none-eabihf. This analyzes the fixture's ARM build:
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
-  --manifest-path examples/dr16/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
+target/debug/mir-check --manifest-path examples/dr16/Cargo.toml \
+  --locked --target thumbv7em-none-eabihf
 ```
 
 The report records the compiler, target, panic strategy, overflow checks and compiler arguments.
@@ -107,8 +184,8 @@ that overflow is impossible. To analyze a build with checks enabled and aborting
 
 ```sh
 RUSTFLAGS='-Cpanic=abort -Coverflow-checks=yes' \
-  target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
-  --manifest-path examples/dr16/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
+  target/debug/mir-check --manifest-path examples/dr16/Cargo.toml \
+  --locked --target thumbv7em-none-eabihf
 ```
 
 Other targets need their Rust target libraries installed for the same pinned compiler and must
@@ -120,12 +197,12 @@ the tool does not claim that every architecture has been tested.
 | Outcome | Meaning | Verification exit |
 | --- | --- | --- |
 | PROVED | Every explored feasible path completed and all body/contract obligations passed under the declared root domain | Success if every selected root proves |
-| PROVED_WITH_ASSUMPTIONS | Obligations passed using explicit user-trusted call summaries | Nonzero unless --allow-assumptions is set |
+| PROVED_WITH_ASSUMPTIONS | Obligations passed under listed trusted-call or entry-domain assumptions | Nonzero unless --allow-assumptions is set |
 | REFUTED | A supported translated obligation has a satisfying failing assignment | Nonzero |
 | UNKNOWN | Unsupported behavior, missing MIR, solver failure or an exploration/input/query limit prevented completion | Nonzero |
 | Unselected | The body has an inventory, without an independent root proof | Does not affect selected-root verification |
 
-An inventory run without `--verify` reports sites as unverified. Its successful exit establishes
+`mir-check inventory` reports sites as unverified. Its successful exit establishes
 that compilation and inventory completed. Inventory call paths are structural and ignore branch
 feasibility. `--entry` works in inventory mode too, to request those paths.
 
@@ -159,7 +236,7 @@ trusted models and individual obligations. Schema version 9 JSON includes:
 - `functions[].sites`: the independent unverified MIR inventory.
 - `rustc_arguments`, `compiler`, `target`, `panic_strategy`, `overflow_checks`: analysis build data.
 
-Cargo writes reports to a fresh `target/mir-check/<run>/reports` directory and prints its path.
+Cargo writes reports to a fresh `target/mir-check/runs/<run>/reports` directory and prints its path.
 It renders available reports even when verification fails. Compiler failures can leave reports
 for other completed crates; they cannot produce a successful run. Missing requested roots also
 fail while retaining the collected reports. Build directories can be removed after use.
@@ -213,7 +290,7 @@ and errors. It does not suppress compiler diagnostics or change verification pol
 
 ## JSONL and saved reports
 
-Export one complete schema-8 crate report per line, including on failed verification when reports
+Export one complete schema-9 crate report per line, including on failed verification when reports
 were produced:
 
 ```sh
@@ -236,11 +313,11 @@ Inspect a saved run without recompiling or rerunning the solver:
 
 ```sh
 cargo mir-check report results.jsonl
-mir-check report target/mir-check/<run>/reports --verbose --color never
+mir-check report target/mir-check/runs/<run>/reports --verbose --color never
 mir-check report first.json second.json --jsonl combined.jsonl
 ```
 
-Both binaries accept the report subcommand. Inputs can be schema-7/8 JSON files, JSONL files or
+Both binaries accept the report subcommand. Inputs can be schema-7/8/9 JSON files, JSONL files or
 directories containing those files. Directory entries are sorted, with no recursive scan. Counts
 are recomputed from the stored root statuses; supplying the same report twice counts it twice.
 Empty input sets, malformed records and unsupported schemas fail without a success report.
@@ -278,6 +355,9 @@ arguments and takes analysis budgets from the new command, rather than the saved
 
 ## Direct whole-crate and main checks
 
+These are advanced compiler-debugging commands. Normal project checks use Cargo directly and
+require no saved invocation.
+
 `mir-check --verify -- <rustc arguments>` already checks every inventoried body in the selected
 compilation unit when no --entry is supplied. This includes generated bodies; generic or
 unsupported roots can still be UNKNOWN. A successful run requires every selected root to pass
@@ -294,7 +374,7 @@ Run these commands from the original compiler working directory. The source, dep
 and sysroot paths must remain available. This runs the compiler and solver on current source;
 it does not rebuild Cargo dependencies. Rebuild the inventory after changing dependencies,
 features or build configuration. The saved compiler must match the analyzer's pinned compiler.
-Schema-7/8 inputs are accepted; extra rustc arguments cannot be combined with --from-report.
+Schema-7/8/9 inputs are accepted; extra rustc arguments cannot be combined with --from-report.
 Only compiler arguments are reused. Saved root selection, proof outcomes, sidecar contracts and
 trusted-summary acceptance are ignored; supply checker options explicitly for the new run.
 Compiler diagnostic formatting is changed to human output with the selected color policy, so
@@ -317,8 +397,8 @@ This mode does not run the application's main on the host.
 Use `--async-entry FACTORY` to check a concrete async factory independently of its startup caller:
 
 ```sh
-mir-check --verify --async-entry sample_task --entry initialization --from-report inventory.json
-cargo mir-check --verify --async-entry sample_task --entry initialization
+mir-check --async-entry sample_task --entry initialization
+cargo mir-check --async-entry sample_task --entry initialization
 ```
 
 The selector uses the exact inventoried factory name, including macro-generated module paths when

@@ -28,6 +28,21 @@ decoding formulas. GitHub Actions runs the proof suite on Linux and macOS, inclu
 When changing fixtures, also run their formatting, Clippy, host tests and ARM release builds.
 See the [repository conventions](https://github.com/hxyulin/mir-check/blob/main/AGENTS.md).
 
+## CLI implementation
+
+`src/project` owns configuration, Cargo orchestration, the dependency cache and latest-run
+records. Both the standalone command and Cargo subcommand delegate there. `src/main.rs` retains
+rustc integration and direct invocations; `src/cli.rs` renders current and recorded reports.
+Keep these responsibilities separate rather than adding a second project parser to either binary.
+
+Project checks verify by default; inventory is explicit. Defaults do not trust external calls,
+assume startup history, enable native execution or silently raise resource limits. A flat JSON
+configuration holds repeatable settings; preserve CLI precedence and reject unknown fields.
+
+Cache tests must show fresh roots on unchanged source and changed selectors, dependency artifact
+reuse, and rejected mutations of both root and dependency code. A run with a compiler error or a
+missing requested entry must remain failed when read through `mir-check report`.
+
 ## Analyzer design priorities
 
 The [analyzer redesign](analyzer-redesign.md) records implemented foundations, remaining migrations

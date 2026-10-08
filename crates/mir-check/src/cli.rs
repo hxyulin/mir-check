@@ -673,7 +673,8 @@ pub fn report_command(args: &[String]) -> Result<bool, Box<dyn std::error::Error
                 println!(
                     "Usage: mir-check report [--verbose] [--color auto|always|never] \
                     [--quiet] [--allow-assumptions] [--jsonl FILE|-] \
-                    <JSON file, JSONL file or directory>..."
+                    [JSON file, JSONL file or directory]...\n\
+                    Without paths, reads the latest run in the current Cargo workspace."
                 );
                 return Ok(true);
             }
@@ -684,9 +685,13 @@ pub fn report_command(args: &[String]) -> Result<bool, Box<dyn std::error::Error
             path => paths.push(PathBuf::from(path)),
         }
     }
-    if paths.is_empty() {
-        return Err("report needs at least one input file or directory".into());
-    }
+    let recorded_success = if paths.is_empty() {
+        let (path, successful) = crate::project::latest()?;
+        paths.push(path);
+        Some(successful)
+    } else {
+        None
+    };
     let mut inputs = Vec::new();
     for path in paths {
         if path.is_dir() {
@@ -751,9 +756,13 @@ pub fn report_command(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
     let elapsed_s = progress.elapsed();
     drop(progress);
-    let success = reports
-        .iter()
-        .all(|report| accepted(report, allow_assumptions));
+    let success = recorded_success != Some(false)
+        && reports
+            .iter()
+            .all(|report| accepted(report, allow_assumptions));
+    if recorded_success == Some(false) {
+        eprintln!("mir-check: the recorded project run failed; these may be partial results");
+    }
     present(
         &reports,
         verbose,

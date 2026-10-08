@@ -43,8 +43,7 @@ cd mir-check
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-solver.txt
 cargo build --workspace --locked
-target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
-  --manifest-path examples/dr16/Cargo.toml --lib --locked
+target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
 ```
 
 Read the [examples](examples.md), [usage guide](usage.md) and [proof explanation](proofs.md).
