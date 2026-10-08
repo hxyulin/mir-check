@@ -105,6 +105,11 @@ fn next_step(detail: &str) -> &'static str {
         "Try Cargo -Zbuild-std=core to retain core MIR for this target."
     } else if detail.contains("MIR body unavailable") {
         "Rebuild with dependency MIR retention; inspect the named callee and build artifacts."
+    } else if detail.contains("retired uninitialized storage") {
+        "Check the named drop and matching typed store; \
+         partial stores do not restore a whole subobject."
+    } else if detail.contains("static destructor") {
+        "Add support for this destructor's initialization effects; larger limits cannot model them."
     } else if detail.contains("mutable static payload reads need a state model") {
         "Add support for this storage's initialization and updates; larger limits \
          cannot supply its runtime value."

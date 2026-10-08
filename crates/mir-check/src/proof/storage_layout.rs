@@ -20,6 +20,13 @@ impl StorageFootprint {
         })
     }
 
+    /// Zero-sized subobjects need typed paths to establish disjoint initialization.
+    pub(super) fn may_overlap(self, other: Self) -> bool {
+        self.size == 0
+            || other.size == 0
+            || (self.offset < other.offset + other.size && other.offset < self.offset + self.size)
+    }
+
     pub(super) fn fits(self, allocation_size: u64, allocation_alignment: u64) -> bool {
         self.offset + self.size <= allocation_size
             && allocation_alignment >= self.alignment
@@ -110,6 +117,15 @@ impl<'tcx> Engine<'tcx> {
 #[cfg(test)]
 mod tests {
     use super::StorageFootprint;
+
+    #[test]
+    fn initialization_overlap_keeps_zero_sized_paths_conservative() {
+        let parent = StorageFootprint::new(0, 8, 8).unwrap();
+        assert!(parent.may_overlap(StorageFootprint::new(4, 4, 4).unwrap()));
+        assert!(!parent.may_overlap(StorageFootprint::new(8, 4, 4).unwrap()));
+        assert!(parent.may_overlap(StorageFootprint::new(8, 0, 1).unwrap()));
+        assert!(StorageFootprint::new(16, 0, 1).unwrap().may_overlap(parent));
+    }
 
     #[test]
     fn typed_footprints_check_extent_and_alignment_without_wrapping() {

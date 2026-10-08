@@ -18,7 +18,7 @@ impl<'tcx> Engine<'tcx> {
         bits: u32,
         signed: bool,
     ) -> Result<(Value, Option<AtomicStorage>), String> {
-        let location = self.startup_atomic_location(receiver, state, bits, signed)?;
+        let location = self.static_atomic_location(receiver, state, bits, signed)?;
         if state.memory.startup_invalidated {
             return Ok((self.opaque_atomic_value(bits, signed), None));
         }

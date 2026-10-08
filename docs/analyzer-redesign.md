@@ -78,11 +78,13 @@ Shape validation is insufficient for restricted types. Retained `NonNull` values
 address validity evidence, and enums need a valid discriminant and initialized selected payload.
 Unsupported union members, conflicting overlaps and unmodeled effects remain UNKNOWN.
 
-A separate coverage stage can model a fresh arbitrary legal discriminant from initialized opaque
-static storage, without constructing pointer payloads or assuming the initializer's variant. It must
-report the abstraction and preserve no relation across separate storage reads. Such a model may
-produce conservative counterexamples; exact startup safety still needs an interference permission.
-This snapshot stage and mutable static retention are not implemented yet.
+The bounded discriminant coverage stage now models fresh legal tags from initialized opaque static
+`Copy + Freeze` enum places. It reports the abstraction and preserves no relation across separate
+storage reads, without constructing pointer payloads or assuming the initializer's variant.
+Such observations can produce conservative counterexamples; exact startup safety still needs an
+interference permission. Bounded no-destructor static drops now retire typed subobjects.
+Validated stores restore their initialization without retaining values. Mutable static retention,
+general partial initialization and effectful owned moves remain future work.
 
 ## Atomic histories and interference
 
@@ -99,6 +101,11 @@ establishing exclusivity or a happens-before relation.
 Different views with overlapping footprints cannot keep independent precise histories. The first
 extension should decline exact history for these overlaps. Sharing symbolic storage across suitable
 supported views is a later step, with explicit initialization and atomic access rules.
+
+Initialized static `Copy + Freeze` enum places now support discriminant-only observations. Each
+read uses a fresh compiler-constrained tag, with no initializer or cross-read correlation. Payload
+loads and static destructors remain UNKNOWN; tag counterexamples report the abstraction. This stage
+supplies no ordinary static history or additional startup premise.
 
 Explicit `--startup` now supplies a conditional initializer domain with branch-local static atomic
 histories, reported entry assumptions and conservative invalidation. It does not verify the entry

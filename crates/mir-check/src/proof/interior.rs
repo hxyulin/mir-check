@@ -380,8 +380,12 @@ impl<'tcx> Engine<'tcx> {
         bits: u32,
         signed: bool,
     ) -> Result<(Value, Option<AtomicStorage>), String> {
-        if self.startup && matches!(receiver, Value::StaticView { .. }) {
-            return self.startup_atomic_access(receiver, state, bits, signed);
+        if matches!(receiver, Value::StaticView { .. }) {
+            if self.startup {
+                return self.startup_atomic_access(receiver, state, bits, signed);
+            }
+            self.static_atomic_location(receiver, state, bits, signed)?;
+            return Ok((self.opaque_atomic_value(bits, signed), None));
         }
         let (actual_bits, actual_signed, storage) = match receiver {
             Value::Atomic { bits, signed } => (*bits, *signed, None),

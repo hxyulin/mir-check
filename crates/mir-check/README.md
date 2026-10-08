@@ -699,7 +699,7 @@ uninitialized members do not establish a certificate or write capability.
 
 Certified writable static places can form mutable reference descriptors for address operations and
 supported opaque stores. Reference mutability supplies no exclusivity or retained-payload facts;
-ordinary static loads stay UNKNOWN, and mutable array-to-slice coercions remain unsupported.
+ordinary whole payload loads stay UNKNOWN, and mutable array-to-slice coercions remain unsupported.
 `UnsafeCell::raw_get` preserves the receiver's initialization certificate. An unrelated raw cast or
 uninitialized payload cannot acquire initialized type evidence through address derivation.
 
@@ -712,11 +712,28 @@ remain independent across branches. The first write still copies the whole alloc
 Call and destructor continuations take returned memory and conditions directly, avoiding a clone
 of the caller state that would immediately be discarded.
 
-UNKNOWN reports for mutable static enum discriminants name the payload type and the missing runtime
-storage model. Terminal guidance distinguishes those gaps from execution and solver budgets.
+Discriminant reads from certified initialized static `Copy + Freeze` enums use fresh symbolic
+observations constrained to compiler-defined tags. This includes pointer-bearing option tags
+without inventing their pointer payloads. Each storage read is independent; copying one observed
+tag keeps its value. Initialization checks run before the single-variant shortcut. MaybeUninit,
+unrelated casts, noncopy tags, static destructors, payload field reads and invalidated epochs stay
+UNKNOWN. Supported typed stores preserve valid tag shape without retaining a variant value.
+
+Counterexamples involving these observations report the static-tag abstraction and remain runtime
+unconfirmed. `--startup` does not make ordinary non-atomic static tags equal their initializers or
+make separate reads agree. Whole payload reads still name the missing runtime storage model, with
+terminal guidance distinguishing that gap from execution and solver budgets.
 
 Integer atomic RMWs include `fetch_add`, `fetch_sub`, `fetch_and`, `fetch_or`, `fetch_xor`,
 `fetch_nand`, `fetch_min` and `fetch_max`. Arithmetic wraps, NAND complements the entire integer
 width, and extrema respect signedness. They use one structural transition implementation for owned
 local and explicit startup histories. Shared or invalidated atomics still allow arbitrary old
 values; an RMW does not establish exclusivity. Boolean and pointer RMWs remain UNKNOWN.
+
+Static no-destructor drops retire their certified, nonempty typed subobject. Later reads and borrows
+check overlapping retirements, including old references and atomic receivers. A validated ordinary
+store to the same compiler type and offset reinitializes that subobject. Partial stores do not
+restore a retired parent; stores never revive an invalidated epoch or retain a runtime value.
+Initialization markers are branch-local and capped at 128 pending subobjects. Zero-sized drops,
+static destructors and actual static payload moves remain UNKNOWN. Terminal guidance points to the
+missing reinitializing store rather than suggesting larger solver limits.

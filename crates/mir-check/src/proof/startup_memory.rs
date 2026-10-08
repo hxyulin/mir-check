@@ -22,6 +22,7 @@ pub(super) struct Memory {
     allocations: Rc<Vec<Option<Value>>>,
     pub(super) startup_atomics: std::collections::HashMap<StaticAtomicLocation, Value>,
     pub(super) startup_invalidated: bool,
+    pub(super) static_uninitialized: Vec<usize>,
 }
 
 impl Memory {
@@ -151,7 +152,10 @@ mod tests {
         let other_location = atomic_location(8);
         let mut original: Memory = vec![Some(Value::Unit)].into();
         original.startup_atomics.insert(location, Value::Unit);
+        original.static_uninitialized.push(4);
         let mut branch = original.clone();
+        branch.static_uninitialized.clear();
+        assert_eq!(original.static_uninitialized, vec![4]);
         branch
             .startup_atomics
             .insert(location, Value::Uninitialized);

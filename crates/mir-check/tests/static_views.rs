@@ -38,9 +38,23 @@ fn verify(
     optimized: bool,
     specification: Option<serde_json::Value>,
 ) -> Report {
+    verify_mode(path, entries, target, optimized, specification, false)
+}
+
+fn verify_mode(
+    path: &Path,
+    entries: &[(&str, ProofStatus)],
+    target: Option<&str>,
+    optimized: bool,
+    specification: Option<serde_json::Value>,
+    startup: bool,
+) -> Report {
     let directory = Directory::new();
     let mut command = Command::new(env!("CARGO_BIN_EXE_mir-check"));
     command.args(["--verify", "--json", "--quiet", "--allow-assumptions"]);
+    if startup {
+        command.arg("--startup");
+    }
     if let Some(specification) = specification {
         let config = directory.0.join("contracts.json");
         std::fs::write(&config, serde_json::to_vec(&specification).unwrap()).unwrap();
@@ -588,32 +602,295 @@ fn mutable_static_borrows_preserve_addresses_without_readable_or_initialization_
 }
 
 #[test]
-fn an_opaque_static_discriminant_names_the_payload_and_missing_runtime_state() {
+fn static_enum_tags_are_fresh_legal_observations_without_payload_or_initializer_facts() {
+    let abstraction = "opaque initialized static enum reads allow fresh legal discriminants";
+    let entries = [
+        (
+            "opaque_static_variant_reads_are_symbolic",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_static_variant_can_be_observed_without_loading_its_payload",
+            ProofStatus::Proved,
+        ),
+        (
+            "an_opaque_pointer_option_tag_needs_no_pointer_payload",
+            ProofStatus::Proved,
+        ),
+        (
+            "sparse_signed_static_tags_have_only_declared_values",
+            ProofStatus::Proved,
+        ),
+        (
+            "an_initialized_single_static_variant_is_known",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_static_tag_keeps_one_copied_observation",
+            ProofStatus::Proved,
+        ),
+        (
+            "an_initialized_static_parent_has_an_observable_tag",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_static_variant_is_not_its_initializer",
+            ProofStatus::Refuted,
+        ),
+        (
+            "separate_static_variant_reads_need_not_agree",
+            ProofStatus::Refuted,
+        ),
+        (
+            "omitting_a_static_tag_from_the_domain_fails",
+            ProofStatus::Refuted,
+        ),
+        (
+            "a_typed_static_store_does_not_freeze_the_variant",
+            ProofStatus::Refuted,
+        ),
+        (
+            "a_static_variant_does_not_allow_payload_reads",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_single_static_variant_still_requires_initialization",
+            ProofStatus::Unknown,
+        ),
+        (
+            "uninitialized_static_enum_tags_are_unknown",
+            ProofStatus::Unknown,
+        ),
+        (
+            "unrelated_equal_size_storage_does_not_certify_an_enum_tag",
+            ProofStatus::Unknown,
+        ),
+        (
+            "noncopy_static_variants_need_initialization_effects",
+            ProofStatus::Unknown,
+        ),
+        (
+            "dropping_a_static_parent_cannot_leave_initialized_tags",
+            ProofStatus::Unknown,
+        ),
+    ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
-        let report = verify(
+        for optimized in [false, true] {
+            let report = verify(&fixture(), &entries, target, optimized, None);
+            for (name, expected) in entries {
+                if expected != ProofStatus::Refuted {
+                    continue;
+                }
+                let proof = report
+                    .functions
+                    .iter()
+                    .find(|function| function.name == name)
+                    .unwrap()
+                    .proof
+                    .as_ref()
+                    .unwrap();
+                assert!(
+                    proof.obligations.iter().any(|obligation| {
+                        obligation.status == ProofStatus::Refuted
+                            && obligation
+                                .abstraction_reasons
+                                .iter()
+                                .any(|reason| reason == abstraction)
+                    }),
+                    "{name}: {:?}",
+                    proof.obligations
+                );
+                assert!(
+                    proof
+                        .obligations
+                        .iter()
+                        .all(|obligation| obligation.replay.is_none())
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn startup_does_not_assume_nonatomic_static_variants_are_unchanged() {
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        let report = verify_mode(
             &fixture(),
             &[(
-                "opaque_static_variants_need_runtime_storage",
-                ProofStatus::Unknown,
+                "a_static_variant_is_not_its_initializer",
+                ProofStatus::Refuted,
             )],
             target,
             false,
             None,
+            true,
         );
         let proof = report
             .functions
             .iter()
-            .find(|function| function.name == "opaque_static_variants_need_runtime_storage")
+            .find(|function| function.name == "a_static_variant_is_not_its_initializer")
             .unwrap()
             .proof
             .as_ref()
             .unwrap();
-        assert!(proof.obligations.iter().any(|obligation| {
-            obligation.detail.contains("Option<u32>")
-                && obligation.detail.contains("need a state model")
-                && obligation
-                    .detail
-                    .contains("initializer is not runtime state")
-        }));
+        assert_eq!(proof.entry_assumptions.len(), 2);
+        assert!(
+            proof
+                .obligations
+                .iter()
+                .any(|obligation| { !obligation.abstraction_reasons.is_empty() })
+        );
+    }
+}
+
+#[test]
+fn static_discriminant_effect_boundaries_keep_their_epoch_checks() {
+    let mut specification = serde_json::json!({"schema_version":1,"functions":[{
+        "function":"static_views::boundary", "trusted":true,"no_panic":true,
+        "reason":"Explicit boundary for discriminant invalidation testing"
+    }]});
+    for (framed, expected) in [
+        (false, ProofStatus::Unknown),
+        (true, ProofStatus::ProvedWithAssumptions),
+    ] {
+        if framed {
+            specification["functions"][0]["modifies"] = serde_json::json!([]);
+        }
+        for target in [None, Some("thumbv7em-none-eabihf")] {
+            verify(
+                &fixture(),
+                &[("static_tags_are_invalidated_by_unknown_effects", expected)],
+                target,
+                false,
+                Some(specification.clone()),
+            );
+        }
+    }
+}
+
+#[test]
+fn changing_a_declared_static_variant_breaks_the_allowed_tag_claim() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let original = "Hot = 32760,";
+    assert!(source.contains(original));
+    let directory = Directory::new();
+    let path = directory.0.join("mutant.rs");
+    std::fs::write(&path, source.replace(original, "Hot = 32759,")).unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(
+                &path,
+                &[(
+                    "sparse_signed_static_tags_have_only_declared_values",
+                    ProofStatus::Refuted,
+                )],
+                target,
+                optimized,
+                None,
+            );
+        }
+    }
+    assert!(!native_tests(&path, &directory));
+}
+
+#[test]
+fn static_retirement_and_exact_reinitialization_preserve_branch_and_subobject_boundaries() {
+    let entries = [
+        (
+            "a_matching_store_restores_an_observable_static_tag",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_whole_store_restores_a_retired_static_parent",
+            ProofStatus::Proved,
+        ),
+        (
+            "branch_stores_restore_only_their_own_initialization",
+            ProofStatus::Proved,
+        ),
+        (
+            "a_restored_static_tag_still_has_no_retained_value",
+            ProofStatus::Refuted,
+        ),
+        (
+            "a_retired_static_tag_cannot_be_observed",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_static_subobject_cannot_be_dropped_twice",
+            ProofStatus::Unknown,
+        ),
+        (
+            "an_old_static_reference_cannot_escape_after_retirement",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_partial_store_does_not_restore_a_retired_static_parent",
+            ProofStatus::Unknown,
+        ),
+        (
+            "retired_static_fields_cannot_be_observed",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_different_branch_cannot_restore_initialization",
+            ProofStatus::Unknown,
+        ),
+        (
+            "a_single_variant_shortcut_cannot_bypass_retirement",
+            ProofStatus::Unknown,
+        ),
+        (
+            "zero_sized_static_retirement_needs_typed_paths",
+            ProofStatus::Unknown,
+        ),
+    ];
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(&fixture(), &entries, target, optimized, None);
+            for startup in [false, true] {
+                verify_mode(
+                    &fixture(),
+                    &[
+                        (
+                            "old_atomic_references_respect_retirement",
+                            ProofStatus::Unknown,
+                        ),
+                        (
+                            "fresh_atomic_references_respect_retirement",
+                            ProofStatus::Unknown,
+                        ),
+                    ],
+                    target,
+                    optimized,
+                    None,
+                    startup,
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn removing_a_matching_store_leaves_static_initialization_unknown() {
+    let source = std::fs::read_to_string(fixture()).unwrap();
+    let directory = Directory::new();
+    let path = directory.0.join("mutant.rs");
+    let original = "set_optional_value(pointer, Some(6));";
+    assert!(source.contains(original));
+    std::fs::write(&path, source.replace(original, "")).unwrap();
+    for target in [None, Some("thumbv7em-none-eabihf")] {
+        for optimized in [false, true] {
+            verify(
+                &path,
+                &[(
+                    "a_matching_store_restores_an_observable_static_tag",
+                    ProofStatus::Unknown,
+                )],
+                target,
+                optimized,
+                None,
+            );
+        }
     }
 }

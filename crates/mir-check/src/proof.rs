@@ -1237,6 +1237,15 @@ impl<'tcx> Engine<'tcx> {
                 }
                 TerminatorKind::Drop { place, target, .. } => {
                     let ty = place.ty(&body.local_decls, self.tcx).ty;
+                    let dropped = self.place(&state, *place);
+                    if !place.projection.is_empty() && dropped.is_err() {
+                        dropped?;
+                    } else if let Ok(value) = dropped
+                        && self.drop_static_place(&value, ty, &mut state)?
+                    {
+                        queue.push_back((*target, state));
+                        continue;
+                    }
                     if ty.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
                         && !self.is_owned_no_drop_iterator(ty)
                     {
@@ -1491,6 +1500,12 @@ impl<'tcx> Engine<'tcx> {
         match operand {
             Operand::Copy(place) | Operand::Move(place) => {
                 let value = self.place(state, *place)?;
+                if matches!(operand, Operand::Move(_))
+                    && matches!(value, Value::StaticView { .. })
+                    && self.static_place_view(&value, state)?
+                {
+                    return Err("static payload moves need subobject initialization effects".into());
+                }
                 if matches!(value, Value::DebugReference { place: true, .. }) {
                     return Err("opaque Debug payload reads remain unsupported".into());
                 }
@@ -1590,7 +1605,19 @@ impl<'tcx> Engine<'tcx> {
                     .integer_type(value.ty(&body.local_decls, self.tcx))
                     .ok_or("unsupported discriminant type")?;
                 let ty = place.ty(&body.local_decls, self.tcx).ty;
-                if let ty::Adt(def, _) = ty.kind()
+                let modeled = self.place(state, *place);
+                if let Ok(modeled) = &modeled
+                    && let Some(tag) =
+                        self.static_discriminant_snapshot(modeled, ty, state, bits, signed)?
+                {
+                    return Ok(tag);
+                }
+                // rustc can omit an owned local whose tag needs no storage read.
+                let elided_local = place.projection.is_empty()
+                    && state.locals[place.local.as_usize()].is_none()
+                    && state.addresses[place.local.as_usize()].is_none();
+                if (modeled.is_ok() || elided_local)
+                    && let ty::Adt(def, _) = ty.kind()
                     && def.is_enum()
                     && let Ok(layout) = self
                         .tcx
@@ -1605,8 +1632,7 @@ impl<'tcx> Engine<'tcx> {
                         signed,
                     ));
                 }
-                let modeled = self.place(state, *place)?;
-                let modeled = self.static_view_operand(modeled, state)?;
+                let modeled = self.static_view_operand(modeled?, state)?;
                 match modeled {
                     Value::Adt { discriminant, .. } => {
                         Ok(symbolic::integer(&self.terms, discriminant, bits, signed))

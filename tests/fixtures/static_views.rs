@@ -711,6 +711,398 @@ fn share_optional_word(pointer: *mut Option<u32>) -> &'static Option<u32> {
     mir! { { RET = &*pointer; Return() } }
 }
 
-pub fn opaque_static_variants_need_runtime_storage() -> bool {
+pub fn opaque_static_variant_reads_are_symbolic() -> bool {
     share_optional_word(OPTIONAL_WORD.get()).is_none()
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn optional_word_tag(pointer: *mut Option<u32>) -> isize {
+    mir! { { RET = Discriminant(*pointer); Return() } }
+}
+
+pub fn a_static_variant_can_be_observed_without_loading_its_payload() -> bool {
+    share_optional_word(OPTIONAL_WORD.get()).is_none()
+}
+
+pub fn a_static_variant_is_not_its_initializer() {
+    assert!(share_optional_word(OPTIONAL_WORD.get()).is_none());
+}
+
+pub fn separate_static_variant_reads_need_not_agree() {
+    let first = optional_word_tag(OPTIONAL_WORD.get());
+    let second = optional_word_tag(OPTIONAL_WORD.get());
+    assert!(first == second);
+}
+
+pub fn a_static_variant_does_not_allow_payload_reads() -> u32 {
+    match share_optional_word(OPTIONAL_WORD.get()) {
+        Some(value) => *value,
+        None => 0,
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(i16)]
+enum SparseTag {
+    Cold = -9,
+    Warm = 41,
+    Hot = 32760,
+}
+
+static SPARSE_TAG: SyncUnsafeCell<SparseTag> = SyncUnsafeCell::new(SparseTag::Cold);
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn sparse_tag(pointer: *mut SparseTag) -> i16 {
+    mir! { { RET = Discriminant(*pointer); Return() } }
+}
+
+pub fn sparse_signed_static_tags_have_only_declared_values() {
+    let tag = sparse_tag(SPARSE_TAG.get());
+    assert!(tag == -9 || tag == 41 || tag == 32760);
+}
+
+pub fn omitting_a_static_tag_from_the_domain_fails() {
+    let tag = sparse_tag(SPARSE_TAG.get());
+    assert!(tag == -9 || tag == 41);
+}
+
+#[derive(Clone, Copy)]
+enum OneTag {
+    Only(u32),
+}
+
+static ONE_TAG: SyncUnsafeCell<OneTag> = SyncUnsafeCell::new(OneTag::Only(3));
+static UNINIT_TAG: SyncUnsafeCell<MaybeUninit<OneTag>> =
+    SyncUnsafeCell::new(MaybeUninit::uninit());
+static UNINIT_OPTION: SyncUnsafeCell<MaybeUninit<Option<u32>>> =
+    SyncUnsafeCell::new(MaybeUninit::uninit());
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn one_tag(pointer: *mut OneTag) -> isize {
+    mir! { { RET = Discriminant(*pointer); Return() } }
+}
+
+pub fn a_single_static_variant_still_requires_initialization() -> isize {
+    one_tag(UNINIT_TAG.get().cast())
+}
+
+pub fn an_initialized_single_static_variant_is_known() {
+    assert!(one_tag(ONE_TAG.get()) == 0);
+}
+
+pub fn uninitialized_static_enum_tags_are_unknown() -> isize {
+    optional_word_tag(UNINIT_OPTION.get().cast())
+}
+
+pub fn a_typed_static_store_does_not_freeze_the_variant() {
+    let pointer = OPTIONAL_WORD.get();
+    set_optional_word(pointer);
+    assert!(optional_word_tag(pointer) == 1);
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn set_optional_word(pointer: *mut Option<u32>) {
+    mir! { { *pointer = Some(4); Return() } }
+}
+
+pub fn noncopy_static_variants_need_initialization_effects() -> isize {
+    noncopy_tag(NONCOPY_TAG.get())
+}
+
+enum NonCopyTag {
+    Empty,
+    Data(u32),
+}
+
+static NONCOPY_TAG: SyncUnsafeCell<NonCopyTag> = SyncUnsafeCell::new(NonCopyTag::Empty);
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn noncopy_tag(pointer: *mut NonCopyTag) -> isize {
+    mir! { { RET = Discriminant(*pointer); Return() } }
+}
+
+#[cfg(test)]
+#[test]
+fn valid_static_discriminants_replay_for_every_declared_variant() {
+    for value in [SparseTag::Cold, SparseTag::Warm, SparseTag::Hot] {
+        set_sparse_tag(SPARSE_TAG.get(), value);
+        sparse_signed_static_tags_have_only_declared_values();
+    }
+    for value in [None, Some(11)] {
+        set_optional_value(OPTIONAL_WORD.get(), value);
+        assert_eq!(a_static_variant_can_be_observed_without_loading_its_payload(), value.is_none());
+    }
+    an_initialized_single_static_variant_is_known();
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn set_sparse_tag(pointer: *mut SparseTag, value: SparseTag) {
+    mir! { { *pointer = value; Return() } }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn set_optional_value(pointer: *mut Option<u32>, value: Option<u32>) {
+    mir! { { *pointer = value; Return() } }
+}
+
+type PointerOption = Option<core::ptr::NonNull<[u8; 8]>>;
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+const fn erase_pointer_option(
+    value: PointerOption,
+) -> SyncUnsafeCell<[MaybeUninit<usize>; 1]> {
+    mir! { { RET = CastTransmute(Move(value)); Return() } }
+}
+
+static OPTIONAL_POINTER: SyncUnsafeCell<[MaybeUninit<usize>; 1]> = erase_pointer_option(None);
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn share_optional_pointer(
+    pointer: *mut Option<core::ptr::NonNull<[u8; 8]>>,
+) -> &'static Option<core::ptr::NonNull<[u8; 8]>> {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+pub fn an_opaque_pointer_option_tag_needs_no_pointer_payload() -> bool {
+    share_optional_pointer(OPTIONAL_POINTER.get().cast()).is_none()
+}
+
+pub fn a_static_tag_keeps_one_copied_observation() {
+    let tag = sparse_tag(SPARSE_TAG.get());
+    let copy = tag;
+    assert!(tag == copy);
+}
+
+pub fn static_tags_are_invalidated_by_unknown_effects() -> isize {
+    let pointer = OPTIONAL_WORD.get();
+    boundary();
+    optional_word_tag(pointer)
+}
+
+struct TagWrapper {
+    tag: SparseTag,
+}
+
+impl Drop for TagWrapper {
+    fn drop(&mut self) {}
+}
+
+static DROP_WRAPPER: SyncUnsafeCell<TagWrapper> =
+    SyncUnsafeCell::new(TagWrapper { tag: SparseTag::Cold });
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn drop_static_wrapper(pointer: *mut TagWrapper) {
+    mir! {
+        { Drop(*pointer, ReturnTo(done), UnwindUnreachable()) }
+        done = { Return() }
+    }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn wrapper_tag(pointer: *mut TagWrapper) -> i16 {
+    mir! { { RET = Discriminant((*pointer).tag); Return() } }
+}
+
+pub fn dropping_a_static_parent_cannot_leave_initialized_tags() -> i16 {
+    let pointer = DROP_WRAPPER.get();
+    drop_static_wrapper(pointer);
+    wrapper_tag(pointer)
+}
+
+pub fn an_initialized_static_parent_has_an_observable_tag() {
+    let tag = wrapper_tag(DROP_WRAPPER.get());
+    assert!(tag == -9 || tag == 41 || tag == 32760);
+}
+
+
+pub fn unrelated_equal_size_storage_does_not_certify_an_enum_tag() -> isize {
+    one_tag(BYTE_WORD.get().cast())
+}
+
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn retire_optional_word(pointer: *mut Option<u32>) {
+    mir! {
+        { Drop(*pointer, ReturnTo(done), UnwindUnreachable()) }
+        done = { Return() }
+    }
+}
+
+pub fn a_matching_store_restores_an_observable_static_tag() {
+    let pointer = OPTIONAL_WORD.get();
+    retire_optional_word(pointer);
+    set_optional_value(pointer, Some(6));
+    let tag = optional_word_tag(pointer);
+    assert!(tag == 0 || tag == 1);
+}
+
+pub fn a_restored_static_tag_still_has_no_retained_value() {
+    let pointer = OPTIONAL_WORD.get();
+    retire_optional_word(pointer);
+    set_optional_value(pointer, Some(6));
+    assert!(optional_word_tag(pointer) == 1);
+}
+
+pub fn a_retired_static_tag_cannot_be_observed() -> isize {
+    let pointer = OPTIONAL_WORD.get();
+    retire_optional_word(pointer);
+    optional_word_tag(pointer)
+}
+
+pub fn a_static_subobject_cannot_be_dropped_twice() {
+    let pointer = OPTIONAL_WORD.get();
+    retire_optional_word(pointer);
+    retire_optional_word(pointer);
+}
+
+pub fn an_old_static_reference_cannot_escape_after_retirement() -> &'static Option<u32> {
+    let pointer = OPTIONAL_WORD.get();
+    let reference = share_optional_word(pointer);
+    retire_optional_word(pointer);
+    reference
+}
+
+#[derive(Clone, Copy)]
+struct TagPair {
+    tag: SparseTag,
+    mirror: u32,
+}
+
+static TAG_PAIR: SyncUnsafeCell<TagPair> =
+    SyncUnsafeCell::new(TagPair { tag: SparseTag::Cold, mirror: 0 });
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn retire_tag_pair(pointer: *mut TagPair) {
+    mir! {
+        { Drop(*pointer, ReturnTo(done), UnwindUnreachable()) }
+        done = { Return() }
+    }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn tag_pair_tag(pointer: *mut TagPair) -> i16 {
+    mir! { { RET = Discriminant((*pointer).tag); Return() } }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn replace_tag_pair(pointer: *mut TagPair, value: TagPair) {
+    mir! { { *pointer = value; Return() } }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn replace_pair_tag(pointer: *mut TagPair, value: SparseTag) {
+    mir! { { (*pointer).tag = value; Return() } }
+}
+
+pub fn a_partial_store_does_not_restore_a_retired_static_parent() -> i16 {
+    let pointer = TAG_PAIR.get();
+    retire_tag_pair(pointer);
+    replace_pair_tag(pointer, SparseTag::Warm);
+    tag_pair_tag(pointer)
+}
+
+pub fn a_whole_store_restores_a_retired_static_parent() {
+    let pointer = TAG_PAIR.get();
+    retire_tag_pair(pointer);
+    replace_tag_pair(pointer, TagPair { tag: SparseTag::Warm, mirror: 4 });
+    let tag = tag_pair_tag(pointer);
+    assert!(tag == -9 || tag == 41 || tag == 32760);
+}
+
+pub fn retired_static_fields_cannot_be_observed() -> i16 {
+    let pointer = TAG_PAIR.get();
+    retire_tag_pair(pointer);
+    tag_pair_tag(pointer)
+}
+
+pub fn branch_stores_restore_only_their_own_initialization(replace: bool) {
+    let pointer = OPTIONAL_WORD.get();
+    if replace {
+        retire_optional_word(pointer);
+        set_optional_value(pointer, Some(6));
+    }
+    let tag = optional_word_tag(pointer);
+    assert!(tag == 0 || tag == 1);
+}
+
+pub fn a_different_branch_cannot_restore_initialization(retire: bool) -> isize {
+    let pointer = OPTIONAL_WORD.get();
+    if retire {
+        retire_optional_word(pointer);
+    } else {
+        set_optional_value(pointer, Some(6));
+    }
+    optional_word_tag(pointer)
+}
+
+static RETIRABLE_ATOMIC: SyncUnsafeCell<AtomicU32> = SyncUnsafeCell::new(AtomicU32::new(1));
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn atomic_reference(pointer: *mut AtomicU32) -> &'static AtomicU32 {
+    mir! { { RET = &*pointer; Return() } }
+}
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn retire_atomic(pointer: *mut AtomicU32) {
+    mir! {
+        { Drop(*pointer, ReturnTo(done), UnwindUnreachable()) }
+        done = { Return() }
+    }
+}
+
+pub fn old_atomic_references_respect_retirement() -> u32 {
+    let pointer = RETIRABLE_ATOMIC.get();
+    let reference = atomic_reference(pointer);
+    retire_atomic(pointer);
+    reference.load(Ordering::Relaxed)
+}
+
+pub fn fresh_atomic_references_respect_retirement() -> u32 {
+    let pointer = RETIRABLE_ATOMIC.get();
+    retire_atomic(pointer);
+    atomic_reference(RETIRABLE_ATOMIC.get()).load(Ordering::Relaxed)
+}
+
+#[cfg(test)]
+#[test]
+fn matching_static_stores_reinitialize_native_values() {
+    a_matching_store_restores_an_observable_static_tag();
+    a_whole_store_restores_a_retired_static_parent();
+    for replace in [false, true] {
+        branch_stores_restore_only_their_own_initialization(replace);
+    }
+}
+
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn retire_one_tag(pointer: *mut OneTag) {
+    mir! {
+        { Drop(*pointer, ReturnTo(done), UnwindUnreachable()) }
+        done = { Return() }
+    }
+}
+
+pub fn a_single_variant_shortcut_cannot_bypass_retirement() -> isize {
+    let pointer = ONE_TAG.get();
+    retire_one_tag(pointer);
+    one_tag(pointer)
+}
+
+#[derive(Clone, Copy)]
+enum ZeroTag {
+    Only,
+}
+
+static ZERO_TAG: SyncUnsafeCell<ZeroTag> = SyncUnsafeCell::new(ZeroTag::Only);
+
+#[custom_mir(dialect = "runtime", phase = "optimized")]
+fn retire_zero_tag(pointer: *mut ZeroTag) {
+    mir! {
+        { Drop(*pointer, ReturnTo(done), UnwindUnreachable()) }
+        done = { Return() }
+    }
+}
+
+pub fn zero_sized_static_retirement_needs_typed_paths() {
+    retire_zero_tag(ZERO_TAG.get());
 }

@@ -371,3 +371,14 @@ fn opaque_static_state_points_to_storage_support_instead_of_a_larger_budget() {
         assert!(!display.contains("Try --max-"));
     }
 }
+
+#[test]
+fn retired_static_storage_guidance_points_to_initialization_transitions() {
+    let report = report(
+        ProofStatus::Unknown,
+        "static payload Tag overlaps retired uninitialized storage Parent",
+    );
+    let display = cli::render_report(&report, false, false);
+    assert!(display.contains("Check the named drop and matching typed store"));
+    assert!(display.contains("partial stores do not restore a whole subobject"));
+}

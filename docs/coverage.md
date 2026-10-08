@@ -484,6 +484,18 @@ including side effects and short circuiting. Mutable opaque element storage and 
 composite indices remain UNKNOWN. Address checks use symbolic non-null aligned bases without
 enabling arbitrary memory access.
 
+Certified initialized static `Copy + Freeze` enum places support discriminant-only reads. Each read
+is a fresh logical tag constrained to compiler-declared variants, including signed sparse tags and
+pointer-bearing option tags. One saved observation stays consistent; separate storage reads need
+not agree. Exact typed stores preserve legal tag shape without retaining a variant. No non-atomic
+initializer value is assumed under `--startup`. Tag-dependent counterexamples report the abstraction
+and remain runtime unconfirmed. Host/ARM debug and optimized fixtures check legal domains, separate
+reads, payload-read barriers, invalidated epochs, unrelated casts, noncopy tags and static
+destructors.
+A declared-variant mutation fails symbolic checking and native replay. Uninitialized single-variant
+static tags are UNKNOWN, with validation before the constant-tag shortcut. Rustc-elided owned locals
+can still use their compiler-known constant tag without performing a storage read.
+
 Compiler-identified fence/compiler_fence wrappers validate non-Relaxed Ordering arguments before
 executing actual MIR. Their intrinsic boundaries validate constant ordering enums and preserve
 tracked local storage. Both compiler and hardware fences add no synchronization facts: atomic
@@ -532,3 +544,10 @@ host/ARM debug and optimized builds, constructor-guard mutations, native replay 
 rejection. A panic-helper counterexample remains a translated obligation rather than an automatic
 replay-confirmed failure; arbitrary atomic states can make otherwise unobserved error paths
 feasible.
+
+Static no-destructor drop fixtures check retirement before tag reads, old reference and atomic use,
+and a second drop. Exact typed stores restore initialization; partial parent stores and writes in
+another branch cannot restore it. Removing a required store changes the proof to UNKNOWN on host
+and ARM in both optimization modes. Supported native cases restore storage before observing it.
+Static destructors, zero-sized retirements and static payload moves remain unsupported. General
+partial initialization and exact mutable-static payload histories are still separate work.

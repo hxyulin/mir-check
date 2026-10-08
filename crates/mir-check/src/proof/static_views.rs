@@ -2,6 +2,8 @@ use super::*;
 use rustc_const_eval::const_eval::mk_eval_cx_for_const_val;
 use rustc_middle::mir::interpret::GlobalAlloc;
 
+mod initialization;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ViewKind {
     Reference { mutable: bool },
@@ -30,9 +32,7 @@ impl<'tcx> Engine<'tcx> {
         let ty::Ref(_, pointee, mutability) = constant.ty().kind() else {
             return Ok(None);
         };
-        if mutability.is_mut()
-            || pointee.is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized())
-            || (!self.startup && self.atomic_container(*pointee, 0).is_some())
+        if mutability.is_mut() || pointee.is_freeze(self.tcx, ty::TypingEnv::fully_monomorphized())
         {
             return Ok(None);
         }
@@ -51,6 +51,9 @@ impl<'tcx> Engine<'tcx> {
             .provenance
             .ok_or("static view needs allocation provenance")?;
         let GlobalAlloc::Static(static_id) = self.tcx.global_alloc(provenance.alloc_id()) else {
+            if !self.startup && self.atomic_container(*pointee, 0).is_some() {
+                return Ok(None);
+            }
             return Err(
                 "interior mutable constant view needs an ordinary static allocation".into(),
             );
@@ -250,14 +253,17 @@ impl<'tcx> Engine<'tcx> {
         }
         if matches!(value, Value::StaticView { .. }) {
             let view = self.static_view(&value, state)?;
+            if view.kind != ViewKind::Raw {
+                self.require_static_initialization(view, state)?;
+            }
             if view.kind == ViewKind::Place {
                 if self.uninit_static_address(view)? {
                     return Err(
                         "uninitialized static payload reads need an initialization model".into(),
                     );
                 }
-                if let Some(atomic) = self.atomic_shape(view.ty) {
-                    return Ok(if self.startup { value } else { atomic });
+                if self.atomic_shape(view.ty).is_some() {
+                    return Ok(value);
                 }
                 return Err(format!(
                     "mutable static payload reads need a state model for {}; \
@@ -267,6 +273,71 @@ impl<'tcx> Engine<'tcx> {
             }
         }
         Ok(value)
+    }
+
+    pub(super) fn static_discriminant_snapshot(
+        &mut self,
+        value: &Value,
+        ty: Ty<'tcx>,
+        state: &mut State,
+        bits: u32,
+        signed: bool,
+    ) -> Result<Option<Value>, String> {
+        if !matches!(value, Value::StaticView { .. }) {
+            return Ok(None);
+        }
+        let view = self.static_view(value, state)?;
+        self.require_static_initialization(view, state)?;
+        if view.kind != ViewKind::Place || view.ty != ty {
+            return Err("static discriminant requires its exactly typed enum place".into());
+        }
+        if self.uninit_static_address(view)? || !self.certified_static_type(view)? {
+            return Err("static discriminant needs a certified initialized enum".into());
+        }
+        let ty::Adt(def, _) = ty.kind() else {
+            return Err("static discriminant requires a compiler enum".into());
+        };
+        if !def.is_enum() || def.variants().is_empty() || def.variants().len() > 64 {
+            return Err("static discriminant needs between 1 and 64 enum variants".into());
+        }
+        let env = ty::TypingEnv::fully_monomorphized();
+        if !ty.is_freeze(self.tcx, env) || !self.tcx.type_is_copy_modulo_regions(env, ty) {
+            return Err(format!(
+                "static discriminant for {ty} needs Copy and Freeze; \
+                noncopy storage needs initialization effects"
+            ));
+        }
+        if self.integer_type(ty.discriminant_ty(self.tcx)) != Some((bits, signed)) {
+            return Err("static discriminant integer type mismatch".into());
+        }
+        let tag = Value::Int {
+            expression: self.fresh_abstraction(
+                Sort::BitVec(bits),
+                "opaque initialized static enum reads allow fresh legal discriminants",
+            ),
+            bits,
+            signed,
+        };
+        let valid = def
+            .variants()
+            .indices()
+            .map(|index| {
+                symbolic::binary(
+                    &self.terms,
+                    "eq",
+                    tag.clone(),
+                    symbolic::integer(
+                        &self.terms,
+                        def.discriminant_for_variant(self.tcx, index).val,
+                        bits,
+                        signed,
+                    ),
+                )?
+                .boolean()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        state.conditions.push(self.terms.apply(Op::Or, &valid)?);
+        Ok(Some(tag))
     }
 
     pub(super) fn static_non_null_transmute(
@@ -347,6 +418,9 @@ impl<'tcx> Engine<'tcx> {
         state: &State,
     ) -> Result<(), String> {
         let view = self.static_view(value, state)?;
+        if matches!(ty.kind(), ty::Ref(..)) {
+            self.require_static_initialization(view, state)?;
+        }
         let compatible = match ty.kind() {
             ty::Ref(_, pointee, mutability) => {
                 !mutability.is_mut()
@@ -387,6 +461,7 @@ impl<'tcx> Engine<'tcx> {
                 }
                 self.static_store_value(view.ty, value, state, 0, &mut 0)?;
                 self.retain_static_store_references(value, state)?;
+                self.reinitialize_static_place(view, state);
                 state.memory.invalidate_startup();
                 // Shared payload reads stay opaque; this store supplies no value/history facts.
                 return Ok(true);
@@ -684,17 +759,12 @@ impl<'tcx> Engine<'tcx> {
                 "static borrowing requires a typed place with the requested capability".into(),
             );
         }
+        self.require_static_initialization(view, state)?;
         if self.uninit_static_address(view)? {
             if mutable || !self.is_static_unsafe_cell(view.ty) {
                 return Err("uninitialized static payload borrowing remains unsupported".into());
             }
         } else {
-            if !mutable
-                && !self.startup
-                && let Some(atomic) = self.atomic_shape(view.ty)
-            {
-                return Ok(atomic);
-            }
             if !self.certified_static_type(view)? {
                 return Err(
                     "static reinterpretation does not restore a certified storage type".into(),
@@ -715,6 +785,7 @@ impl<'tcx> Engine<'tcx> {
         state: &State,
     ) -> Result<Value, String> {
         let view = self.static_view(value, state)?;
+        self.require_static_initialization(view, state)?;
         let ty::Array(element, _) = view.ty.kind() else {
             return Err("static slice views require a certified fixed array".into());
         };
@@ -856,6 +927,9 @@ impl<'tcx> Engine<'tcx> {
         } else {
             ViewKind::Raw
         };
+        if name == "get" {
+            self.require_static_initialization(view, state)?;
+        }
         if view.kind != expected || view.ty != receiver {
             return Err("UnsafeCell static receiver type mismatch".into());
         }
@@ -948,7 +1022,7 @@ impl<'tcx> Engine<'tcx> {
 }
 
 impl Engine<'_> {
-    pub(super) fn startup_atomic_location(
+    pub(super) fn static_atomic_location(
         &self,
         value: &Value,
         state: &State,
@@ -956,19 +1030,19 @@ impl Engine<'_> {
         signed: bool,
     ) -> Result<startup_memory::StaticAtomicLocation, String> {
         let view = self.static_view(value, state)?;
-        if !self.startup
-            || view.kind != (ViewKind::Reference { mutable: false })
+        self.require_static_initialization(view, state)?;
+        if view.kind != (ViewKind::Reference { mutable: false })
             || !self.certified_static_type(view)?
             || !matches!(self.atomic_shape(view.ty), Some(Value::Atomic { bits: b, signed: s })
                 if (bits, signed) == (b, s))
         {
             return Err(
-                "startup atomic history requires a certified shared integer atomic view".into(),
+                "static atomic access requires a certified shared integer atomic view".into(),
             );
         }
         let layout = self.static_layout(view.ty)?;
         if layout.size.bits() != u64::from(bits) {
-            return Err("startup atomic history requires exactly sized scalar storage".into());
+            return Err("static atomic access requires exactly sized scalar storage".into());
         }
         Ok(startup_memory::StaticAtomicLocation {
             definition: view.static_id,
@@ -992,6 +1066,7 @@ impl<'tcx> Engine<'tcx> {
             );
         }
         let view = self.static_view(destination, state)?;
+        self.require_static_initialization(view, state)?;
         if view.kind != ViewKind::Raw
             || !view.writable
             || view.ty != ty

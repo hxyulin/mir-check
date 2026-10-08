@@ -220,3 +220,51 @@ copying cost without granting any new Rust aliasing or initialization permission
 Startup atomic maps and their invalidation latch remain independently cloned. Invalidating one
 branch cannot invalidate another branch or restore an initializer in an already invalidated branch.
 The first mutable access still copies the entire vector; this is not persistent per-slot storage.
+
+## Opaque initialized enum tags
+
+An actual MIR discriminant read can observe a certified initialized static enum without reading
+its payload. The current admission rule requires an exact enum place, a live epoch, its compiler
+initialization certificate, and compiler-confirmed `Copy + Freeze`. It accepts at most 64 variants.
+Every read creates a new symbolic tag constrained to rustc's declared discriminants, including
+sparse and signed values. Allowing every declared variant is conservative even when some payloads
+are uninhabited. The tag neither comes from the initializer nor persists across storage reads.
+
+Saving that tag in an ordinary local preserves one observation. Reading the storage twice supplies
+two independent observations, even under `--startup`. An exact typed enum store preserves legal
+tag shape but supplies no retained value or noninterference fact. Pointer-bearing tags need no
+pointer value or provenance because their payloads remain unreadable. Counterexamples involving
+such observations carry an abstraction reason; a solver model alone is not a native panic replay.
+
+The existing type certificate excludes MaybeUninit payloads and unrelated equal-size casts. Epoch
+checks reject reads after unknown effects. Initialization validation precedes the compiler's
+single-variant shortcut, preventing a constant tag from bypassing those checks. Whole static
+moves and copies, static downcasts and payload fields remain unsupported. Static destructors remain
+UNKNOWN. A copyable tag field inside a noncopy parent cannot obtain readable initialization evidence
+after dropping that parent.
+
+These observations increase coverage without retaining mutable static payloads. Exact histories
+still need explicit initialization transitions and an independently justified visibility policy.
+
+## Bounded static retirement transitions
+
+A compiler-confirmed no-destructor drop of a writable, initialized, nonempty static subobject adds
+a branch-local retirement marker. Its shape is an interned static descriptor owned by the engine;
+comparisons use compiler allocation identity, normalized type and offset rather than descriptor
+number. Initialization-consuming operations reject overlapping retired subobjects, including
+single-variant tags, borrows, old references, stored references, slices and atomic receivers.
+Static atomic constants preserve their descriptors so a fresh reference cannot lose that identity.
+Zero-sized accesses cannot establish disjointness by byte offsets alone.
+
+An ordinary typed store validates its value and retains reference-escape evidence before clearing
+an exact matching retirement. Writes to a field of a retired parent do not restore the parent.
+Stores to a containing object do not clear unmatched child retirements in this bounded model.
+Raw addresses remain available to resolve a supported reinitialization destination; initialized
+borrowing is a separate operation. Retired array element destinations remain unsupported where
+projection requires constructing an initialized array view.
+
+Retirement invalidates precise startup atomic history. Reinitialization supplies neither payload
+values nor noninterference facts and cannot revive an epoch lost to unknown effects. Pending
+retirements have a 128-subobject limit. Static destructors, static payload moves and zero-sized
+retirements remain UNKNOWN until their typed initialization effects are implemented. This stage
+tracks missing static initialization, not general partial initialization or owned move semantics.

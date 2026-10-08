@@ -780,7 +780,8 @@ impl<'tcx> Engine<'tcx> {
         value: &Value,
         state: &State,
     ) -> Result<(), String> {
-        Self::validate_reference_graph(value, state, None, &mut Vec::new())
+        Self::validate_reference_graph(value, state, None, &mut Vec::new())?;
+        self.validate_static_initialization_graph(value, state, &mut Vec::new())
     }
 
     pub(super) fn validate_frame_escape(
@@ -792,6 +793,7 @@ impl<'tcx> Engine<'tcx> {
         self.return_value(value.clone(), state, incoming)?;
         for value in state.memory[..incoming].iter().flatten() {
             Self::validate_reference_graph(value, state, Some(incoming), &mut Vec::new())?;
+            self.validate_static_initialization_graph(value, state, &mut Vec::new())?;
         }
         Ok(())
     }
@@ -876,6 +878,12 @@ impl<'tcx> Engine<'tcx> {
         state: &State,
         incoming: usize,
     ) -> Result<Value, String> {
+        if matches!(
+            value,
+            Value::Reference { .. } | Value::TrackedPointer { .. } | Value::DebugReference { .. }
+        ) {
+            self.validate_static_initialization_graph(&value, state, &mut Vec::new())?;
+        }
         match value {
             Value::StaticSlice { .. } => {
                 self.validate_tracked_value(&value, state)?;
