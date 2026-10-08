@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use core::cell::Cell;
-use mir_contracts::requires;
+use miren_contracts::requires;
 
 #[requires(offset < 100)]
 pub fn station_labels(offset: u16) {
@@ -301,7 +301,8 @@ pub fn nested_borrowed_elements() {
     let mut pending = [Some(BorrowedParcel {
         weight_g: &mut weight_g,
         label: &label,
-    })].into_iter();
+    })]
+    .into_iter();
     let parcel = pending.next().unwrap().unwrap();
     *parcel.weight_g = *parcel.label;
     assert!(pending.next().is_none());
@@ -309,7 +310,10 @@ pub fn nested_borrowed_elements() {
     assert!(weight_g == 42);
 }
 
-fn move_pending<'a>(left: &'a mut u16, right: &'a mut u16) -> core::array::IntoIter<&'a mut u16, 2> {
+fn move_pending<'a>(
+    left: &'a mut u16,
+    right: &'a mut u16,
+) -> core::array::IntoIter<&'a mut u16, 2> {
     [left, right].into_iter()
 }
 
@@ -348,7 +352,9 @@ pub fn borrowed_callback_panic() {
 
 pub fn borrowed_bad_bound() {
     let labels = [3_u16, 12];
-    [&labels[0], &labels[1]].into_iter().all(|label| small(*label));
+    [&labels[0], &labels[1]]
+        .into_iter()
+        .all(|label| small(*label));
 }
 
 pub fn borrowed_wrong_order() {
@@ -478,5 +484,4 @@ mod tests {
             assert!(std::panic::catch_unwind(check).is_err());
         }
     }
-
 }

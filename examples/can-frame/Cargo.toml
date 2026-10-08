@@ -1,11 +1,11 @@
 [package]
-name = "mir-check-can-frame"
+name = "miren-can-frame"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-mir-contracts = { path = "../../crates/mir-contracts" }
+miren-contracts = { path = "../../crates/miren-contracts" }
 
 [workspace]

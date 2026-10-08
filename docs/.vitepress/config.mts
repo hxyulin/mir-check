@@ -1,11 +1,11 @@
 import { defineConfig } from 'vitepress';
 
-const base = '/mir-check/';
-const repository = 'https://github.com/hxyulin/mir-check';
+const base = '/miren/';
+const repository = 'https://github.com/hxyulin/miren';
 
 export default defineConfig({
-  title: 'mir-check',
-  description: 'Panic freedom and function contracts, checked from Rust MIR.',
+  title: 'miren',
+  description: 'Panic freedom and contracts, verified from Rust MIR.',
   base,
   cleanUrls: false,
   lastUpdated: true,
@@ -23,7 +23,7 @@ export default defineConfig({
     ],
     sidebar: [
       {
-        text: 'Use mir-check',
+        text: 'Use miren',
         items: [
           { text: 'Install and run', link: '/usage' },
           { text: 'Declare contracts', link: '/contracts' },

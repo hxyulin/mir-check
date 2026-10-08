@@ -12,12 +12,12 @@ checks panic freedom, exact 18-byte acceptance, switch bounds and five decoded c
 The analyzer follows the actual closures, core Result/Option bodies and question-mark paths.
 
 ```sh
-target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
+target/debug/miren --manifest-path examples/dr16/Cargo.toml
 ```
 
 Bad byte-index and channel-mask mutations are refuted. Independent decoding formulas cover
 4,608 runtime frames. Read the
-[fixture and provenance](https://github.com/hxyulin/mir-check/tree/main/examples/dr16).
+[fixture and provenance](https://github.com/hxyulin/miren/tree/main/examples/dr16).
 
 ## CAN frames and bus configuration
 
@@ -26,7 +26,7 @@ proofs use explicit capacity preconditions. Two payload round-trip harnesses che
 at the actual call and preserve every accepted input byte.
 
 ```sh
-target/debug/mir-check --entry Frame::new --entry Frame::data \
+target/debug/miren --entry Frame::new --entry Frame::data \
   --manifest-path examples/can-frame/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 ```
 
@@ -36,7 +36,7 @@ The arbitrary `&[Use]` entry remains unsupported. Full-crate verification intent
 because the fixture also contains negative harnesses and unsupported derived methods.
 
 Read the
-[fixture and provenance](https://github.com/hxyulin/mir-check/tree/main/examples/can-frame).
+[fixture and provenance](https://github.com/hxyulin/miren/tree/main/examples/can-frame).
 
 ## Contracts and nested inputs
 
@@ -45,10 +45,10 @@ read callee's index precondition and returns Some exactly when the header is ena
 index is valid. Fields remain arbitrary symbolic inputs; there is no constructor invariant.
 
 ```sh
-target/debug/mir-check --entry guarded_packet_read \
+target/debug/miren --entry guarded_packet_read \
   --manifest-path examples/contracts/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 ```
 
 Changing `<` to `<=` in the guard permits an invalid call and fails verification. Read the
-[fixture](https://github.com/hxyulin/mir-check/tree/main/examples/contracts),
+[fixture](https://github.com/hxyulin/miren/tree/main/examples/contracts),
 [contract guide](contracts.md) and [coverage matrix](coverage.md).

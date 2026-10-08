@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 
 use core::cell::Cell;
-use mir_contracts::{ensures, requires};
+use miren_contracts::{ensures, requires};
 
 #[requires(start < 65000)]
 #[ensures(result[0] == start && result[3] > start)]

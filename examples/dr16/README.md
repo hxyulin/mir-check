@@ -6,7 +6,7 @@ src/upstream.rs retains the original excerpt. src/lib.rs adds metadata contracts
 is unchanged, and a compiler integration test compares its tokens with the snapshot.
 
 This is a separate no_std crate with unsafe code forbidden. Only the fixture depends on
-mir-contracts; the original firmware workspace has no new dependency or source changes.
+miren-contracts; the original firmware workspace has no new dependency or source changes.
 
 Raw::parse proves on aarch64-apple-darwin and thumbv7em-none-eabihf with the pinned compiler,
 panic=abort and overflow checks enabled. The recorded body has 42 MIR blocks. No entry precondition
@@ -26,14 +26,14 @@ with solver models. Independent host tests check lengths zero through 40 and com
 against separate packed-channel and field-decoding formulas: every byte position takes all 256
 values while the other bytes are zero. Runtime samples supplement the universal symbolic proof.
 
-From the mir-check repository root:
+From the miren repository root:
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry Raw::parse \
+target/debug/cargo-miren --verify --summary --entry Raw::parse \
   --manifest-path examples/dr16/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
-cargo test --locked -p mir-check --test compiler \
+cargo test --locked -p miren --test compiler \
   the_dr16_parser_proves_without_entry_bounds_on_host_and_arm
-cargo test --locked -p mir-check --test compiler \
+cargo test --locked -p miren --test compiler \
   incorrect_dr16_indices_and_channel_masks_are_rejected
 cargo test --locked --manifest-path examples/dr16/Cargo.toml
 cargo build --locked --release --manifest-path examples/dr16/Cargo.toml \

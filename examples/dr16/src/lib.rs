@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::{ensures, no_panic};
+use miren_contracts::{ensures, no_panic};
 
 /// One DBUS frame's fields as sent, unchecked. Channels have the centre, 1024, taken off, so each
 /// is within ±660 in a good frame: right stick x and y, left stick x and y, then the wheel.

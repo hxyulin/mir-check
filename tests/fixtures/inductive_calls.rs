@@ -31,8 +31,8 @@ pub fn a_helper_with_a_bad_wrap() -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:requires:bin < 6 -->"]
-#[doc = "<!-- mir-check:v1:ensures:result > bin && final_bin == result -->"]
+#[doc = "<!-- miren:v1:requires:bin < 6 -->"]
+#[doc = "<!-- miren:v1:ensures:result > bin && final_bin == result -->"]
 fn checked_advance(mut bin: u8) -> u8 {
     bin += 1;
     bin
@@ -58,7 +58,7 @@ pub fn a_broken_call_domain() -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:ensures:result < 6 -->"]
+#[doc = "<!-- miren:v1:ensures:result < 6 -->"]
 fn a_misleading_return_contract() -> u8 {
     17
 }
@@ -69,8 +69,8 @@ pub fn a_false_contract_cannot_hide_the_body() -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:requires:limit < 32 -->"]
-#[doc = "<!-- mir-check:v1:ensures:result == limit && final_limit == 0 -->"]
+#[doc = "<!-- miren:v1:requires:limit < 32 -->"]
+#[doc = "<!-- miren:v1:ensures:result == limit && final_limit == 0 -->"]
 pub fn count_down(mut limit: u8) -> u8 {
     let mut completed = 0_u8;
     while limit > 0 {
@@ -80,8 +80,8 @@ pub fn count_down(mut limit: u8) -> u8 {
     completed
 }
 
-#[doc = "<!-- mir-check:v1:requires:limit < 32 -->"]
-#[doc = "<!-- mir-check:v1:ensures:result == limit && final_limit == limit -->"]
+#[doc = "<!-- miren:v1:requires:limit < 32 -->"]
+#[doc = "<!-- miren:v1:ensures:result == limit && final_limit == limit -->"]
 pub fn count_up(limit: u8) -> u8 {
     let mut completed = 0_u8;
     while completed < limit {
@@ -97,7 +97,7 @@ pub fn a_loop_inside_a_callee(seed: u8) -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:ensures:result < limit -->"]
+#[doc = "<!-- miren:v1:ensures:result < limit -->"]
 pub fn a_false_root_postcondition(limit: u8) -> u8 {
     let mut result = 0_u8;
     while result < limit {
@@ -106,7 +106,7 @@ pub fn a_false_root_postcondition(limit: u8) -> u8 {
     result
 }
 
-#[doc = "<!-- mir-check:v1:ensures:unmodeled_predicate(result) -->"]
+#[doc = "<!-- miren:v1:ensures:unmodeled_predicate(result) -->"]
 pub fn an_unsupported_postcondition(limit: u8) -> u8 {
     let mut result = 0_u8;
     while result < limit {
@@ -160,7 +160,7 @@ fn an_indirect_callee(callback: fn(u8) -> u8, value: u8) -> u8 {
     callback(value)
 }
 
-#[doc = "<!-- mir-check:v1:ensures:unmodeled_predicate(result) -->"]
+#[doc = "<!-- miren:v1:ensures:unmodeled_predicate(result) -->"]
 pub fn an_unsupported_contract_on_an_endless_function() -> u8 {
     loop {}
 }
@@ -171,8 +171,8 @@ pub fn an_unsupported_callee_remains_unknown() -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:requires:data[0] < 6 -->"]
-#[doc = "<!-- mir-check:v1:ensures:result[0] > data[0] && final_data[0] == result[0] -->"]
+#[doc = "<!-- miren:v1:requires:data[0] < 6 -->"]
+#[doc = "<!-- miren:v1:ensures:result[0] > data[0] && final_data[0] == result[0] -->"]
 fn advance_buffer(mut data: [u8; 4]) -> [u8; 4] {
     data[0] += 1;
     data

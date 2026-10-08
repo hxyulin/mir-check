@@ -1,4 +1,4 @@
-# Contributing to mir-check
+# Contributing to miren
 
 Bug reports, small real-code examples, documentation and implementation changes are welcome.
 Start with the [usage guide](docs/usage.md), [coverage matrix](docs/coverage.md) and

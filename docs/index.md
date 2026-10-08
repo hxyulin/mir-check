@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: mir-check
+  name: miren
   text: Check the paths that can panic.
   tagline: Symbolic execution of Rust MIR, with contracts that add no runtime checks.
   image:
@@ -18,7 +18,7 @@ hero:
       link: /coverage
     - theme: alt
       text: View on GitHub
-      link: https://github.com/hxyulin/mir-check
+      link: https://github.com/hxyulin/miren
 
 features:
   - title: Follow actual calls
@@ -38,19 +38,19 @@ contracts also check exact-length acceptance and decoded channel bounds. The tes
 host and `thumbv7em-none-eabihf`.
 
 ```sh
-git clone https://github.com/hxyulin/mir-check.git
-cd mir-check
+git clone https://github.com/hxyulin/miren.git
+cd miren
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-solver.txt
 cargo build --workspace --locked
-target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
+target/debug/miren --manifest-path examples/dr16/Cargo.toml
 ```
 
 Read the [examples](examples.md), [usage guide](usage.md) and [proof explanation](proofs.md).
 The [fleet survey](fleet-survey.md) measures the current checker against unchanged firmware.
 
 ::: warning Experimental side project
-mir-check supports a limited Rust/MIR subset and requires a pinned nightly compiler. The
+miren supports a limited Rust/MIR subset and requires a pinned nightly compiler. The
 interpreter and its library models have not completed a soundness audit. A selected-root proof
 is conditional on its input domain and build configuration; it is not a whole-firmware guarantee.
 :::

@@ -40,8 +40,8 @@ pub fn a_bad_write_through_a_callee() -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:requires:count < 15 -->"]
-#[doc = "<!-- mir-check:v1:ensures:final_count > count -->"]
+#[doc = "<!-- miren:v1:requires:count < 15 -->"]
+#[doc = "<!-- miren:v1:ensures:final_count > count -->"]
 fn increment(count: &mut u8) {
     *count += 1;
 }
@@ -56,7 +56,7 @@ pub fn entry_snapshots_are_separate_from_mutable_storage() -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:ensures:final_count == count -->"]
+#[doc = "<!-- miren:v1:ensures:final_count == count -->"]
 fn incorrect_snapshot_contract(count: &mut u8) {
     *count = 11;
 }

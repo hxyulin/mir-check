@@ -10,8 +10,8 @@ no implicit constructor invariant.
 After building the root workspace and installing the solver, run from the repository root:
 
 ```sh
-target/debug/cargo-mir-check --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
-target/debug/cargo-mir-check --verify --summary --entry guarded_packet_read \
+target/debug/cargo-miren --verify --manifest-path examples/contracts/Cargo.toml --lib --locked
+target/debug/cargo-miren --verify --summary --entry guarded_packet_read \
   --manifest-path examples/contracts/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
 ```
 

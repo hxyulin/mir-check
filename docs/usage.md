@@ -1,4 +1,4 @@
-# Running mir-check
+# Running miren
 
 ## Install
 
@@ -6,31 +6,39 @@ The repository's toolchain file installs the exact nightly compiler and componen
 rustc_driver. Build the host analyzer with that toolchain even when analyzing another target.
 
 ```sh
-git clone https://github.com/hxyulin/mir-check.git
-cd mir-check
+git clone https://github.com/hxyulin/miren.git
+cd miren
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-solver.txt
 cargo build --workspace --locked
-cargo install --path crates/mir-check --locked
+cargo install --path crates/miren --locked
 ```
 
 The solver is an external executable. The development build locates `.venv/bin/z3` in its source
-checkout. An installed build retains that lookup; otherwise use Z3 on PATH or `MIR_CHECK_Z3`.
+checkout. An installed build retains that lookup; otherwise use Z3 on PATH or `MIREN_Z3`.
 Removing or moving the source checkout can require updating the solver path or reinstalling.
 The binaries also depend on their pinned rustc sysroot being installed.
+
+## Rename from mir-check
+
+The tool is now `miren`, with `cargo-miren` and `miren-rustc` installed alongside it. The contract
+crate is `miren-contracts` (`miren_contracts` in Rust). Rename project configuration to `miren.json`
+and use `MIREN_*` in place of the former environment variable prefix. New runs and caches live
+under `target/miren`; explicit saved report files remain readable with `miren report FILE`.
+The checker continues to verify the old contract metadata marker in existing dependencies.
 
 ## Project checks
 
 Run from the Cargo project you want to analyze:
 
 ```sh
-mir-check --entry module::function --lib
-mir-check --async-entry task --bin firmware
-mir-check report
+miren --entry module::function --lib
+miren --async-entry task --bin firmware
+miren report
 ```
 
-`mir-check` and `cargo mir-check` now use the same project implementation. Verification is the
-default; `--verify` remains accepted for existing scripts. `mir-check check` is an explicit spelling
+`miren` and `cargo miren` now use the same project implementation. Verification is the
+default; `--verify` remains accepted for existing scripts. `miren check` is an explicit spelling
 of the same command. Without selectors, every inventoried local body is checked, including
 generated and generic bodies whose inputs may be unsupported.
 
@@ -43,9 +51,9 @@ rustc invocation or pass `--from-report` for a project check.
 Find exact inventoried names, then select the bodies you want to check:
 
 ```sh
-mir-check inventory --verbose --lib
-mir-check --entry module::function --lib
-mir-check --entry my_crate::module::function --workspace --lib
+miren inventory --verbose --lib
+miren --entry module::function --lib
+miren --entry my_crate::module::function --workspace --lib
 ```
 
 Inventory mode performs no proofs. Entries are exact names, not patterns or suffix matches.
@@ -59,13 +67,13 @@ Selected roots still execute reachable callees and check call bounds. Independen
 helpers use their own symbolic input domains; a caller proof does not give them universal proofs.
 
 Checker options may appear alongside Cargo options. `--` passes remaining arguments to Cargo;
-use `mir-check check -- <cargo arguments>` when they resemble compiler arguments. Cargo's
+use `miren check -- <cargo arguments>` when they resemble compiler arguments. Cargo's
 `--features`, `--workspace`, `-p`, `--profile` and `--target` retain their meaning. Analysis owns
 `--target-dir` so ordinary Cargo artifacts are not used as proof/build cache inputs.
 
 ## Project configuration
 
-An optional flat `mir-check.json` stores the settings you otherwise repeat:
+An optional flat `miren.json` stores the settings you otherwise repeat:
 
 ```json
 {
@@ -79,7 +87,7 @@ An optional flat `mir-check.json` stores the settings you otherwise repeat:
 }
 ```
 
-Then `mir-check` performs that check. There are no built-in presets or named profiles. Limits keep
+Then `miren` performs that check. There are no built-in presets or named profiles. Limits keep
 their existing defaults unless explicitly overridden; reaching one still produces UNKNOWN.
 
 | Field | Meaning |
@@ -111,12 +119,12 @@ startup/induction policies.
 The parser example has a minimal configuration selecting `Raw::parse`. From the checker checkout:
 
 ```sh
-target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
+target/debug/miren --manifest-path examples/dr16/Cargo.toml
 ```
 
 ## Builds and saved runs
 
-The cache is isolated beneath the Cargo workspace's `target/mir-check`. Dependency builds
+The cache is isolated beneath the Cargo workspace's `target/miren`. Dependency builds
 are reused; workspace package artifacts are refreshed before every attempt so unchanged source,
 changed roots, limits and contracts still receive fresh proofs. Dependencies without retained MIR
 use a separate cache. Cargo tracks dependency source, features, target and profile changes normally.
@@ -127,8 +135,8 @@ records completion and success. It starts incomplete, so interruption cannot exp
 successful scan as the latest result. Failed builds and missing entries stay failed when reopened.
 
 ```sh
-mir-check report
-mir-check report --verbose
+miren report
+miren report --verbose
 ```
 
 Run these from the analyzed workspace or a child directory. No Cargo build or solver query runs.
@@ -138,7 +146,7 @@ missing build outcome. These are stored results, not a new proof of current sour
 
 ## Dependency MIR
 
-Cargo analysis retains dependency MIR by default. The `mir-check-rustc` wrapper appends
+Cargo analysis retains dependency MIR by default. The `miren-rustc` wrapper appends
 `-Zalways-encode-mir=yes` and `-Zmir-opt-level=0` to compiler invocations. This makes ordinary
 non-generic/non-inline dependency functions available, including transitive and shared path
 crates. Workspace members still produce the independently selected root reports; dependency
@@ -146,7 +154,7 @@ bodies execute only when called by an analyzed root.
 
 The wrapper passes Cargo's arguments unchanged before appending the MIR options. It preserves
 `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, target configuration, features, profiles, panic strategy
-and overflow settings. As before, mir-check owns the compiler and wrapper settings for its
+and overflow settings. As before, miren owns the compiler and wrapper settings for its
 isolated analysis build. Dependency MIR optimization is deliberately fixed at level zero, even
 if a profile or user flag requests another MIR level. Code-generation optimization settings are
 preserved. Retained and plain dependency caches are separate. Workspace artifacts are refreshed
@@ -155,11 +163,11 @@ on every run.
 For a baseline or an inventory that does not need retained dependency bodies:
 
 ```sh
-mir-check inventory --no-dependency-mir --lib
+miren inventory --no-dependency-mir --lib
 ```
 
 Install all three binaries with the Cargo install command above, or build the whole workspace;
-`cargo-mir-check` expects both wrappers beside it. A checkout installed before this feature
+`cargo-miren` expects both wrappers beside it. A checkout installed before this feature
 needs rebuilding/reinstalling. Direct driver analysis does not rebuild dependencies; its
 `--extern` inputs must already contain the required MIR.
 
@@ -173,7 +181,7 @@ continue to produce checked call/return obligations, not trusted summaries.
 The pinned toolchain includes thumbv7em-none-eabihf. This analyzes the fixture's ARM build:
 
 ```sh
-target/debug/mir-check --manifest-path examples/dr16/Cargo.toml \
+target/debug/miren --manifest-path examples/dr16/Cargo.toml \
   --locked --target thumbv7em-none-eabihf
 ```
 
@@ -184,7 +192,7 @@ that overflow is impossible. To analyze a build with checks enabled and aborting
 
 ```sh
 RUSTFLAGS='-Cpanic=abort -Coverflow-checks=yes' \
-  target/debug/mir-check --manifest-path examples/dr16/Cargo.toml \
+  target/debug/miren --manifest-path examples/dr16/Cargo.toml \
   --locked --target thumbv7em-none-eabihf
 ```
 
@@ -202,7 +210,7 @@ the tool does not claim that every architecture has been tested.
 | UNKNOWN | Unsupported behavior, missing MIR, solver failure or an exploration/input/query limit prevented completion | Nonzero |
 | Unselected | The body has an inventory, without an independent root proof | Does not affect selected-root verification |
 
-`mir-check inventory` reports sites as unverified. Its successful exit establishes
+`miren inventory` reports sites as unverified. Its successful exit establishes
 that compilation and inventory completed. Inventory call paths are structural and ignore branch
 feasibility. `--entry` works in inventory mode too, to request those paths.
 
@@ -236,7 +244,7 @@ trusted models and individual obligations. Schema version 9 JSON includes:
 - `functions[].sites`: the independent unverified MIR inventory.
 - `rustc_arguments`, `compiler`, `target`, `panic_strategy`, `overflow_checks`: analysis build data.
 
-Cargo writes reports to a fresh `target/mir-check/runs/<run>/reports` directory and prints its path.
+Cargo writes reports to a fresh `target/miren/runs/<run>/reports` directory and prints its path.
 It renders available reports even when verification fails. Compiler failures can leave reports
 for other completed crates; they cannot produce a successful run. Missing requested roots also
 fail while retaining the collected reports. Build directories can be removed after use.
@@ -246,7 +254,7 @@ Direct mode accepts `--json`, `--jsonl FILE|-`, `--verbose`, `--summary`, `--ver
 before rustc arguments:
 
 ```sh
-target/debug/mir-check --json --verify --entry next_byte -- \
+target/debug/miren --json --verify --entry next_byte -- \
   --crate-type=lib --edition=2024 tests/fixtures/proofs.rs
 ```
 
@@ -294,7 +302,7 @@ Export one complete schema-9 crate report per line, including on failed verifica
 were produced:
 
 ```sh
-cargo mir-check --verify --entry my_crate::function --jsonl results.jsonl --lib
+cargo miren --verify --entry my_crate::function --jsonl results.jsonl --lib
 ```
 
 The file contains ordinary JSON objects with the same fields as the per-crate files: build data,
@@ -306,15 +314,15 @@ For a pipeline, use `--jsonl -`. Human results, progress and Cargo output then g
 stdout contains only JSONL, even when Cargo uses --message-format=json:
 
 ```sh
-cargo mir-check --verify --entry my_crate::function --jsonl - --lib > results.jsonl
+cargo miren --verify --entry my_crate::function --jsonl - --lib > results.jsonl
 ```
 
 Inspect a saved run without recompiling or rerunning the solver:
 
 ```sh
-cargo mir-check report results.jsonl
-mir-check report target/mir-check/runs/<run>/reports --verbose --color never
-mir-check report first.json second.json --jsonl combined.jsonl
+cargo miren report results.jsonl
+miren report target/miren/runs/<run>/reports --verbose --color never
+miren report first.json second.json --jsonl combined.jsonl
 ```
 
 Both binaries accept the report subcommand. Inputs can be schema-7/8/9 JSON files, JSONL files or
@@ -344,7 +352,7 @@ Input shape, allocation and individual library-model limits remain separate impl
 Reaching a budget remains UNKNOWN. Increasing a budget cannot bypass unsupported behavior.
 
 ```sh
-mir-check --verify --induction --from-report invocation.json --entry main \
+miren --verify --induction --from-report invocation.json --entry main \
   --max-steps 32768 --max-call-depth 32 --root-timeout-secs 120 \
   --solver-timeout-ms 15000 --max-query-bytes 1000000
 ```
@@ -358,7 +366,7 @@ arguments and takes analysis budgets from the new command, rather than the saved
 These are advanced compiler-debugging commands. Normal project checks use Cargo directly and
 require no saved invocation.
 
-`mir-check --verify -- <rustc arguments>` already checks every inventoried body in the selected
+`miren --verify -- <rustc arguments>` already checks every inventoried body in the selected
 compilation unit when no --entry is supplied. This includes generated bodies; generic or
 unsupported roots can still be UNKNOWN. A successful run requires every selected root to pass
 under its recorded domain. Dependencies execute when called but do not become independent roots.
@@ -366,8 +374,8 @@ under its recorded domain. Dependencies execute when called but do not become in
 Reuse compiler arguments from a saved per-crate JSON report to avoid copying a long invocation:
 
 ```sh
-mir-check --verify --from-report invocation.json --jsonl results.jsonl
-mir-check --verify --from-report invocation.json --entry main
+miren --verify --from-report invocation.json --jsonl results.jsonl
+miren --verify --from-report invocation.json --entry main
 ```
 
 Run these commands from the original compiler working directory. The source, dependency metadata
@@ -397,8 +405,8 @@ This mode does not run the application's main on the host.
 Use `--async-entry FACTORY` to check a concrete async factory independently of its startup caller:
 
 ```sh
-mir-check --async-entry sample_task --entry initialization
-cargo mir-check --async-entry sample_task --entry initialization
+miren --async-entry sample_task --entry initialization
+cargo miren --async-entry sample_task --entry initialization
 ```
 
 The selector uses the exact inventoried factory name, including macro-generated module paths when
@@ -440,7 +448,7 @@ continue. Use `--all-failures` with direct or Cargo verification to collect furt
 
 ```sh
 cd examples/contracts
-cargo mir-check --verify --all-failures --entry bounded_increment --lib
+cargo miren --verify --all-failures --entry bounded_increment --lib
 ```
 
 Normal execution and solver budgets still apply, so this does not promise every possible failure.
@@ -454,11 +462,11 @@ refuted root. Execution is opt-in: an ordinary scan only performs static analysi
 concrete counterexample inputs can also appear in ordinary reports without executing the function.
 
 ```sh
-target/debug/mir-check --verify --replay --entry checked_index -- \
+target/debug/miren --verify --replay --entry checked_index -- \
   --crate-type=lib --edition=2024 tests/fixtures/counterexample_replay.rs \
   -Coverflow-checks=yes -Cpanic=abort
 
-cargo mir-check --verify --replay --entry decode --lib
+cargo miren --verify --replay --entry decode --lib
 ```
 
 The first example reports a failing bounds check, native input values, the observed panic message

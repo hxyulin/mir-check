@@ -334,11 +334,11 @@ These identities can discharge an infeasible symbolic path without a solver requ
 validation and size limits still apply before that decision.
 Failing obligations still request a Z3 counterexample model. Remaining symbolic questions go to Z3
 with the existing decision cache and persistent subprocess. No symbolic search runs inside
-mir-check.
+miren.
 The folder is part of the trusted implementation and has differential tests against Z3. The old
 string evaluator remains test-only for protocol regressions; production proofs do not use it.
 
-Setting MIR_CHECK_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
+Setting MIREN_Z3 retains the custom executable's one-shot stdin/EOF protocol, including its
 process timeout option (-T:6 with default limits). This compatibility path relies on the executable
 honoring that
 option; the default persistent backend enforces the host deadline independently.

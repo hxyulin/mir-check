@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::requires;
+use miren_contracts::requires;
 
 const fn shelf_codes() -> [u16; 128] {
     let mut codes = [0; 128];

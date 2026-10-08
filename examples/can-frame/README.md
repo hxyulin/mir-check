@@ -7,7 +7,7 @@ preserves Use, both helpers and check; bus.rs adds annotations and verification 
 src/upstream.rs is the unmodified excerpt. src/lib.rs adds metadata contracts;
 the six method bodies remain unchanged and a regression test compares them to the snapshot.
 
-The fixture is a separate no_std crate. Only this vendored crate depends on mir-contracts.
+The fixture is a separate no_std crate. Only this vendored crate depends on miren-contracts.
 The original firmware repository is neither modified nor required to run these tests.
 
 Constructor contracts request valid IDs and capacity bounds for Some returns, exact stored
@@ -41,12 +41,12 @@ can now be interpreted, subject to the same MIR coverage and execution limits. F
 loops can prove only when every feasible path finishes within the execution budget.
 These are selected-root proofs, not a proof of every function or caller in the original crate.
 
-From the mir-check repository root:
+From the miren repository root:
 
 ```sh
-target/debug/cargo-mir-check --verify --summary --entry Frame::new --entry Frame::data \
+target/debug/cargo-miren --verify --summary --entry Frame::new --entry Frame::data \
   --manifest-path examples/can-frame/Cargo.toml --lib --locked --target thumbv7em-none-eabihf
-cargo test --locked -p mir-check --test compiler \
+cargo test --locked -p miren --test compiler \
   vendored_constructors_accessors_and_payload_round_trips_prove_on_host_and_arm
 cargo test --locked --manifest-path examples/can-frame/Cargo.toml
 cargo build --locked --release --manifest-path examples/can-frame/Cargo.toml \
@@ -54,7 +54,7 @@ cargo build --locked --release --manifest-path examples/can-frame/Cargo.toml \
 ```
 
 Compiler integration tests locate the pinned proc-macro artifact and select proof roots directly.
-Without --entry, full-crate cargo mir-check --verify is expected to fail because it selects the bad
+Without --entry, full-crate cargo miren --verify is expected to fail because it selects the bad
 call-bound harnesses and unsupported derived methods too.
 
 The bus validator's unchanged body contains nested loops, enum matches, two helper calls and
@@ -76,8 +76,8 @@ returns UNKNOWN. A narrow trusted model for static formatting arguments permits 
 literal panic messages; dynamic formatting and user formatters remain unsupported.
 
 ```sh
-cargo test --locked -p mir-check --test compiler \
+cargo test --locked -p miren --test compiler \
   nested_bus_loops_prove_for_symbolic_ids_and_slots_on_host_and_arm
-cargo test --locked -p mir-check --test compiler \
+cargo test --locked -p miren --test compiler \
   invalid_bus_ids_slots_collisions_and_fd_compatibility_are_refuted
 ```

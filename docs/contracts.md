@@ -1,4 +1,4 @@
-<!--@include: ../crates/mir-contracts/README.md-->
+<!--@include: ../crates/miren-contracts/README.md-->
 
 ## A bounded call
 
@@ -6,11 +6,11 @@ Add the metadata crate to the code you want to annotate:
 
 ```toml
 [dependencies]
-mir-contracts = { git = "https://github.com/hxyulin/mir-check" }
+miren-contracts = { git = "https://github.com/hxyulin/miren" }
 ```
 
 ```rust
-use mir_contracts::{ensures, no_panic, requires};
+use miren_contracts::{ensures, no_panic, requires};
 
 #[no_panic]
 #[requires(value < 15)]
@@ -60,7 +60,7 @@ For example, this checks the final state of the fleet controller's reset method:
 ```
 
 ```sh
-cargo mir-check --verify --summary --contracts contracts.json \
+cargo miren --verify --summary --contracts contracts.json \
   --entry controller::Pid::reset -p controller --lib --target thumbv7em-none-eabihf
 ```
 
@@ -109,7 +109,7 @@ Every root that uses a trusted summary is labeled **PROVED_WITH_ASSUMPTIONS**, c
 from PROVED, and fails strict verification. Accept these conditional results explicitly with:
 
 ```sh
-cargo mir-check --verify --summary --contracts contracts.json --allow-assumptions --lib
+cargo miren --verify --summary --contracts contracts.json --allow-assumptions --lib
 ```
 
 The flag never accepts REFUTED or UNKNOWN. Selecting the trusted function itself as a root still

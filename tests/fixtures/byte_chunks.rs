@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::ensures;
+use miren_contracts::ensures;
 
 fn paint_pixel(pixel: &mut [u8; 3], shade: u8) {
     *pixel = [shade, 17, 23];

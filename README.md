@@ -2,19 +2,19 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/public/mark-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/public/mark.svg">
-    <img src="docs/public/mark.svg" alt="mir-check logo" width="128" height="128">
+    <img src="docs/public/mark.svg" alt="miren logo" width="128" height="128">
   </picture>
 </p>
-<h1 align="center">mir-check</h1>
-<p align="center">Panic freedom and function contracts, checked from Rust MIR.</p>
+<h1 align="center">miren</h1>
+<p align="center">Panic freedom and contracts, verified from Rust MIR.</p>
 <p align="center">
-  <a href="https://github.com/hxyulin/mir-check/actions/workflows/ci.yml">
+  <a href="https://github.com/hxyulin/miren/actions/workflows/ci.yml">
     <img alt="CI status"
-      src="https://github.com/hxyulin/mir-check/actions/workflows/ci.yml/badge.svg?branch=main">
+      src="https://github.com/hxyulin/miren/actions/workflows/ci.yml/badge.svg?branch=main">
   </a>
-  <a href="https://github.com/hxyulin/mir-check/actions/workflows/docs.yml">
+  <a href="https://github.com/hxyulin/miren/actions/workflows/docs.yml">
     <img alt="Documentation status"
-      src="https://github.com/hxyulin/mir-check/actions/workflows/docs.yml/badge.svg?branch=main">
+      src="https://github.com/hxyulin/miren/actions/workflows/docs.yml/badge.svg?branch=main">
   </a>
   <a href="rust-toolchain.toml">
     <img alt="Rust nightly 2026-09-22"
@@ -30,10 +30,10 @@
   </a>
 </p>
 <p align="center">
-  <a href="https://hxyulin.github.io/mir-check/">Documentation</a> ·
-  <a href="https://hxyulin.github.io/mir-check/usage.html">Getting started</a> ·
-  <a href="https://hxyulin.github.io/mir-check/examples.html">Examples</a> ·
-  <a href="https://hxyulin.github.io/mir-check/fleet-survey.html">Fleet survey</a>
+  <a href="https://hxyulin.github.io/miren/">Documentation</a> ·
+  <a href="https://hxyulin.github.io/miren/usage.html">Getting started</a> ·
+  <a href="https://hxyulin.github.io/miren/examples.html">Examples</a> ·
+  <a href="https://hxyulin.github.io/miren/fleet-survey.html">Fleet survey</a>
 </p>
 
 A Rust MIR analyzer for panic freedom and function contracts. It follows actual function calls
@@ -50,14 +50,14 @@ UNKNOWN. A solver counterexample is not automatically a confirmed runtime panic.
 The toolchain file installs the matching nightly, compiler development components and ARM target.
 
 ```sh
-git clone https://github.com/hxyulin/mir-check.git
-cd mir-check
+git clone https://github.com/hxyulin/miren.git
+cd miren
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-solver.txt
-cargo install --path crates/mir-check --locked
+cargo install --path crates/miren --locked
 ```
 
-Z3 must remain available in the checkout's `.venv`, on PATH, or through `MIR_CHECK_Z3`.
+Z3 must remain available in the checkout's `.venv`, on PATH, or through `MIREN_Z3`.
 The installed binaries also require their pinned rustc sysroot.
 
 ## Check a project
@@ -65,18 +65,18 @@ The installed binaries also require their pinned rustc sysroot.
 Run from the Cargo project you want to analyze:
 
 ```sh
-mir-check --entry module::function --lib
-mir-check --async-entry task --bin firmware
-mir-check report
+miren --entry module::function --lib
+miren --async-entry task --bin firmware
+miren report
 ```
 
 Verification is the default. Cargo supplies dependency metadata, environment variables, target,
-features and profile; there is no compiler invocation or saved report to prepare. `cargo mir-check`
+features and profile; there is no compiler invocation or saved report to prepare. `cargo miren`
 uses the same workflow. Without an entry, every inventoried local body is selected, including
-generated bodies that may require unsupported inputs. Use `mir-check inventory --verbose` to find
+generated bodies that may require unsupported inputs. Use `miren inventory --verbose` to find
 exact names before selecting a smaller root.
 
-An optional `mir-check.json` stores settings you want to repeat:
+An optional `miren.json` stores settings you want to repeat:
 
 ```json
 {
@@ -87,13 +87,13 @@ An optional `mir-check.json` stores settings you want to repeat:
 }
 ```
 
-Then run `mir-check`. Explicit entry options replace configured roots; CLI limit options override
+Then run `miren`. Explicit entry options replace configured roots; CLI limit options override
 configured limits. There are no built-in presets or named profiles. See the
 [configuration guide](docs/usage.md#project-configuration) for precedence and supported fields.
 
 Analysis reuses dependency builds but refreshes workspace artifacts and proof results on every
 run. It keeps its own build cache and run reports beneath the Cargo workspace's
-`target/mir-check`. `mir-check report` reads the latest attempted run without rebuilding or
+`target/miren`. `miren report` reads the latest attempted run without rebuilding or
 rerunning Z3; interrupted and failed runs cannot fall back to an older successful scan.
 
 ## Try the parser example
@@ -102,7 +102,7 @@ From this checkout:
 
 ```sh
 cargo build --workspace --locked
-target/debug/mir-check --manifest-path examples/dr16/Cargo.toml
+target/debug/miren --manifest-path examples/dr16/Cargo.toml
 ```
 
 The example's project configuration selects `Raw::parse`. Its arbitrary byte-slice inputs prove
@@ -123,8 +123,8 @@ Slow checks report their active root and elapsed time. Colors supplement labels;
 not line coverage or the safety of unselected code.
 
 ```sh
-mir-check --entry decode --lib --jsonl results.jsonl
-mir-check report results.jsonl --verbose
+miren --entry decode --lib --jsonl results.jsonl
+miren report results.jsonl --verbose
 ```
 
 `--jsonl -` emits machine-readable reports on stdout and keeps human messages on stderr.

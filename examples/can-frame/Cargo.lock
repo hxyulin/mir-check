@@ -3,14 +3,14 @@
 version = 4
 
 [[package]]
-name = "mir-check-can-frame"
+name = "miren-can-frame"
 version = "0.1.0"
 dependencies = [
- "mir-contracts",
+ "miren-contracts",
 ]
 
 [[package]]
-name = "mir-contracts"
+name = "miren-contracts"
 version = "0.1.0"
 dependencies = [
  "quote",

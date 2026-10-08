@@ -1,6 +1,6 @@
 # Guides
 
-Read the [published documentation](https://hxyulin.github.io/mir-check/) or the same guides here.
+Read the [published documentation](https://hxyulin.github.io/miren/) or the same guides here.
 
 - [Usage](usage.md): installation, Cargo root selection, embedded targets and report outcomes.
 - [Contracts](contracts.md): metadata semantics and a bounded function example.
@@ -16,5 +16,5 @@ Read the [published documentation](https://hxyulin.github.io/mir-check/) or the 
 - [Stages](stages.md): implementation history and validation evidence.
 
 Start with the repository README for a runnable parser proof. The compiler crate README describes
-the adapter boundary; the mir-contracts README describes metadata behavior. Each example README
+the adapter boundary; the miren-contracts README describes metadata behavior. Each example README
 records its scope and, for vendored code, its source provenance.

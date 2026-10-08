@@ -118,8 +118,8 @@ pub fn indexed_references_reach_helper_storage(bytes: &mut [u8]) {
     }
 }
 
-#[doc = "<!-- mir-check:v1:requires:byte < 32 -->"]
-#[doc = "<!-- mir-check:v1:ensures:final_byte > byte -->"]
+#[doc = "<!-- miren:v1:requires:byte < 32 -->"]
+#[doc = "<!-- miren:v1:ensures:final_byte > byte -->"]
 fn increase(byte: &mut u8) {
     *byte += 1;
 }
@@ -132,7 +132,7 @@ pub fn indexed_helper_snapshots(bytes: &mut [u8; 3]) {
     }
 }
 
-#[doc = "<!-- mir-check:v1:ensures:final_byte == byte -->"]
+#[doc = "<!-- miren:v1:ensures:final_byte == byte -->"]
 fn a_false_indexed_contract(byte: &mut u8) {
     *byte = 17;
 }
@@ -324,8 +324,8 @@ pub fn initialized_local_byte_storage() {
     assert!(bytes[0] == 9);
 }
 
-#[doc = "<!-- mir-check:v1:requires:byte < 32 -->"]
-#[doc = "<!-- mir-check:v1:ensures:result == final_byte && final_byte > byte -->"]
+#[doc = "<!-- miren:v1:requires:byte < 32 -->"]
+#[doc = "<!-- miren:v1:ensures:result == final_byte && final_byte > byte -->"]
 fn increase_and_return(byte: &mut u8) -> &mut u8 {
     *byte += 1;
     byte

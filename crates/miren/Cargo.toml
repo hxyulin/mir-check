@@ -1,0 +1,30 @@
+[package]
+name = "miren"
+description = "Experimental Rust MIR analysis for panic freedom and function contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+syn.workspace = true
+
+[dev-dependencies]
+miren-contracts = { path = "../miren-contracts" }
+quote.workspace = true
+
+[[bin]]
+name = "miren"
+path = "src/main.rs"
+
+[[bin]]
+name = "cargo-miren"
+path = "src/cargo.rs"
+
+[[bin]]
+name = "miren-rustc"
+path = "src/compiler.rs"

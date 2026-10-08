@@ -1,6 +1,6 @@
 # Fleet workspace survey
 
-On 2026-10-06, mir-check checked the unchanged fleet-2027 shared libraries, DM-MC02 board/robot
+On 2026-10-06, miren checked the unchanged fleet-2027 shared libraries, DM-MC02 board/robot
 workspace and RM-C board workspace for `thumbv7em-none-eabihf`. After adding floating point,
 symbolic enum inputs, dependency-defined inputs, array patterns, dependency MIR retention and
 aggregate constants, it proves 293 of 976 function roots, up from 25 in the original baseline.
@@ -30,10 +30,10 @@ outcomes. Across the expansions, 268 original unknowns now prove and 49 now refu
 These are root-domain proofs, not line coverage or the fraction of firmware safety established.
 The original and intermediate measurements remain available:
 
-- [Original baseline data](https://hxyulin.github.io/mir-check/data/fleet-survey.json).
-- [Input expansion data](https://hxyulin.github.io/mir-check/data/fleet-survey-expanded.json).
-- [Retained MIR data](https://hxyulin.github.io/mir-check/data/fleet-survey-dependency-mir.json).
-- [Aggregate constant data](https://hxyulin.github.io/mir-check/data/fleet-survey-constants.json).
+- [Original baseline data](https://hxyulin.github.io/miren/data/fleet-survey.json).
+- [Input expansion data](https://hxyulin.github.io/miren/data/fleet-survey-expanded.json).
+- [Retained MIR data](https://hxyulin.github.io/miren/data/fleet-survey-dependency-mir.json).
+- [Aggregate constant data](https://hxyulin.github.io/miren/data/fleet-survey-constants.json).
 
 The new data records per-unit counts, outcome transitions and the first reported unknown reasons.
 
@@ -223,11 +223,11 @@ building dependent crates. From the relevant workspace root:
 
 ```sh
 # Root workspace: all seven embedded shared libraries.
-/path/to/mir-check/target/release/cargo-mir-check --summary \
+/path/to/miren/target/release/cargo-miren --summary \
   --workspace --exclude xtask --lib --target thumbv7em-none-eabihf --locked
 
 # bsp/dm-mc02 and bsp/rm-c: library and binary targets of their members.
-/path/to/mir-check/target/release/cargo-mir-check --summary \
+/path/to/miren/target/release/cargo-miren --summary \
   --workspace --target thumbv7em-none-eabihf --locked
 ```
 
@@ -245,7 +245,7 @@ The later runs execute more paths that previously stopped at input construction 
 Many roots still return UNKNOWN early, so this is not an estimate for full-firmware proof time.
 Larger supported symbolic roots can cost much more.
 
-The [latest JSON summary](https://hxyulin.github.io/mir-check/data/fleet-survey-constants.json)
+The [latest JSON summary](https://hxyulin.github.io/miren/data/fleet-survey-constants.json)
 records per-unit counts, source classification, changed roots and first-gap reasons. Raw solver
 reports and build outputs remain local measurement artifacts. No entire workspace passed
 verification; every scope still contains unsupported or refuted roots.

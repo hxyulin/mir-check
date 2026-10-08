@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::ensures;
+use miren_contracts::ensures;
 
 #[ensures(final_values[0] == 7 && final_values[1] == 7 && final_values[2] == 7)]
 pub fn set_all(values: &mut [u16; 3]) {

@@ -264,7 +264,7 @@ the 11-second baseline. No firmware source, configuration or dependencies change
 ## Stage 13: retain dependency MIR in Cargo analysis
 
 Cargo analysis now retains ordinary non-inline dependency bodies by default. The small
-mir-check-rustc outer wrapper appends always-encode-mir and MIR optimization level zero, forwarding
+miren-rustc outer wrapper appends always-encode-mir and MIR optimization level zero, forwarding
 to the workspace analyzer or the pinned compiler. It preserves Cargo configuration, profiles,
 features and Rust flags, including encoded arguments containing spaces. The existing fresh target
 directory prevents stale metadata from earlier builds. --no-dependency-mir provides a comparison

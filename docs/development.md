@@ -1,6 +1,6 @@
 # Development and documentation
 
-mir-check is a standalone host tool. Its compiler adapter requires the exact nightly in
+miren is a standalone host tool. Its compiler adapter requires the exact nightly in
 `rust-toolchain.toml`, including rustc-dev, LLVM tools and rust-src. Install the pinned solver
 before running compiler integration tests:
 
@@ -26,7 +26,7 @@ the corresponding proof. Fixture runtime tests independently replay selected fai
 decoding formulas. GitHub Actions runs the proof suite on Linux and macOS, including ARM proofs.
 
 When changing fixtures, also run their formatting, Clippy, host tests and ARM release builds.
-See the [repository conventions](https://github.com/hxyulin/mir-check/blob/main/AGENTS.md).
+See the [repository conventions](https://github.com/hxyulin/miren/blob/main/AGENTS.md).
 
 ## CLI implementation
 
@@ -41,7 +41,7 @@ configuration holds repeatable settings; preserve CLI precedence and reject unkn
 
 Cache tests must show fresh roots on unchanged source and changed selectors, dependency artifact
 reuse, and rejected mutations of both root and dependency code. A run with a compiler error or a
-missing requested entry must remain failed when read through `mir-check report`.
+missing requested entry must remain failed when read through `miren report`.
 
 ## Analyzer design priorities
 
@@ -110,7 +110,7 @@ npm run docs:build
 npm run docs:preview
 ```
 
-Open the local server at `/mir-check/`. Production builds check internal Markdown links.
+Open the local server at `/miren/`. Production builds check internal Markdown links.
 Keep prose within 100 columns, except tables, and review the home page and guides on desktop
 and mobile in both themes before publishing layout changes.
 
@@ -121,7 +121,7 @@ build artifact; pushes to main deploy that artifact to GitHub Pages. Deployment 
 `github-pages` environment, with Pages write and OIDC permissions confined to the deploy job.
 
 The repository's Pages source is GitHub Actions. The public address is
-[hxyulin.github.io/mir-check](https://hxyulin.github.io/mir-check/). The workflow needs no Rust
+[hxyulin.github.io/miren](https://hxyulin.github.io/miren/). The workflow needs no Rust
 compiler or Z3 because the site renders checked-in guides rather than running proofs.
 
 When adding analyzer behavior, update the [coverage matrix](coverage.md) and relevant examples

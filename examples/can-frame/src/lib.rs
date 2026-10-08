@@ -12,7 +12,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::{ensures, no_panic, requires};
+use miren_contracts::{ensures, no_panic, requires};
 
 pub mod bus;
 

@@ -1,4 +1,4 @@
-use mir_contracts::{no_panic, requires};
+use miren_contracts::{no_panic, requires};
 
 /// One ID a device puts on a bus, for `check`.
 #[derive(Clone, Copy)]

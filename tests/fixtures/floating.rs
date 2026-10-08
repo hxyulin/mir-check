@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::{ensures, requires};
+use miren_contracts::{ensures, requires};
 
 pub fn arithmetic(value: f32, divisor: f32) -> f32 {
     -((value + 2.0) * 3.0 - value / divisor)

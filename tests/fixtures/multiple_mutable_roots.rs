@@ -13,23 +13,23 @@ pub struct Borrowed<'a> {
     pub count: &'a u16,
 }
 
-#[doc = "<!-- mir-check:v1:ensures:final_left == 9 && final_right == 12 -->"]
+#[doc = "<!-- miren:v1:ensures:final_left == 9 && final_right == 12 -->"]
 pub fn distinct_scalar_storage(left: &mut u16, right: &mut u16) {
     *left = 9;
     *right = 12;
     assert!(*left == 9 && *right == 12);
 }
 
-#[doc = "<!-- mir-check:v1:requires:left < 100 && right < 100 -->"]
-#[doc = "<!-- mir-check:v1:ensures:final_left == right && final_right == left -->"]
+#[doc = "<!-- miren:v1:requires:left < 100 && right < 100 -->"]
+#[doc = "<!-- miren:v1:ensures:final_left == right && final_right == left -->"]
 pub fn entry_snapshots_are_independent(left: &mut u16, right: &mut u16) {
     let original = *left;
     *left = *right;
     *right = original;
 }
 
-#[doc = "<!-- mir-check:v1:requires:left == 4 && right == 8 -->"]
-#[doc = "<!-- mir-check:v1:ensures:final_left == 5 && final_right == 10 -->"]
+#[doc = "<!-- miren:v1:requires:left == 4 && right == 8 -->"]
+#[doc = "<!-- miren:v1:ensures:final_left == 5 && final_right == 10 -->"]
 fn update_both(left: &mut u16, right: &mut u16) {
     *left += 1;
     *right += 2;
@@ -85,7 +85,7 @@ pub fn iterative_writes(left: &mut [u8; 3], right: &mut [u8; 3]) {
     assert!(left[0] == 3 && right[0] == 7);
 }
 
-#[doc = "<!-- mir-check:v1:ensures:final_left == left -->"]
+#[doc = "<!-- miren:v1:ensures:final_left == left -->"]
 pub fn a_write_does_not_change_its_entry_snapshot(left: &mut u16, right: &mut u16) {
     *left = 9;
     *right = 12;

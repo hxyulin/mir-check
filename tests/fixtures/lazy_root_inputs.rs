@@ -113,17 +113,17 @@ pub fn unguarded_field_index(archive: &Archive) -> u8 {
     [11_u8; 8][usize::from(archive.records[5].slot)]
 }
 
-#[doc = "<!-- mir-check:v1:requires:archive.records[5].slot == 3 -->"]
-#[doc = "<!-- mir-check:v1:ensures:final_archive.records[5].slot == 4 -->"]
-#[doc = "<!-- mir-check:v1:ensures:archive.records[5].slot == 3 -->"]
-#[doc = "<!-- mir-check:v1:ensures:final_archive.records[6].slot == archive.records[6].slot -->"]
+#[doc = "<!-- miren:v1:requires:archive.records[5].slot == 3 -->"]
+#[doc = "<!-- miren:v1:ensures:final_archive.records[5].slot == 4 -->"]
+#[doc = "<!-- miren:v1:ensures:archive.records[5].slot == 3 -->"]
+#[doc = "<!-- miren:v1:ensures:final_archive.records[6].slot == archive.records[6].slot -->"]
 pub fn updates_preserve_entry_snapshots(archive: &mut Archive) {
     archive.records[5].slot += 1;
     archive.records[5].enabled = true;
     assert!(archive.records[5].enabled);
 }
 
-#[doc = "<!-- mir-check:v1:ensures:final_archive.records[5].slot == archive.records[5].slot -->"]
+#[doc = "<!-- miren:v1:ensures:final_archive.records[5].slot == archive.records[5].slot -->"]
 pub fn a_false_snapshot_claim(archive: &mut Archive) {
     archive.records[5].slot = 7;
 }

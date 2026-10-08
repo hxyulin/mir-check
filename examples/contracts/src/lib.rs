@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::{ensures, no_panic, requires};
+use miren_contracts::{ensures, no_panic, requires};
 
 #[no_panic]
 #[requires(index < bytes.len())]

@@ -1,0 +1,31 @@
+# miren-contracts
+
+Host procedural macros declaring no_panic, requires and ensures contracts for miren.
+Consumers can use stable Rust and no_std. The attributes add doc metadata without evaluating
+predicates, modifying function bodies or adding target runtime dependencies.
+
+The macros validate Rust expression syntax only. With --verify, the checker resolves and checks
+its restricted pure predicate language against typed MIR arguments, checks call preconditions and
+proves postconditions. Unsupported predicates cannot pass verification. Without the checker,
+unresolved names and false predicates still add no runtime behavior.
+
+In ensures, result names the actual return value and parameter names denote entry values.
+Functions and methods with bodies are supported, including const fn. Receiver types outside the
+checker's modeled input subset remain unsupported for proof.
+
+The checker supports nested modeled fields and numeric tuple projections in predicates, such as
+packet.header.index or value.1.0. Literal indices can select fixed non-byte arrays or byte storage
+with a known length. Arbitrary predicate calls, arithmetic, dynamic indexing and Result matches
+remain unsupported; the macros only check syntax and do not expand the checker's supported predicate
+language.
+
+Versioned HTML comments in doc attributes carry the declarations through macro expansion to
+the compiler adapter. This format is experimental and is not a trusted proof certificate.
+New declarations use the `miren:v1` marker. The checker also reads the former `mir-check:v1`
+marker, so existing dependency metadata keeps its bounds and postconditions during the rename.
+
+Predicates support comparisons, boolean operations, modeled fields and tuple projections,
+array/slice lengths, literal fixed-array and known-length byte indices, integer/float casts and
+restricted exhaustive Option matches. Float literals infer their type from the compared value;
+mismatched or out-of-range literals are rejected. Symbolic Option matches require boolean arms.
+Unsupported predicates and inconsistent entry domains return UNKNOWN.

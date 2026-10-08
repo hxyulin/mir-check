@@ -57,7 +57,7 @@ pub fn a_loop_with_a_scalar_helper(value: u8) -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:ensures:result == 0 -->"]
+#[doc = "<!-- miren:v1:ensures:result == 0 -->"]
 pub fn a_loop_with_a_postcondition(limit: u16) -> u16 {
     let mut count = 0_u16;
     while count < limit {
@@ -66,7 +66,7 @@ pub fn a_loop_with_a_postcondition(limit: u16) -> u16 {
     count
 }
 
-#[doc = "<!-- mir-check:v1:requires:seed <= 511 -->"]
+#[doc = "<!-- miren:v1:requires:seed <= 511 -->"]
 pub fn a_constrained_register(seed: u16) -> ! {
     let mut reading = seed;
     loop {
@@ -75,7 +75,7 @@ pub fn a_constrained_register(seed: u16) -> ! {
     }
 }
 
-#[doc = "<!-- mir-check:v1:requires:seed > 511 && seed <= 511 -->"]
+#[doc = "<!-- miren:v1:requires:seed > 511 && seed <= 511 -->"]
 pub fn an_inconsistent_loop_domain(seed: u16) -> ! {
     loop {
         assert!(seed <= 511);

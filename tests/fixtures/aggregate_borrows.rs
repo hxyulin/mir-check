@@ -1,7 +1,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use mir_contracts::{ensures, requires};
+use miren_contracts::{ensures, requires};
 
 #[derive(Clone, Copy)]
 pub struct Stamp {
