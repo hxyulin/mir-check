@@ -25,7 +25,7 @@ program: resource limits and undecided queries remain separate sources of UNKNOW
 | Enums | Local/dependency inputs with symbolic tags/payloads; constructed variants and core Option/Result/ControlFlow | At most 64 input variants, all payloads modeled; enum/struct slices remain unsupported |
 | Mutable storage | Disjoint mutable root references, projected writes, tracked aggregate/capture references and incoming-storage returns | Reference fields in root pointees, general aliasing and partial initialization remain UNKNOWN |
 | Typed static stores | Certified UnsafeCell payload places accept supported typed moves, known callbacks and fresh constructed futures; stored references retain escape evidence | Shared reads remain opaque; no last-write, initialization-protocol or exclusivity facts; arbitrary writes, general unions, resumed futures and static future polling remain UNKNOWN |
-| Interior mutation | Scalar Cell aliases/calls; distinct owned integer atomic allocations retain new/load/store/add/sub/swap/CAS history; fences check orderings | Root/static atomics and local atomics after trusted publication remain arbitrary per access; pointer escapes, thread execution, RefCell and pointer atomics remain gaps |
+| Interior mutation | Scalar Cell aliases/calls; distinct owned integer atomic allocations retain new/load/store/add/sub/swap/CAS history; fences check orderings | Root/static atomics and local atomics after trusted publication remain arbitrary per access; thin pointer loads/CAS support observed address relations; pointer histories, thread execution, RefCell and general pointer destinations remain gaps |
 | Shared references | Read-only snapshots of supported values, including nested slice fields | Snapshot writes and general aliases remain unsupported; certified static stores have a separate model |
 | Constants | Compiler-evaluated structs/tuples, active enum fields, bounded arrays/slices and immutable promoted/static references | Unions/MaybeUninit, interior mutable storage and raw pointers remain UNKNOWN |
 
@@ -454,6 +454,12 @@ from main through two polls; a bad resumed index refutes and panics natively. Co
 proofs cover the async factory, not deferred execution. Unbounded polling, arbitrary coroutine root
 states, waker operations and executor internals remain incomplete.
 
+Explicit `--async-entry` selectors construct fresh concrete factory returns from supported inputs
+and poll each feasible Pending state until Ready. Shared execution limits prevent forever-Pending
+paths from proving. Executor input handles, startup history, coroutine induction, cancellation,
+returned-output drops and native replay are not supplied by this entry mode. Initialization roots
+remain separately selectable and report their own result.
+
 Integer-derived thin pointer handles support address casts, address exposure, equality and null
 checks. Numeric constants without allocation provenance preserve their exact target-width address.
 Copied handles and aggregate storage retain that address. Core pointer-atomic construction checks
@@ -560,7 +566,7 @@ loads, including static fields at nonzero offsets. Every load returns arbitrary 
 address bits. A saved observation stays consistent, but separate reads and initializer-specific
 claims can refute under the reported abstraction. Startup mode supplies no additional pointer
 history or pointee provenance. Raw intrinsic loads, loaded-pointer dereferences, volatile loads,
-and pointer compare-exchange remain unsupported.
+and general raw atomic destinations remain unsupported.
 
 Host/ARM debug and optimized fixtures cover legal comparisons, guarded ordering, uninitialized
 receivers, numeric intrinsic destinations, conservative local and shared reads, and startup
@@ -582,3 +588,18 @@ loaded observations, caller storage, forward/reverse representation changes and 
 Zero-address conversions refute validity. Removing a nonzero guard fails the proof, and corrupting
 an address round trip refutes and panics in native tests. Supported native cases publish both null
 options and nonnull handles; ordinary shared payload reads still remain UNKNOWN.
+
+Thin raw-pointer root inputs carry arbitrary target-width address bits, including nested struct
+fields. Compiler nonnull pointer patterns constrain those bits to be nonzero. These inputs provide
+no pointee storage, provenance, alignment or executor initialization history. Fat pointer inputs
+remain UNKNOWN. Guard mutations refute and fail native checks; nonnull roots, nested fields and
+unsupported dereferences are checked on host and ARM in debug and optimized configurations.
+
+Thin pointer compare-exchange validates the same compiler-typed initialized storage as pointer
+loads. Strong CAS succeeds exactly when the observed old address matches the expected address;
+weak CAS also permits spurious failure. Both Result variants carry that same arbitrary observed
+address, without pointee provenance or retained update history. Failure Release and AcqRel produce
+panic obligations. A possible pointer publication invalidates startup and existing owned atomic
+histories.
+Address/order guard mutations fail symbolic and native tests; matching observed bits do not
+permit dereferencing a returned pointer. Numeric intrinsic destinations remain unsupported.

@@ -610,6 +610,16 @@ execution budgets remain UNKNOWN. Fixtures include nested futures, shared slots,
 cancellation effects/panics, completion checks, mutations and native replay. A binary main fixture
 checks its resumed async body, including a refuted index mutation.
 
+An explicit `--async-entry` starts from a concrete factory rather than arbitrary coroutine state.
+Factory source arguments use the normal validated root input model. Its return must be a fresh
+constructed compiler coroutine, with a compiler Pin receiver and Poll return type. Separate
+tracked allocations hold the future and an opaque valid Context. All feasible Pending returns
+feed their memory and path conditions into another poll; Ready returns are never polled again.
+All polls share the root's step and time limits. A forever-Pending path cannot complete a proof.
+This root covers construction and reached polls, excluding executor behavior, cancellation and
+returned-output destruction. It carries no startup assumptions and supports no coroutine induction
+or native replay. Host/ARM positive, refuted, unknown and mutated fixtures check this boundary.
+
 ## Thin pointer handles
 
 The ordinary interpreter represents an integer-derived thin pointer as a target-width bit-vector
@@ -834,7 +844,10 @@ The nonvolatile atomic-store intrinsic can write primitive integer and thin-poin
 certified writable static storage. Its compiler signature, concrete ordering and volatile option
 are validated. Actual pointer-store wrapper MIR still executes after an early ordering obligation;
 invalid acquire stores are REFUTED even when the error-formatting path is unsupported. Writes retain
-reference evidence and end precise startup history. Pointer loads, integer-derived destinations,
+reference evidence and end precise startup history. Compiler-identified thin pointer loads and CAS
+check ordering and storage, returning arbitrary observed address bits without pointee provenance.
+Strong CAS matches old and expected addresses; weak CAS can spuriously fail. Possible pointer
+publication ends precise startup and existing owned atomic histories. Integer-derived destinations,
 uncertified type changes and volatile atomic operations stay UNKNOWN.
 
 
@@ -842,4 +855,5 @@ The integer RMW transition family shares structural SMT operations for wrapping 
 AND/OR/XOR/NAND and signed/unsigned minimum/maximum. Each RMW returns the pre-update value; tracked
 local and supported startup storage retain its replacement. Compiler receiver identity, primitive
 signature, widths, signedness and SMT sorts are checked. A shared access still receives an arbitrary
-old value and retains no update history. Boolean and pointer RMWs remain UNKNOWN.
+old value and retains no update history. Boolean RMWs and pointer arithmetic/bitwise RMWs remain
+UNKNOWN.

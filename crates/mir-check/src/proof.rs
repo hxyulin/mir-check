@@ -18,6 +18,7 @@ const MAX_INPUT_VALUES: usize = 512;
 
 mod aggregates;
 mod array_equality;
+mod async_entries;
 mod atomic_intrinsics;
 mod atomic_rmw;
 mod builtins;
@@ -37,6 +38,7 @@ mod library;
 mod membership;
 mod memory;
 mod owned_iterators;
+mod pointer_atomic_cas;
 mod pointer_atomic_shapes;
 mod pointer_atomics;
 mod pointer_handles;
@@ -113,15 +115,27 @@ struct Engine<'tcx> {
         std::cell::RefCell<std::collections::HashMap<ty::Instance<'tcx>, ty::PolyFnSig<'tcx>>>,
 }
 
+pub struct VerificationOptions {
+    pub all_failures: bool,
+    pub induction: bool,
+    pub startup: bool,
+    pub async_entry: bool,
+    pub limits: mir_check::AnalysisLimits,
+}
+
 pub fn verify(
     tcx: TyCtxt<'_>,
     id: DefId,
     config: &mir_check::ContractConfig,
-    all_failures: bool,
-    induction: bool,
-    startup: bool,
-    limits: mir_check::AnalysisLimits,
+    options: VerificationOptions,
 ) -> Proof {
+    let VerificationOptions {
+        all_failures,
+        induction,
+        startup,
+        async_entry,
+        limits,
+    } = options;
     let mut engine = Engine {
         tcx,
         terms: Context::default(),
@@ -154,6 +168,7 @@ pub fn verify(
         call_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
         proof: Proof {
             status: ProofStatus::Proved,
+            async_entry,
             assumptions: Vec::new(),
             entry_assumptions: Vec::new(),
             inputs: BTreeMap::new(),
@@ -167,7 +182,7 @@ pub fn verify(
             replay_inputs: None,
         },
     };
-    let result = engine.root(id);
+    let result = engine.root(id, async_entry);
     if let Err(reason) = result
         && !engine.proof.stopped_after_counterexample
     {
@@ -196,8 +211,20 @@ pub fn verify(
 }
 
 impl<'tcx> Engine<'tcx> {
-    fn root(&mut self, id: DefId) -> Result<(), String> {
+    fn root(&mut self, id: DefId, async_entry: bool) -> Result<(), String> {
         let body = self.tcx.optimized_mir(id);
+        if async_entry && (self.startup || self.induction) {
+            return Err(
+                "async entries cannot inherit executor startup history or use induction; \
+                 check separately"
+                    .into(),
+            );
+        }
+        if async_entry && !body.return_ty().is_coroutine() {
+            return Err(
+                "--async-entry requires a factory returning a concrete compiler coroutine".into(),
+            );
+        }
         let mut conditions = Vec::new();
         let mut arguments = Vec::new();
         let mut memory = Memory::default();
@@ -280,7 +307,9 @@ impl<'tcx> Engine<'tcx> {
                 arguments.push(self.argument(id, ty, &mut conditions)?);
             }
         }
-        self.proof.replay_inputs = Some(self.replay_arguments(id, &arguments));
+        if !async_entry {
+            self.proof.replay_inputs = Some(self.replay_arguments(id, &arguments));
+        }
         let snapshots = self.snapshots(&arguments, &memory, &conditions)?;
         let instance = ty::Instance::new_raw(id, ty::GenericArgs::identity_for_item(self.tcx, id));
         let bindings = self.configured_bindings(body, &snapshots, instance)?;
@@ -317,6 +346,9 @@ impl<'tcx> Engine<'tcx> {
             }
             return self.inductive_root(instance, arguments, conditions, memory);
         }
+        if async_entry {
+            return self.async_factory_root(instance, arguments, conditions, memory);
+        }
         self.execute(instance, arguments, conditions, memory, &[])?;
         Ok(())
     }
@@ -329,6 +361,10 @@ impl<'tcx> Engine<'tcx> {
             Value::Int { expression, .. }
             | Value::Float { expression, .. }
             | Value::Bool(expression) => expression.smt(self.limits.max_query_bytes)?,
+            Value::RawPointer { address, .. } => format!(
+                "raw address {}; no pointee provenance",
+                address.smt(self.limits.max_query_bytes)?
+            ),
             Value::Bytes { length, data } => format!(
                 "len={}, data={}",
                 length.integer()?.0.smt(self.limits.max_query_bytes)?,
@@ -380,7 +416,6 @@ impl<'tcx> Engine<'tcx> {
             | Value::MetadataPointer(_)
             | Value::StaticText
             | Value::FormatArguments
-            | Value::RawPointer { .. }
             | Value::TrackedPointer { .. }
             | Value::StaticSlice { .. }
             | Value::StaticView { .. }
@@ -534,6 +569,13 @@ impl<'tcx> Engine<'tcx> {
         if let Some(bits) = self.float_type(ty) {
             let raw = self.fresh(Sort::BitVec(bits));
             return Ok(symbolic::float_from_bits(&self.terms, raw, bits));
+        }
+        if self.thin_raw_pointer(ty) {
+            let bits = u32::from(self.tcx.sess.target.pointer_width);
+            return Ok(Value::RawPointer {
+                address: self.fresh(Sort::BitVec(bits)),
+                bits,
+            });
         }
         if self.is_task_context(ty) {
             let context = self

@@ -38,6 +38,7 @@ struct Checker {
     report_dir: Option<PathBuf>,
     error: Option<String>,
     entries: Vec<String>,
+    async_entries: Vec<String>,
     rustc_arguments: Vec<String>,
     verify: bool,
     verbose: bool,
@@ -103,6 +104,26 @@ impl Callbacks for Checker {
                     }
                 }
             }
+        }
+        let conflicting = report.functions.iter().find(|function| {
+            let selected = self
+                .entries
+                .iter()
+                .filter(|entry| mir_check::entry_matches(&report.crate_name, &function.name, entry))
+                .count();
+            let async_selected = self
+                .async_entries
+                .iter()
+                .filter(|entry| mir_check::entry_matches(&report.crate_name, &function.name, entry))
+                .count();
+            async_selected != 0 && selected > async_selected
+        });
+        if let Some(function) = conflicting {
+            self.error = Some(format!(
+                "entry {:?} is selected by both --entry and --async-entry; choose one scope",
+                function.name
+            ));
+            return Compilation::Stop;
         }
         let missing = self.entries.iter().find(|entry| {
             !report
@@ -179,10 +200,15 @@ impl Callbacks for Checker {
                             tcx,
                             id.to_def_id(),
                             &config,
-                            self.all_failures,
-                            self.induction,
-                            self.startup,
-                            self.limits,
+                            proof::VerificationOptions {
+                                all_failures: self.all_failures,
+                                induction: self.induction,
+                                startup: self.startup,
+                                async_entry: self.async_entries.iter().any(|entry| {
+                                    mir_check::entry_matches(&crate_name, &function.name, entry)
+                                }),
+                                limits: self.limits,
+                            },
                         ));
                         completed += 1;
                         if function.proof.as_ref().is_some_and(|proof| {
@@ -398,6 +424,24 @@ fn main() -> ExitCode {
     } else {
         Vec::new()
     };
+    let async_entries = if report_dir.is_some() {
+        match std::env::var("MIR_CHECK_ASYNC_ENTRIES") {
+            Ok(value) => match serde_json::from_str(&value) {
+                Ok(entries) => entries,
+                Err(error) => {
+                    eprintln!("mir-check: invalid MIR_CHECK_ASYNC_ENTRIES: {error}");
+                    return ExitCode::FAILURE;
+                }
+            },
+            Err(std::env::VarError::NotPresent) => Vec::new(),
+            Err(error) => {
+                eprintln!("mir-check: invalid MIR_CHECK_ASYNC_ENTRIES: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        Vec::new()
+    };
     let limits = match AnalysisLimits::from_environment() {
         Ok(limits) => limits,
         Err(error) => {
@@ -410,6 +454,7 @@ fn main() -> ExitCode {
         report_dir,
         error: None,
         entries,
+        async_entries,
         rustc_arguments: Vec::new(),
         verify: std::env::var_os("MIR_CHECK_VERIFY").is_some(),
         verbose: false,
@@ -441,12 +486,15 @@ fn main() -> ExitCode {
         {
             println!(
                 "Usage: mir-check [--json] [--summary] [--verify] [--entry FUNCTION] \
+                [--async-entry FACTORY] \
                 [--contracts FILE] [--allow-assumptions] [--all-failures] [--induction] \
                 [--startup] [--replay] [--verbose] [--quiet] \
                 [--color auto|always|never] [--jsonl FILE|-] -- \
                 <rustc arguments>\n\
                 Or: mir-check --verify --from-report FILE [--entry FUNCTION] [display options]\n\
                 Without --entry, --verify checks every inventoried MIR body in the crate.\n\
+                --async-entry checks a fresh future factory and polls its body until Ready.\n\
+                Pending paths continue under the execution limits; unsupported inputs fail.\n\
                 --from-report recompiles with saved arguments; it does not reuse saved proofs.\n\
                 --verify proves panic safety for a restricted MIR subset; unknown proofs fail.\n\
                 --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
@@ -579,6 +627,26 @@ fn main() -> ExitCode {
                     }
                     checker.contracts_path = Some(PathBuf::from(args.remove(1)));
                 }
+                Some("--async-entry") => {
+                    args.remove(1);
+                    if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
+                        eprintln!("mir-check: --async-entry requires a factory name");
+                        return ExitCode::FAILURE;
+                    }
+                    let entry = args.remove(1);
+                    checker.entries.push(entry.clone());
+                    checker.async_entries.push(entry);
+                }
+                Some(value) if value.starts_with("--async-entry=") => {
+                    let entry = value[14..].to_owned();
+                    if entry.is_empty() {
+                        eprintln!("mir-check: --async-entry requires a factory name");
+                        return ExitCode::FAILURE;
+                    }
+                    args.remove(1);
+                    checker.entries.push(entry.clone());
+                    checker.async_entries.push(entry);
+                }
                 Some("--entry") => {
                     args.remove(1);
                     if args.get(1).is_none_or(|arg| arg.starts_with('-')) {
@@ -663,6 +731,10 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+    }
+    if !checker.async_entries.is_empty() && !checker.verify {
+        eprintln!("mir-check: --async-entry requires --verify");
+        return ExitCode::FAILURE;
     }
     if checker.startup && !checker.verify {
         eprintln!("mir-check: --startup requires --verify");

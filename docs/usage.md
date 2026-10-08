@@ -314,6 +314,32 @@ body; the report records the construction model explicitly. Arbitrary coroutine 
 async polling, executor state and unsupported hardware operations can still prevent completion.
 This mode does not run the application's main on the host.
 
+Use `--async-entry FACTORY` to check a concrete async factory independently of its startup caller:
+
+```sh
+mir-check --verify --async-entry sample_task --entry initialization --from-report inventory.json
+cargo mir-check --verify --async-entry sample_task --entry initialization
+```
+
+The selector uses the exact inventoried factory name, including macro-generated module paths when
+needed. It executes the factory with supported arbitrary source inputs, creates fresh tracked
+future storage and a valid opaque task context, then checks every reached poll. Pending branches
+resume with their previous state; Ready branches finish without polling a completed future.
+Ordinary `--entry FACTORY` continues to check construction only. Human reports label async roots
+`(async construction + polls)`, and JSON records `proof.async_entry`. Older reports without that
+field default to ordinary scope. Selecting the same root through both flags is an error, including
+crate-qualified aliases. The two entries above produce
+independent results: initialization can refute while the async body proves.
+
+This checks task execution from fresh construction; it does not infer state established by
+initialization or execute an executor. Unsupported factory inputs remain UNKNOWN, including opaque
+executor handles. Infinite polling still requires an invariant and ends UNKNOWN at the shared
+resource limits. Executor operations, scheduling, cancellation and dropping the returned output
+are outside the async entry. Native counterexample replay does not yet generate an async caller.
+Run startup and async checks separately: `--startup` would import entry-time initializer facts into
+a task that runs later, and `--induction` does not yet represent suspended coroutine state. These
+combinations report UNKNOWN rather than adding an unchecked executor history.
+
 ## Work through UNKNOWN
 
 Start with an inventory or a small root, then inspect the summary's gap reasons. An unsupported

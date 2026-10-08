@@ -83,7 +83,7 @@ pub fn a_constructor_panic_is_checked(cookie: usize) {
     let _ = Handle::new(cookie);
 }
 
-pub fn arbitrary_pointer_inputs_are_unknown(pointer: *const u8) -> bool {
+pub fn arbitrary_pointer_inputs_preserve_observed_bits(pointer: *const u8) -> bool {
     pointer.is_null()
 }
 

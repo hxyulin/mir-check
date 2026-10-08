@@ -48,12 +48,7 @@ impl<'tcx> Engine<'tcx> {
             "pointer atomic load requires a valid non-release ordering".into(),
         )?;
         state.conditions.push(safe);
-        if matches!(receiver, Value::StaticView { .. }) {
-            self.static_atomic_storage(receiver, receiver_ty, pointer_ty, state)?;
-        } else {
-            self.validate_tracked_value(receiver, state)?;
-            self.validate_pointer_atomic_value(receiver_ty, pointer_ty, receiver, state, 0)?;
-        }
+        self.validate_pointer_atomic_receiver(receiver_ty, pointer_ty, receiver, state)?;
         self.record_model(
             callee,
             "pointer atomic load; arbitrary address bits without pointee provenance or history",
@@ -67,6 +62,22 @@ impl<'tcx> Engine<'tcx> {
             ),
             bits,
         }))
+    }
+
+    pub(super) fn validate_pointer_atomic_receiver(
+        &self,
+        receiver_ty: Ty<'tcx>,
+        pointer_ty: Ty<'tcx>,
+        receiver: &Value,
+        state: &State,
+    ) -> Result<(), String> {
+        if matches!(receiver, Value::StaticView { .. }) {
+            self.static_atomic_storage(receiver, receiver_ty, pointer_ty, state)?;
+        } else {
+            self.validate_tracked_value(receiver, state)?;
+            self.validate_pointer_atomic_value(receiver_ty, pointer_ty, receiver, state, 0)?;
+        }
+        Ok(())
     }
 
     fn validate_pointer_atomic_value(

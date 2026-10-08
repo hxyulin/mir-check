@@ -153,6 +153,8 @@ pub struct Function {
 pub struct Proof {
     pub status: ProofStatus,
     #[serde(default)]
+    pub async_entry: bool,
+    #[serde(default)]
     pub stopped_after_counterexample: bool,
     pub assumptions: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -451,7 +453,12 @@ pub fn render(report: &Report) -> String {
             let _ = writeln!(output, "    bb{} local call -> {}", call.block, call.callee);
         }
         if let Some(proof) = &function.proof {
-            let _ = writeln!(output, "    verification: {}", proof.status.label());
+            let scope = if proof.async_entry {
+                " (async construction + polls)"
+            } else {
+                ""
+            };
+            let _ = writeln!(output, "    verification: {}{scope}", proof.status.label());
             if proof.stopped_after_counterexample {
                 let _ = writeln!(output, "      stopped after first counterexample");
             }

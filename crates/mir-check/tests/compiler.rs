@@ -2306,7 +2306,7 @@ fn population_counts_are_exact_for_signed_and_target_width_integers_on_host_and_
         ("bad_bound", ProofStatus::Refuted),
         ("bad_signed", ProofStatus::Refuted),
         ("user_method", ProofStatus::Refuted),
-        ("unsupported", ProofStatus::Unknown),
+        ("address_bits_have_a_population_count", ProofStatus::Proved),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         let args = target

@@ -225,7 +225,7 @@ fn claiming_an_occupied_counter_panics() {
     occupied_counter_claim();
 }
 
-pub fn pointer_cas_is_unknown() {
+pub fn pointer_cas_checks_primitive_orderings() {
     let word = core::sync::atomic::AtomicPtr::<()>::new(core::ptr::null_mut());
     let _ = word.compare_exchange(
         core::ptr::null_mut(),

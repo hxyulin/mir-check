@@ -30,12 +30,15 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     {
         println!(
             "Usage: cargo mir-check [--verify] [--summary] [--entry FUNCTION] \
+            [--async-entry FACTORY] \
             [--no-dependency-mir] [--contracts FILE] [--allow-assumptions] \
             [--all-failures] [--induction] [--startup] [--replay] \
             [--verbose] [--color auto|always|never] [--quiet] [--jsonl FILE|-] \
             [cargo check arguments]\n\
             Analyzes workspace members with a pinned compiler and writes JSON reports.\n\
             Repeat --entry to select exact or crate-qualified roots; missing roots fail.\n\
+            --async-entry polls a fresh future factory through Pending until Ready.\n\
+            Unsupported inputs or exhausted execution limits remain UNKNOWN.\n\
             Dependency MIR is retained by default; --no-dependency-mir disables retention.\n\
             Without --entry, --verify requires all local bodies to pass.\n\
             --induction uses experimental Spacer proofs for supported cyclic root bodies.\n\
@@ -55,6 +58,7 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut jsonl = None;
     let mut dependency_mir = true;
     let mut entries = Vec::new();
+    let mut async_entries = Vec::new();
     let mut contracts_path = None;
     let mut allow_assumptions = false;
     let mut all_failures = false;
@@ -109,6 +113,17 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
                 let path = args.next().ok_or("--contracts requires a JSON file")?;
                 contracts_path = Some(std::fs::canonicalize(PathBuf::from(path))?);
             }
+            Some("--async-entry") => {
+                let name = args.next().ok_or("--async-entry requires a factory name")?;
+                let name = entry_name(name)?;
+                entries.push(name.clone());
+                async_entries.push(name);
+            }
+            Some(text) if text.starts_with("--async-entry=") => {
+                let name = entry_name(OsString::from(&text[14..]))?;
+                entries.push(name.clone());
+                async_entries.push(name);
+            }
             Some("--entry") => {
                 let name = args.next().ok_or("--entry requires a function name")?;
                 entries.push(entry_name(name)?);
@@ -128,6 +143,9 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .any(|arg| arg == "--target-dir" || arg.to_string_lossy().starts_with("--target-dir="))
     {
         return Err("--target-dir is managed by mir-check to prevent stale inventories".into());
+    }
+    if !async_entries.is_empty() && !verify {
+        return Err("--async-entry requires --verify".into());
     }
     if startup && !verify {
         return Err("--startup requires --verify".into());
@@ -164,6 +182,10 @@ fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         .env_remove("RUSTC_WRAPPER")
         .env("MIR_CHECK_REPORT_DIR", &reports)
         .env("MIR_CHECK_ENTRIES", serde_json::to_string(&entries)?)
+        .env(
+            "MIR_CHECK_ASYNC_ENTRIES",
+            serde_json::to_string(&async_entries)?,
+        )
         .env("CARGO_INCREMENTAL", "0");
     command.env("MIR_CHECK_LIMITS", serde_json::to_string(&limits)?);
     command.env("MIR_CHECK_COLOR", color.argument());

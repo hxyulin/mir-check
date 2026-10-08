@@ -263,6 +263,11 @@ impl<'tcx> Engine<'tcx> {
         if let Some(value) = self.pointer_atomic_load(instance, receiver_ty, values, state, site)? {
             return Ok(Some(value));
         }
+        if let Some(value) =
+            self.pointer_atomic_compare_exchange(instance, receiver_ty, values, state, site)?
+        {
+            return Ok(Some(value));
+        }
         let Some(Value::Atomic { bits, signed }) = self.atomic_shape(receiver_ty) else {
             return Ok(None);
         };

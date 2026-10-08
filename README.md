@@ -342,6 +342,12 @@ A standalone binary fixture proves from main through two polls and rejects a bad
 Unbounded async polling, arbitrary coroutine inputs, waker operations and executor internals remain
 UNKNOWN. See [constructed async futures](docs/proofs.md#constructed-async-futures).
 
+Use `--async-entry FACTORY` to construct and repeatedly poll a fresh async task without a polling
+harness. It preserves state across Pending and stops at Ready, sharing the root resource limits.
+Initialization can be selected independently with `--entry`. Unsupported executor handles,
+unbounded suspension and executor behavior remain UNKNOWN; startup history is not inherited by
+the async entry. See [entry selection](docs/usage.md#select-roots) for the scope and limits.
+
 Lifetime-only mutable-reference casts now preserve tracked storage. An explicit trusted
 `returns_alias` clause can also preserve a named mutable-reference argument, with the claimed
 memory effects and existing escape checks. Assumptions remain visible even when a root ends in
@@ -387,3 +393,8 @@ formatting setup. Concrete shared references can coerce to opaque core Debug ref
 storage identity through reborrows, local aggregates and returns. Creating the reference does not
 execute a formatter. Dynamic formatter calls, general trait-object inputs and vtable operations
 remain UNKNOWN. See [error formatting boundaries](docs/proofs.md#error-formatting-boundaries).
+
+Thin raw-pointer inputs and pointer atomic compare-exchange support address-only reasoning without
+pointee provenance. Compiler nonnull input patterns exclude zero; dereferencing numeric inputs
+remains UNKNOWN. Pointer CAS validates orderings and allows weak spurious failures, with arbitrary
+old addresses and no retained pointer update history.

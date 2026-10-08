@@ -148,8 +148,8 @@ fn large_root_shapes_materialize_only_supported_projected_values() {
         ("tuple_and_nested_arrays", ProofStatus::Proved),
         ("ambiguous_composite_index", ProofStatus::Unknown),
         (
-            "an_unused_pointer_is_still_unsupported",
-            ProofStatus::Unknown,
+            "unused_raw_address_fields_are_supported",
+            ProofStatus::Proved,
         ),
         (
             "an_unused_reference_is_still_unsupported",

@@ -538,6 +538,14 @@ waker and context construction have explicit compiler-identified models. Waker o
 operations, arbitrary coroutine root inputs, unsupported saved values and unbounded async polling
 remain UNKNOWN. Executor infrastructure is not modeled by this support.
 
+`--async-entry FACTORY` selects fresh async execution without a handwritten polling harness.
+Supported source inputs construct a tracked future; every feasible Pending return resumes the
+same storage until Ready. A valid opaque Context supplies no waker or executor behavior. All polls
+share the root execution limits, so unbounded suspension remains UNKNOWN. Ordinary `--entry` on a
+factory still proves construction only. Startup history, coroutine induction, cancellation,
+returned-output drops and native replay are outside this explicit async root. Initialization and
+async entries can produce separate results in one ordinary scan; use separate runs for startup.
+
 Thin raw pointers constructed from integer addresses now retain target-width address terms through
 casts, equality, null checks and aggregate storage. Numeric pointer constants without allocation
 provenance are accepted. Core pointer-atomic construction checks the actual single-field wrapper
@@ -733,7 +741,8 @@ Integer atomic RMWs include `fetch_add`, `fetch_sub`, `fetch_and`, `fetch_or`, `
 `fetch_nand`, `fetch_min` and `fetch_max`. Arithmetic wraps, NAND complements the entire integer
 width, and extrema respect signedness. They use one structural transition implementation for owned
 local and explicit startup histories. Shared or invalidated atomics still allow arbitrary old
-values; an RMW does not establish exclusivity. Boolean and pointer RMWs remain UNKNOWN.
+values; an RMW does not establish exclusivity. Boolean RMWs and pointer arithmetic/bitwise RMWs
+remain UNKNOWN.
 
 Static no-destructor drops retire their certified, nonempty typed subobject. Later reads and borrows
 check overlapping retirements, including old references and atomic receivers. A validated ordinary
@@ -759,3 +768,10 @@ Typed static stores verify compiler scalar patterns before accepting a value, in
 `NonNull` field's `!null` pointer pattern and supported integer range/or patterns. The predicate
 must follow from current path conditions or the store stays UNKNOWN. These stores preserve the
 existing opaque storage and escape rules; publishing a handle supplies no retained payload history.
+
+Thin raw-pointer root arguments provide arbitrary target-width address bits; compiler nonnull
+patterns exclude zero. Pointer atomic load and compare-exchange validate initialized compiler
+storage without granting pointee provenance. Strong CAS matches old/expected addresses, and weak
+CAS can spuriously fail. Possible pointer publication invalidates startup and existing owned atomic
+histories.
+Returned numeric handles cannot authorize pointee reads; pointer update histories remain unverified.

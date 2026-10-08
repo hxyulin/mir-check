@@ -431,9 +431,14 @@ pub fn render_report(report: &Report, verbose: bool, colored: bool) -> String {
         let proof = function.proof.as_ref().expect("selected root");
         let _ = writeln!(
             output,
-            "  {} {}",
+            "  {} {}{}",
             paint(proof.status.label(), status_color(proof.status), colored),
-            function.name
+            function.name,
+            if proof.async_entry {
+                " (async construction + polls)"
+            } else {
+                ""
+            }
         );
         if proof.status != ProofStatus::Proved {
             for assumption in &proof.entry_assumptions {

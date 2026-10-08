@@ -191,7 +191,7 @@ pub struct HiddenPointer {
     pub pointer: *const u16,
 }
 
-pub fn an_unused_pointer_is_still_unsupported(input: &HiddenPointer) -> bool {
+pub fn unused_raw_address_fields_are_supported(input: &HiddenPointer) -> bool {
     input.records[0].enabled
 }
 
@@ -364,7 +364,7 @@ pub fn shapes_cached_by_previous_fields_still_obey_depth(input: &SharedDepthProb
 
 pub struct SharedUnsupportedProbe {
     pub payloads: Shelves,
-    pub unused: *const u16,
+    pub unused: fn() -> u16,
 }
 
 pub fn cached_shapes_do_not_hide_unsupported_types(input: &SharedUnsupportedProbe) {

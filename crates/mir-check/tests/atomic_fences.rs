@@ -189,7 +189,10 @@ fn cas_preserves_result_relations_ordering_checks_and_spurious_failures() {
         ("cas_history_remains_arbitrary", ProofStatus::Refuted),
         ("fresh_counter_claim", ProofStatus::Proved),
         ("occupied_counter_claim", ProofStatus::Refuted),
-        ("pointer_cas_is_unknown", ProofStatus::Unknown),
+        (
+            "pointer_cas_checks_primitive_orderings",
+            ProofStatus::Proved,
+        ),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         for optimized in [false, true] {

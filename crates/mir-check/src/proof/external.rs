@@ -256,6 +256,17 @@ impl<'tcx> Engine<'tcx> {
         Ok(())
     }
 
+    pub(super) fn invalidate_published_atomics(
+        state: &State,
+        memory: &mut Memory,
+    ) -> Result<(), String> {
+        memory.invalidate_startup();
+        for value in state.locals.iter().chain(state.memory.iter()).flatten() {
+            Self::invalidate_local_atomics(value, memory)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn trusted_call(
         &mut self,
         instance: ty::Instance<'tcx>,
@@ -336,7 +347,6 @@ impl<'tcx> Engine<'tcx> {
             return Ok(Some(Vec::new()));
         }
         let mut memory = state.memory.clone();
-        memory.invalidate_startup();
         if let Some(modifies) = &spec.modifies {
             for name in modifies {
                 let index = names
@@ -415,9 +425,7 @@ impl<'tcx> Engine<'tcx> {
         }
         // A trusted call may publish an atomic without changing its value during the call.
         // Even an empty modifies list cannot certify absence of subsequent interference.
-        for value in state.locals.iter().chain(state.memory.iter()).flatten() {
-            Self::invalidate_local_atomics(value, &mut memory)?;
-        }
+        Self::invalidate_published_atomics(state, &mut memory)?;
         let output = signature.output();
         let (result, result_binding) = if let Some(name) = &spec.returns_alias {
             let index = names

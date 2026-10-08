@@ -94,7 +94,10 @@ fn thin_pointer_handles_preserve_addresses_without_enabling_memory_access_on_hos
         ("wrong_roundtrip", ProofStatus::Refuted),
         ("wrong_comparison", ProofStatus::Refuted),
         ("a_constructor_panic_is_checked", ProofStatus::Refuted),
-        ("arbitrary_pointer_inputs_are_unknown", ProofStatus::Unknown),
+        (
+            "arbitrary_pointer_inputs_preserve_observed_bits",
+            ProofStatus::Proved,
+        ),
         ("pointer_arithmetic_is_unknown", ProofStatus::Unknown),
         (
             "atomic_pointer_reads_keep_only_observed_bits",

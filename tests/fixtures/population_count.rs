@@ -52,6 +52,6 @@ pub fn user_method() {
     Pretender.count_ones();
 }
 
-pub fn unsupported(value: *const u8) -> u32 {
+pub fn address_bits_have_a_population_count(value: *const u8) -> u32 {
     (value as usize).count_ones()
 }

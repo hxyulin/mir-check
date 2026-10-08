@@ -56,6 +56,14 @@ impl<'tcx> Engine<'tcx> {
         if depth >= MAX_INPUT_DEPTH {
             return Err("input pattern nesting limit reached".to_owned());
         }
+        if matches!(*pattern, ty::PatternKind::NotNull) {
+            let Value::RawPointer { address, bits } = value else {
+                return Err("non-null input pattern requires a thin pointer address".into());
+            };
+            let zero = self.terms.bit_vector(0, *bits)?;
+            let equal = self.terms.apply(Op::Equal, &[address.clone(), zero])?;
+            return self.terms.apply(Op::Not, &[equal]);
+        }
         let (_, bits, signed) = value.integer()?;
         match *pattern {
             ty::PatternKind::Range { start, end } => {
@@ -90,7 +98,7 @@ impl<'tcx> Engine<'tcx> {
                 self.terms.apply(Op::Or, &alternatives)
             }
             ty::PatternKind::NotNull => {
-                Err("non-null pointer input patterns remain unsupported".to_owned())
+                Err("non-null input pattern requires a thin pointer address".into())
             }
         }
     }
