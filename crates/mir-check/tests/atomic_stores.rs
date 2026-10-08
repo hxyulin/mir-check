@@ -107,7 +107,10 @@ fn atomic_stores_check_ordering_provenance_types_and_escape_on_host_and_arm() {
             ProofStatus::Unknown,
         ),
         ("volatile_stores_remain_unknown", ProofStatus::Unknown),
-        ("pointer_loads_need_their_own_model", ProofStatus::Unknown),
+        (
+            "pointer_loads_preserve_only_observed_address_bits",
+            ProofStatus::Proved,
+        ),
     ];
     for target in [None, Some("thumbv7em-none-eabihf")] {
         for optimized in [false, true] {

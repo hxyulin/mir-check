@@ -541,10 +541,14 @@ remain UNKNOWN. Executor infrastructure is not modeled by this support.
 Thin raw pointers constructed from integer addresses now retain target-width address terms through
 casts, equality, null checks and aggregate storage. Numeric pointer constants without allocation
 provenance are accepted. Core pointer-atomic construction checks the actual single-field wrapper
-layouts and stores the handle; pointer-atomic loads/stores remain unsupported. This lets available
-constructor bodies execute without a raw-pointer memory model. Arbitrary pointer inputs, allocation
-provenance, reference-to-pointer conversion, metadata-bearing pointers, pointer arithmetic and
-memory access remain UNKNOWN. Host/ARM tests cover signed and truncating casts, copies,
+layouts and stores the handle. Pointer-atomic loads validate the compiler method signature,
+ordering and initialized static or tracked wrapper, then return fresh arbitrary address bits.
+One observation retains consistent comparisons; separate loads have no stable-address or
+pointee-provenance facts, including in startup mode. Release and AcqRel load orderings can panic.
+Pointer stores retain the validated publication model. Raw intrinsic loads and loaded-pointer
+dereferences remain UNKNOWN. Arbitrary pointer inputs, metadata-bearing pointers, pointer
+arithmetic and general raw memory access remain unsupported. Host/ARM tests cover signed and
+truncating casts, copies,
 constructors, false claims and source mutations with native replay.
 
 Lifetime-only mutable-reference transmutes preserve the tracked allocation and projection when
@@ -690,7 +694,8 @@ pointer values at writable certified static destinations. The actual core wrappe
 pointer-store ordering checks report invalid acquire orderings before formatting its panic path.
 Stores retain tracked pointer reference evidence and invalidate precise startup histories. A
 pointer to frame-owned storage cannot escape through a static atomic. Integer-derived destinations,
-uncertified type changes, pointer loads and volatile atomic operations remain UNKNOWN.
+uncertified type changes and volatile atomic operations remain UNKNOWN. Pointer loads have a
+separate conservative model with no pointee provenance or retained history.
 
 `UnsafeCell` casts can reach an actual initialized subobject at offset zero inside its payload,
 including compiler alignment wrappers. The wrapper must preserve its payload layout, and each
@@ -737,3 +742,8 @@ restore a retired parent; stores never revive an invalidated epoch or retain a r
 Initialization markers are branch-local and capped at 128 pending subobjects. Zero-sized drops,
 static destructors and actual static payload moves remain UNKNOWN. Terminal guidance points to the
 missing reinitializing store rather than suggesting larger solver limits.
+
+Integer and pointer static atomics share compiler-identified receiver, payload, extent and
+initialization checks. Pointer atomic constructors and tracked load receivers also share their
+single-field compiler wrapper admission rules. These checks certify storage and representation;
+they provide no exclusivity, synchronization or retained runtime history.

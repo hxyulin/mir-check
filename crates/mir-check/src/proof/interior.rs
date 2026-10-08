@@ -260,6 +260,9 @@ impl<'tcx> Engine<'tcx> {
             self.record_model(callee, "scalar Cell storage; aliases share updates");
             return Ok(Some(result));
         }
+        if let Some(value) = self.pointer_atomic_load(instance, receiver_ty, values, state, site)? {
+            return Ok(Some(value));
+        }
         let Some(Value::Atomic { bits, signed }) = self.atomic_shape(receiver_ty) else {
             return Ok(None);
         };
@@ -547,7 +550,7 @@ impl<'tcx> Engine<'tcx> {
         })
     }
 
-    fn atomic_order(
+    pub(super) fn atomic_order(
         &self,
         order: &Value,
         ordering_ty: Ty<'tcx>,

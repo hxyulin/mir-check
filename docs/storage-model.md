@@ -268,3 +268,18 @@ values nor noninterference facts and cannot revive an epoch lost to unknown effe
 retirements have a 128-subobject limit. Static destructors, static payload moves and zero-sized
 retirements remain UNKNOWN until their typed initialization effects are implemented. This stage
 tracks missing static initialization, not general partial initialization or owned move semantics.
+
+
+## Pointer atomic observations
+
+A supported pointer atomic load reads certified initialized static storage or an initialized
+compiler-shaped tracked wrapper. Shared integer and pointer receiver checks use the exact compiler
+Atomic identity, payload type, scalar extent and access capability. Wrapper construction and
+tracked receiver validation use one compiler-layout admission rule, rather than independent
+size or name guesses.
+
+The load produces a fresh arbitrary thin-pointer address at the target width. It does not retain
+the stored handle, its provenance or an initializer history. Comparisons and null checks operate
+on that observation; a later load creates another independent observation. Atomic ordering checks
+cover the wrapper's panic conditions, without creating synchronization or history permission.
+These rules also apply under startup mode. Dereferencing the loaded pointer remains unsupported.

@@ -64,35 +64,9 @@ impl<'tcx> Engine<'tcx> {
         if depth >= 4 {
             return Err("pointer atomic wrapper nesting exceeds the model budget".into());
         }
-        let ty::Adt(def, args) = target.kind() else {
-            return Err("pointer atomic wrapper is not a core struct".into());
-        };
-        if def.did().krate != core
-            || !def.is_struct()
-            || target.needs_drop(self.tcx, ty::TypingEnv::fully_monomorphized())
-        {
-            return Err("pointer atomic wrapper has unsupported identity or drop behavior".into());
-        }
-        let [field] = def.non_enum_variant().fields.raw.as_slice() else {
-            return Err("pointer atomic wrapper must have one storage field".into());
-        };
-        let layout = self
-            .tcx
-            .layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(target))
-            .map_err(|error| format!("pointer atomic wrapper layout failed: {error:?}"))?;
-        if layout.size.bits() != u64::from(self.tcx.sess.target.pointer_width)
-            || layout.fields.offset(0).bytes() != 0
-        {
-            return Err("pointer atomic wrapper does not preserve pointer representation".into());
-        }
-        let storage = self
-            .tcx
-            .try_normalize_erasing_regions(
-                ty::TypingEnv::fully_monomorphized(),
-                field.ty(self.tcx, args),
-            )
-            .map_err(|error| format!("pointer atomic storage normalization failed: {error:?}"))?;
-        let inner = self.pointer_atomic_storage(storage, pointer, value, core, depth + 1)?;
+        let wrapper = self.pointer_atomic_wrapper(target, core)?;
+        let inner =
+            self.pointer_atomic_storage(wrapper.field_ty, pointer, value, core, depth + 1)?;
         self.constructed(target, 0, vec![inner])
     }
 

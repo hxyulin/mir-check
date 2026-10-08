@@ -37,6 +37,8 @@ mod library;
 mod membership;
 mod memory;
 mod owned_iterators;
+mod pointer_atomic_shapes;
+mod pointer_atomics;
 mod pointer_handles;
 mod replay_inputs;
 mod slice_equality;

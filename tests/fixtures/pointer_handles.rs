@@ -91,7 +91,7 @@ pub fn pointer_arithmetic_is_unknown(address: usize) -> usize {
     (address as *const u8).wrapping_add(1) as usize
 }
 
-pub fn atomic_memory_is_unknown(cookie: usize) -> bool {
+pub fn atomic_pointer_reads_keep_only_observed_bits(cookie: usize) -> bool {
     Handle::new(cookie).head.load(Ordering::Relaxed).is_null()
 }
 

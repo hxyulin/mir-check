@@ -49,7 +49,7 @@ pub fn volatile_stores_remain_unknown() {
     synthetic::volatile_store(SLOT.as_ptr(), core::ptr::null_mut());
 }
 
-pub fn pointer_loads_need_their_own_model() -> bool {
+pub fn pointer_loads_preserve_only_observed_address_bits() -> bool {
     SLOT.load(Ordering::Relaxed).is_null()
 }
 

@@ -126,7 +126,7 @@ pub fn unsupported_pointer_escape() {
     let _ = counter.as_ptr();
 }
 
-pub fn unsupported_pointer_atomic() {
+pub fn pointer_atomic_loads_are_conservative() {
     let counter = core::sync::atomic::AtomicPtr::<u8>::new(core::ptr::null_mut());
     let _ = counter.load(Ordering::Relaxed);
 }

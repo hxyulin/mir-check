@@ -138,7 +138,7 @@ fn local_integer_atomics_preserve_owned_history_and_reject_unsupported_escapes()
         ("weak_cas_can_fail_spuriously", ProofStatus::Refuted),
         ("release_load_panics", ProofStatus::Refuted),
         ("unsupported_pointer_escape", ProofStatus::Unknown),
-        ("unsupported_pointer_atomic", ProofStatus::Unknown),
+        ("pointer_atomic_loads_are_conservative", ProofStatus::Proved),
         (
             "synthetic::local_borrow_cannot_escape",
             ProofStatus::Unknown,

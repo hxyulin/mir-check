@@ -551,3 +551,20 @@ another branch cannot restore it. Removing a required store changes the proof to
 and ARM in both optimization modes. Supported native cases restore storage before observing it.
 Static destructors, zero-sized retirements and static payload moves remain unsupported. General
 partial initialization and exact mutable-static payload histories are still separate work.
+
+
+Compiler-identified thin pointer atomic loads validate their exact inherent signature and permit
+Relaxed, Acquire and SeqCst ordering. Release and AcqRel orderings produce panic obligations.
+Initialized certified static receivers and exact compiler-shaped tracked wrappers support these
+loads, including static fields at nonzero offsets. Every load returns arbitrary target-width
+address bits. A saved observation stays consistent, but separate reads and initializer-specific
+claims can refute under the reported abstraction. Startup mode supplies no additional pointer
+history or pointee provenance. Raw intrinsic loads, loaded-pointer dereferences, volatile loads,
+and pointer compare-exchange remain unsupported.
+
+Host/ARM debug and optimized fixtures cover legal comparisons, guarded ordering, uninitialized
+receivers, numeric intrinsic destinations, conservative local and shared reads, and startup
+boundaries. Native cases check valid operations and ordering panics. Admitting Release into a
+permitted-order guard fails both symbolic analysis and native execution. Integer and pointer
+static atomic storage share compiler type, extent, epoch and initialization validation; pointer
+constructors and tracked receivers share the same compiler wrapper-layout checks.

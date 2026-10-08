@@ -2,6 +2,7 @@ use super::*;
 use rustc_const_eval::const_eval::mk_eval_cx_for_const_val;
 use rustc_middle::mir::interpret::GlobalAlloc;
 
+mod atomics;
 mod initialization;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1018,37 +1019,6 @@ impl<'tcx> Engine<'tcx> {
             symbolic::integer(&self.terms, u128::from(view.offset), bits, false),
         )?;
         symbolic::cast(&self.terms, address, target_bits, signed)
-    }
-}
-
-impl Engine<'_> {
-    pub(super) fn static_atomic_location(
-        &self,
-        value: &Value,
-        state: &State,
-        bits: u32,
-        signed: bool,
-    ) -> Result<startup_memory::StaticAtomicLocation, String> {
-        let view = self.static_view(value, state)?;
-        self.require_static_initialization(view, state)?;
-        if view.kind != (ViewKind::Reference { mutable: false })
-            || !self.certified_static_type(view)?
-            || !matches!(self.atomic_shape(view.ty), Some(Value::Atomic { bits: b, signed: s })
-                if (bits, signed) == (b, s))
-        {
-            return Err(
-                "static atomic access requires a certified shared integer atomic view".into(),
-            );
-        }
-        let layout = self.static_layout(view.ty)?;
-        if layout.size.bits() != u64::from(bits) {
-            return Err("static atomic access requires exactly sized scalar storage".into());
-        }
-        Ok(startup_memory::StaticAtomicLocation {
-            definition: view.static_id,
-            offset: view.offset,
-            bytes: layout.size.bytes(),
-        })
     }
 }
 

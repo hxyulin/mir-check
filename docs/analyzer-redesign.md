@@ -86,6 +86,13 @@ interference permission. Bounded no-destructor static drops now retire typed sub
 Validated stores restore their initialization without retaining values. Mutable static retention,
 general partial initialization and effectful owned moves remain future work.
 
+Initialization state and history permission should become separate records. A future retained
+payload needs an explicit owned or verified exclusive region, with allocation and subobject
+identity. For an unpublished node, prove that no external actor can reach its storage before
+publication; revoke or transfer that permission when a pointer escapes. Initialization, a mutable
+view, an atomic ordering or a fence cannot establish that permission by itself. The current static
+model has no such ownership or publication record, so it cannot retain exact queue-link values.
+
 ## Atomic histories and interference
 
 An atomic operation uses the same allocation identity and footprint as other typed storage.
@@ -271,3 +278,9 @@ tests, release builds, dependency checks and manual hooks before committing each
 Verified callee summaries remain a separate user decision. They require a proved contract, complete
 frame/modifies information and artifact invalidation tied to compiler, target, build options,
 dependencies and configuration. The current design continues executing ordinary callee bodies.
+
+
+Static integer and pointer atomic receivers now share one compiler-identified storage validator.
+Pointer wrapper construction and tracked load validation also share field/layout admission checks.
+Conservative pointer loads return fresh address bits without transferring provenance or exact
+history. These refactors keep compiler representation checks separate from runtime permissions.
