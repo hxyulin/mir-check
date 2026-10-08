@@ -121,8 +121,8 @@ fn typed_stores_and_uninitialized_addresses_keep_shared_reads_opaque() {
         ("non_null_preserves_static_addresses", ProofStatus::Proved),
         ("non_null_wrong_address_claim", ProofStatus::Refuted),
         (
-            "non_null_integer_handles_remain_unknown",
-            ProofStatus::Unknown,
+            "non_null_integer_handles_have_verified_validity",
+            ProofStatus::Proved,
         ),
         ("initialized_wrapper_addresses", ProofStatus::Proved),
         ("uninit_cell_address_chain", ProofStatus::Proved),

@@ -130,7 +130,7 @@ pub fn non_null_wrong_address_claim() {
     assert!(wrapper.as_ptr() as usize != PALETTE.get() as usize);
 }
 
-pub fn non_null_integer_handles_remain_unknown() {
+pub fn non_null_integer_handles_have_verified_validity() {
     let _ = core::ptr::NonNull::new(16_usize as *mut Palette);
 }
 

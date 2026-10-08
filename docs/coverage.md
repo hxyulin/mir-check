@@ -568,3 +568,17 @@ boundaries. Native cases check valid operations and ordering panics. Admitting R
 permitted-order guard fails both symbolic analysis and native execution. Integer and pointer
 static atomic storage share compiler type, extent, epoch and initialization validation; pointer
 constructors and tracked receivers share the same compiler wrapper-layout checks.
+
+
+Thin pointer/NonNull representation changes check the exact compiler wrapper, pointee and scalar
+layout, then prove a nonzero address obligation. Address round trips preserve observed bits and
+existing tracked references. Numeric nonnull handles do not acquire pointee alignment or memory
+permissions; dereferencing them remains UNKNOWN. The pinned compiler's nonnull pointer-field
+pattern is recognized explicitly. Typed static stores verify that pattern, and supported integer
+range/or predicates, against the current path before accepting their values.
+
+Host/ARM debug and optimized fixtures cover checked nullable conversions, address-one handles,
+loaded observations, caller storage, forward/reverse representation changes and typed publication.
+Zero-address conversions refute validity. Removing a nonzero guard fails the proof, and corrupting
+an address round trip refutes and panics in native tests. Supported native cases publish both null
+options and nonnull handles; ordinary shared payload reads still remain UNKNOWN.

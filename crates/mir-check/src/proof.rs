@@ -40,6 +40,7 @@ mod owned_iterators;
 mod pointer_atomic_shapes;
 mod pointer_atomics;
 mod pointer_handles;
+mod pointer_validity;
 mod replay_inputs;
 mod slice_equality;
 mod startup;
@@ -1846,6 +1847,19 @@ impl<'tcx> Engine<'tcx> {
                     self.record_model(
                         id,
                         "NonNull thin static pointer; allocation provenance retained",
+                    );
+                    return Ok(value);
+                }
+                if let Some(value) = self.pointer_non_null_transmute(
+                    source,
+                    *target,
+                    &value,
+                    state,
+                    (id, self.tcx.def_span(id)),
+                )? {
+                    self.record_model(
+                        id,
+                        "verified nonzero thin NonNull handle; no additional memory permission",
                     );
                     return Ok(value);
                 }

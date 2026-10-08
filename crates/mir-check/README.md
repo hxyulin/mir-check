@@ -747,3 +747,15 @@ Integer and pointer static atomics share compiler-identified receiver, payload, 
 initialization checks. Pointer atomic constructors and tracked load receivers also share their
 single-field compiler wrapper admission rules. These checks certify storage and representation;
 they provide no exclusivity, synchronization or retained runtime history.
+
+
+Thin numeric and tracked pointers can enter or leave the compiler's `NonNull` wrapper after a
+validity obligation proves their address nonzero. Exact pointee and wrapper layout checks preserve
+the handle and any existing tracking evidence. This supports `NonNull::new` and address round trips
+without asserting pointee alignment, initialization or lifetime for numeric addresses. Zero-address
+conversions produce REFUTED validity obligations; they are not native panic confirmations.
+
+Typed static stores verify compiler scalar patterns before accepting a value, including the
+`NonNull` field's `!null` pointer pattern and supported integer range/or patterns. The predicate
+must follow from current path conditions or the store stays UNKNOWN. These stores preserve the
+existing opaque storage and escape rules; publishing a handle supplies no retained payload history.

@@ -127,6 +127,37 @@ impl<'tcx> Engine<'tcx> {
         if let ty::Coroutine(id, args) = ty.kind() {
             return self.static_store_coroutine(*id, args, &value, state, depth, values);
         }
+        if let ty::Pat(base, pattern) = ty.kind() {
+            // A scalar refinement does not add a stored subobject.
+            *values -= 1;
+            self.static_store_value(*base, &value, state, depth + 1, values)?;
+            let valid = match **pattern {
+                ty::PatternKind::NotNull if self.thin_raw_pointer(*base) => match &value {
+                    Value::StaticView { .. } => {
+                        self.static_stored_address(*base, &value, state)?;
+                        self.terms.boolean(true)
+                    }
+                    Value::RawPointer { address, bits }
+                    | Value::TrackedPointer { address, bits, .. } => {
+                        let zero = self.terms.bit_vector(0, *bits)?;
+                        symbolic::not(&self.terms.apply(Op::Equal, &[address.clone(), zero])?)
+                    }
+                    _ => return Err("static nonnull pattern needs a thin pointer handle".into()),
+                },
+                ty::PatternKind::Range { .. } | ty::PatternKind::Or(_) => {
+                    self.input_pattern(*pattern, &value, 0)?
+                }
+                ty::PatternKind::NotNull => {
+                    return Err("static nonnull pattern needs a thin raw pointer type".into());
+                }
+            };
+            let mut invalid = state.conditions.clone();
+            invalid.push(symbolic::not(&valid));
+            if self.feasible(&invalid)? {
+                return Err("typed static store pattern validity is not established".into());
+            }
+            return Ok(());
+        }
         if !ty.is_freeze(self.tcx, env) {
             return Err("typed static stores require owned freeze values".into());
         }

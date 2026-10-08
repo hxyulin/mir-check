@@ -283,3 +283,18 @@ the stored handle, its provenance or an initializer history. Comparisons and nul
 on that observation; a later load creates another independent observation. Atomic ordering checks
 cover the wrapper's panic conditions, without creating synchronization or history permission.
 These rules also apply under startup mode. Dereferencing the loaded pointer remains unsupported.
+
+
+## Restricted pointer and scalar validity
+
+A NonNull representation cast preserves an existing thin pointer handle only after proving its
+address nonzero. Compiler identity, pointee type, one-field layout and pointer width must agree.
+The pinned compiler represents that field as a `!null` pointer pattern. Numeric address validity
+adds no allocation identity, pointee alignment or dereference permission. Existing tracked evidence
+survives the cast; it must still pass its liveness and escape checks.
+
+Typed static stores first validate a scalar pattern's base value, then prove the predicate follows
+from the current path. Supported predicates are nonnull thin pointers and existing integer
+range/or patterns. A certified static raw address has nonzero allocation provenance; a numeric or
+tracked address must satisfy the symbolic condition. An unproved or unsupported pattern remains
+UNKNOWN. This validation does not add runtime checks or exact static payload histories.
