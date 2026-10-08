@@ -117,9 +117,11 @@ shared vectors along the changed path, keeping unaffected nested ADT vectors sha
 shared fields preserves the other owners. Allocation handles and reference validation retain
 their existing semantics; host pointer identity is never a modeled Rust address.
 
-Tuple fields, array elements, enum variant tables and branch allocation vectors still clone their
-containers. ADT display names also remain owned strings. The next stages should share those
-representations and compiler-keyed immutable shapes, with names at reporting boundaries.
+Branch allocation vectors now share host storage until mutable access, with allocation identities
+and retirement kept branch-local. Startup maps remain independently cloned. Tuple fields, array
+elements and enum variant tables still clone their containers, and ADT display names remain owned
+strings. Later stages can share those representations and compiler-keyed immutable shapes, with
+names at reporting boundaries.
 
 Host sharing must not create Rust aliasing. Copying an owned Rust value produces a separate logical
 value; taking an address still identifies its particular allocation. Repeated array elements,

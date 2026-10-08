@@ -208,3 +208,15 @@ original storage.
 An enum discriminant is a payload read too. An initialized static address does not provide the
 current variant. UNKNOWN reports name that type and point to runtime initialization and update
 tracking, rather than suggesting a larger resource budget.
+
+## Branch memory sharing
+
+Cloned branch memories share an immutable allocation vector through host `Rc` storage. Reads keep
+that vector shared; mutable indexing, iteration and Vec operations detach it with `Rc::make_mut`.
+A detached vector preserves allocation indices, including dead slots, so reference identity does
+not change. A write, retirement or appended allocation affects only its branch. This changes host
+copying cost without granting any new Rust aliasing or initialization permission.
+
+Startup atomic maps and their invalidation latch remain independently cloned. Invalidating one
+branch cannot invalidate another branch or restore an initializer in an already invalidated branch.
+The first mutable access still copies the entire vector; this is not persistent per-slot storage.

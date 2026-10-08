@@ -706,8 +706,11 @@ uninitialized payload cannot acquire initialized type evidence through address d
 ADT field vectors share immutable host storage across branch clones. Writes copy the affected
 vectors, preserving Rust allocation identities, independent owned values and contract entry
 snapshots. Reference validity and escape checks still inspect the complete value graph.
-Call and destructor continuations also take returned memory and conditions directly, avoiding a
-clone of the caller state that would immediately be discarded.
+Branch memories also share their allocation vectors until mutable access detaches the vector.
+Allocation indices, liveness and references retain their existing meanings; static atomic histories
+remain independent across branches. The first write still copies the whole allocation vector.
+Call and destructor continuations take returned memory and conditions directly, avoiding a clone
+of the caller state that would immediately be discarded.
 
 UNKNOWN reports for mutable static enum discriminants name the payload type and the missing runtime
 storage model. Terminal guidance distinguishes those gaps from execution and solver budgets.
